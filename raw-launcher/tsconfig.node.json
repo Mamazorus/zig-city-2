@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "skipLibCheck": true,
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "strict": true,
+    "target": "ES2022",
+    "resolveJsonModule": true
+  },
+  "include": ["electron.vite.config.*", "src/main/**/*", "src/preload/**/*"]
+}

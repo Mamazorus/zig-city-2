@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Raw Launcher</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f17;
+      color: #e0e0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      user-select: none;
+    }
+
+    h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    #version-tag {
+      font-size: 0.75rem;
+      color: #555;
+      margin-top: -12px;
+    }
+
+    #user-info {
+      font-size: 0.85rem;
+      color: #888;
+      min-height: 18px;
+    }
+
+    #status {
+      font-size: 0.9rem;
+      color: #aaa;
+      min-height: 20px;
+      text-align: center;
+      max-width: 400px;
+    }
+
+    /* Barre de progression */
+    #progress-wrap {
+      width: 320px;
+      display: none;
+      flex-direction: column;
+      gap: 6px;
+    }
+    #progress-bar {
+      width: 100%;
+      height: 5px;
+      background: #222;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    #progress-fill {
+      height: 100%;
+      background: #4f8ef7;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+    #progress-label {
+      font-size: 0.75rem;
+      color: #666;
+      text-align: right;
+    }
+
+    /* Boutons */
+    button {
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    button:active:not(:disabled) { transform: scale(0.98); }
+    button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    #btn-login {
+      background: #4f8ef7;
+      color: #fff;
+      padding: 12px 36px;
+      font-size: 0.95rem;
+    }
+    #btn-login:hover:not(:disabled) { opacity: 0.85; }
+
+    #btn-play {
+      background: #22c55e;
+      color: #fff;
+      padding: 15px 60px;
+      font-size: 1.15rem;
+      letter-spacing: 0.5px;
+      display: none;
+    }
+    #btn-play:hover:not(:disabled) { opacity: 0.85; }
+
+    #btn-logout {
+      background: transparent;
+      border: 1px solid #2a2a3a;
+      color: #666;
+      padding: 6px 18px;
+      font-size: 0.75rem;
+      display: none;
+    }
+    #btn-logout:hover { color: #999; border-color: #444; }
+  </style>
+</head>
+<body>
+
+  <h1>🎮 Raw Launcher</h1>
+  <div id="version-tag">v1.0.0</div>
+
+  <div id="user-info"></div>
+  <div id="status">Chargement...</div>
+
+  <div id="progress-wrap">
+    <div id="progress-bar"><div id="progress-fill"></div></div>
+    <div id="progress-label"></div>
+  </div>
+
+  <button id="btn-login">Se connecter avec Microsoft</button>
+  <button id="btn-play">JOUER</button>
+  <button id="btn-logout">Déconnexion</button>
+
+  <script>
+    const $ = id => document.getElementById(id)
+    const btnLogin   = $('btn-login')
+    const btnPlay    = $('btn-play')
+    const btnLogout  = $('btn-logout')
+    const statusEl   = $('status')
+    const userInfoEl = $('user-info')
+    const progressWrap = $('progress-wrap')
+    const progressFill = $('progress-fill')
+    const progressLabel = $('progress-label')
+
+    function setStatus(msg) { statusEl.textContent = msg }
+
+    function setProgress(percent, label) {
+      progressWrap.style.display = 'flex'
+      progressFill.style.width = percent + '%'
+      progressLabel.textContent = label || ''
+    }
+
+    function hideProgress() {
+      progressWrap.style.display = 'none'
+      progressFill.style.width = '0%'
+    }
+
+    function showLoggedIn(username) {
+      userInfoEl.textContent = `Connecté en tant que ${username}`
+      btnLogin.style.display  = 'none'
+      btnPlay.style.display   = 'block'
+      btnLogout.style.display = 'block'
+    }
+
+    function showLoggedOut() {
+      userInfoEl.textContent  = ''
+      btnLogin.style.display  = 'block'
+      btnPlay.style.display   = 'none'
+      btnLogout.style.display = 'none'
+      hideProgress()
+    }
+
+    // ── Init ────────────────────────────────────────────────────────────────
+    ;(async () => {
+      const session = await window.launcher.getSession()
+      if (session.logged) {
+        showLoggedIn(session.username)
+        await checkAndInstall()
+      } else {
+        showLoggedOut()
+        setStatus('Connecte-toi pour jouer')
+      }
+    })()
+
+    // ── Login ───────────────────────────────────────────────────────────────
+    btnLogin.addEventListener('click', async () => {
+      btnLogin.disabled = true
+      setStatus('Ouverture du login Microsoft...')
+
+      const result = await window.launcher.login()
+      if (result.success) {
+        showLoggedIn(result.username)
+        await checkAndInstall()
+      } else {
+        setStatus(`Erreur login : ${result.error}`)
+        btnLogin.disabled = false
+      }
+    })
+
+    // ── Logout ──────────────────────────────────────────────────────────────
+    btnLogout.addEventListener('click', async () => {
+      await window.launcher.logout()
+      showLoggedOut()
+      setStatus('Déconnecté')
+    })
+
+    // ── Check + install modpack ──────────────────────────────────────────────
+    async function checkAndInstall() {
+      setStatus('Vérification du modpack...')
+      btnPlay.disabled = true
+
+      const check = await window.launcher.checkModpack()
+      const needsInstall = check.missingMods > 0 || check.needsNeoForge
+
+      if (!needsInstall) {
+        setStatus(`✓ Modpack à jour (${check.total} mods)`)
+        btnPlay.disabled = false
+      } else {
+        const label = check.needsNeoForge
+          ? `Installation NeoForge + ${check.missingMods} mod(s)...`
+          : `Installation de ${check.missingMods} mod(s)...`
+        setStatus(label)
+        const result = await window.launcher.installModpack()
+        if (result && !result.success) {
+          setStatus(`❌ Erreur : ${result.error}`)
+          hideProgress()
+        }
+      }
+    }
+
+    // ── Progression installation ─────────────────────────────────────────────
+    window.launcher.onInstallProgress((data) => {
+      if (data.error) {
+        hideProgress()
+        setStatus(`❌ ${data.message}`)
+        return
+      }
+      if (data.done) {
+        hideProgress()
+        setStatus('✓ Modpack installé')
+        btnPlay.disabled = false
+        return
+      }
+      if (data.step === 'java' || data.step === 'neoforge') {
+        setProgress(data.percent, data.step === 'java' ? 'Java 21' : 'NeoForge')
+        setStatus(data.name)
+      } else {
+        setProgress(data.percent, `${data.current || 0} / ${data.total || 0}`)
+        setStatus(`Téléchargement : ${data.name}`)
+      }
+    })
+
+    // ── Progression download Minecraft/Fabric (première install) ─────────────
+    window.launcher.onLaunchProgress((data) => {
+      if (data.total) {
+        setProgress(Math.round((data.task / data.total) * 100), `${data.type}`)
+        setStatus(`Installation de Minecraft...`)
+      }
+    })
+
+    // ── Launch ───────────────────────────────────────────────────────────────
+    btnPlay.addEventListener('click', async () => {
+      btnPlay.disabled = true
+      setStatus('Lancement...')
+      hideProgress()
+
+      const result = await window.launcher.launch()
+      if (!result.success) {
+        setStatus(`Erreur : ${result.error}`)
+        btnPlay.disabled = false
+      } else {
+        setStatus('Minecraft lancé !')
+      }
+    })
+
+    // ── Jeu fermé ────────────────────────────────────────────────────────────
+    window.launcher.onGameClosed((data) => {
+      btnPlay.disabled = false
+      const code = data?.code
+      if (code !== 0 && code !== null && code !== undefined) {
+        setStatus(`❌ Crash (code ${code}) — voir DevTools (console) pour le détail`)
+        console.error('--- CRASH LOG MINECRAFT ---')
+        console.error(data?.log || '(vide)')
+      } else {
+        setStatus('Prêt à jouer')
+      }
+    })
+  </script>
+</body>
+</html>

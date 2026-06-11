@@ -1,0 +1,27 @@
+<svg preserveAspectRatio="none" width="100%" height="100%" overflow="visible" style="display: block;" viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+<foreignObject x="-6.9" y="-6.9" width="71.8" height="71.8"><div xmlns="http://www.w3.org/1999/xhtml" style="backdrop-filter:blur(5.95px);clip-path:url(#bgblur_0_0_37_clip_path);height:100%;width:100%"></div></foreignObject><g id="Frame 917" filter="url(#filter0_d_0_37)" data-figma-bg-blur-radius="11.9">
+<path d="M5 29C5 15.7452 15.7452 5 29 5V5C42.2548 5 53 15.7452 53 29V29C53 42.2548 42.2548 53 29 53V53C15.7452 53 5 42.2548 5 29V29Z" fill="var(--fill-0, white)" fill-opacity="0.05" shape-rendering="crispEdges"/>
+<path d="M29 5.5C41.9787 5.5 52.5 16.0213 52.5 29C52.5 41.9787 41.9787 52.5 29 52.5C16.0213 52.5 5.5 41.9787 5.5 29C5.5 16.0213 16.0213 5.5 29 5.5Z" stroke="url(#paint0_linear_0_37)" stroke-opacity="0.5" shape-rendering="crispEdges"/>
+<path id="Subtract" d="M29 17C35.6274 17 41 22.3726 41 29C41 35.6274 35.6274 41 29 41C22.3726 41 17 35.6274 17 29C17 22.3726 22.3726 17 29 17ZM29 23C28.5858 23 28.25 23.3358 28.25 23.75V28.25H23.75C23.3358 28.25 23 28.5858 23 29C23 29.4142 23.3358 29.75 23.75 29.75H28.25V34.25C28.25 34.6642 28.5858 35 29 35C29.4142 35 29.75 34.6642 29.75 34.25V29.75H34.25C34.6642 29.75 35 29.4142 35 29C35 28.5858 34.6642 28.25 34.25 28.25H29.75V23.75C29.75 23.3358 29.4142 23 29 23Z" fill="var(--fill-0, white)"/>
+</g>
+<defs>
+<filter id="filter0_d_0_37" x="-6.9" y="-6.9" width="71.8" height="71.8" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dx="1" dy="1"/>
+<feGaussianBlur stdDeviation="3"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.2 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_0_37"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_0_37" result="shape"/>
+</filter>
+<clipPath id="bgblur_0_0_37_clip_path" transform="translate(6.9 6.9)"><path d="M5 29C5 15.7452 15.7452 5 29 5V5C42.2548 5 53 15.7452 53 29V29C53 42.2548 42.2548 53 29 53V53C15.7452 53 5 42.2548 5 29V29Z"/>
+</clipPath><linearGradient id="paint0_linear_0_37" x1="53" y1="7.0584" x2="18.1129" y2="60.5554" gradientUnits="userSpaceOnUse">
+<stop stop-color="white" stop-opacity="0.1"/>
+<stop offset="0.225962" stop-color="white" stop-opacity="0.1"/>
+<stop offset="0.475962" stop-color="white"/>
+<stop offset="0.631425" stop-color="white" stop-opacity="0.1"/>
+<stop offset="1" stop-color="white" stop-opacity="0.1"/>
+</linearGradient>
+</defs>
+</svg>

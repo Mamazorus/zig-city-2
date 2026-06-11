@@ -1,0 +1,20 @@
+# Dépendances
+node_modules/
+raw-launcher/node_modules/
+
+# Build output
+raw-launcher/out/
+raw-launcher/dist/
+
+# Logs & cache
+*.log
+.npm
+raw-launcher/.vite/
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+
+# Secrets / env
+.env
+.env.local
