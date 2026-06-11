@@ -1,6 +1,6 @@
 {
   "name": "raw-launcher",
-  "version": "0.1.0-beta",
+  "version": "0.1.1-beta",
   "description": "Launcher Minecraft custom Raw Studio",
   "main": "out/main/index.js",
   "scripts": {

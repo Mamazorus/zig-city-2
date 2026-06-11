@@ -265,6 +265,17 @@ ipcMain.handle('logout', () => {
   return { success: true }
 })
 
+// ─── CONFIGS ─────────────────────────────────────────────────────────────────
+function deployConfigs() {
+  if (!MODPACK.configs || !MODPACK.configs.length) return
+  for (const cfg of MODPACK.configs) {
+    const dest = path.join(GAME_DIR, cfg.path)
+    fs.mkdirSync(path.dirname(dest), { recursive: true })
+    fs.writeFileSync(dest, cfg.content, 'utf8')
+    console.log('[RawLauncher] Config déployée :', cfg.path)
+  }
+}
+
 // ─── IPC : MODPACK ───────────────────────────────────────────────────────────
 ipcMain.handle('check-modpack', async () => {
   const modsDir = path.join(GAME_DIR, 'mods')
@@ -395,6 +406,9 @@ ipcMain.handle('install-modpack', async () => {
       })
       await downloadFile(mod.url, path.join(modsDir, mod.name))
     }
+
+    // 3. Déploie les fichiers de config requis par le serveur
+    deployConfigs()
 
     win?.webContents.send('install-progress', { done: true })
     return { success: true }
@@ -579,6 +593,10 @@ function buildNeoForgeJvmArgs() {
 // ─── IPC : LAUNCH ────────────────────────────────────────────────────────────
 ipcMain.handle('launch', async () => {
   if (!currentToken) return { success: false, error: 'Non connecté' }
+
+  // Applique les configs requises par le serveur à chaque lancement
+  // (corrige aussi les installations existantes sans réinstallation complète)
+  deployConfigs()
 
   const javaExe = await ensureJava21()
   const launcher = new Client()

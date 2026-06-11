@@ -27,6 +27,7 @@ var __toCommonJS = (mod) => __hasOwnProp.call(mod, "module.exports") ? mod["modu
 //#endregion
 //#region modpack.json
 var modpack_exports = /* @__PURE__ */ __exportAll({
+	configs: () => configs,
 	default: () => modpack_default,
 	launcherName: () => launcherName,
 	loader: () => loader,
@@ -38,7 +39,7 @@ var modpack_exports = /* @__PURE__ */ __exportAll({
 	packName: () => packName,
 	port: () => port,
 	server: () => server
-}), launcherName, packName, minecraft, loader, loaderVersion, server, port, mods, modpack_default;
+}), launcherName, packName, minecraft, loader, loaderVersion, server, port, configs, mods, modpack_default;
 var init_modpack = __esmMin((() => {
 	launcherName = "RawLauncher";
 	packName = "ZIG CITY 2";
@@ -47,6 +48,10 @@ var init_modpack = __esmMin((() => {
 	loaderVersion = "21.1.143";
 	server = "109.239.153.124";
 	port = 25965;
+	configs = [{
+		"path": "config/simplehats.json5",
+		"content": "{\n	// Allow Hat In Helmet Slot\n	\"allowHatInHelmetSlot\": true\n}\n"
+	}];
 	mods = [
 		{
 			"name": "[1.21.1] SecurityCraft v1.9.12.jar",
@@ -663,6 +668,7 @@ var init_modpack = __esmMin((() => {
 		minRam: 4,
 		server,
 		port,
+		configs,
 		mods
 	};
 }));

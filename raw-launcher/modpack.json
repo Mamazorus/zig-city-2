@@ -8,6 +8,12 @@
   "minRam": 4,
   "server": "109.239.153.124",
   "port": 25965,
+  "configs": [
+    {
+      "path": "config/simplehats.json5",
+      "content": "{\n\t// Allow Hat In Helmet Slot\n\t\"allowHatInHelmetSlot\": true\n}\n"
+    }
+  ],
   "mods": [
     {
       "name": "[1.21.1] SecurityCraft v1.9.12.jar",
