@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
+const { autoUpdater } = require('electron-updater')
 const { Client } = require('minecraft-launcher-core')
 const path = require('path')
 const fs = require('fs')
@@ -47,8 +48,44 @@ function createWindow() {
 app.whenReady().then(() => {
   createWindow()
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
+
+  // Vérifie les mises à jour au démarrage (silencieux si à jour)
+  autoUpdater.checkForUpdatesAndNotify()
 })
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+
+// ─── AUTO UPDATE ─────────────────────────────────────────────────────────────
+// Le launcher se met à jour tout seul via les Releases GitHub (electron-builder
+// publie l'installeur + latest.yml, electron-updater compare les versions).
+autoUpdater.on('checking-for-update', () => {
+  console.log('[AutoUpdate] Recherche de mises à jour...')
+})
+autoUpdater.on('update-available', (info) => {
+  console.log('[AutoUpdate] Mise à jour disponible :', info.version)
+  win?.webContents.send('update-status', { status: 'available', version: info.version })
+})
+autoUpdater.on('update-not-available', () => {
+  console.log('[AutoUpdate] Launcher à jour.')
+})
+autoUpdater.on('error', (err) => {
+  console.log('[AutoUpdate] Erreur :', err.message)
+})
+autoUpdater.on('download-progress', (progress) => {
+  win?.webContents.send('update-status', {
+    status: 'downloading',
+    percent: Math.round(progress.percent)
+  })
+})
+autoUpdater.on('update-downloaded', (info) => {
+  console.log('[AutoUpdate] Mise à jour téléchargée :', info.version)
+  win?.webContents.send('update-status', { status: 'ready', version: info.version })
+  // Installe au prochain redémarrage de l'app (pas pendant que le jeu tourne)
+})
+
+// Permet à l'UI de déclencher l'installation immédiate de la mise à jour téléchargée
+ipcMain.handle('install-update', () => {
+  autoUpdater.quitAndInstall()
+})
 
 // ─── SESSION ─────────────────────────────────────────────────────────────────
 function loadSession() {

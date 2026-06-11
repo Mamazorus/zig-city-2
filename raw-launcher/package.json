@@ -8,6 +8,7 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "build:win": "electron-vite build && electron-builder --win",
+    "publish:win": "electron-vite build && electron-builder --win --publish always",
     "build:mac": "electron-vite build && electron-builder --mac"
   },
   "dependencies": {
@@ -52,8 +53,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "TON-USERNAME-GITHUB",
-      "repo": "zig-city-launcher"
+      "owner": "Mamazorus",
+      "repo": "zig-city-2"
     }
   }
 }

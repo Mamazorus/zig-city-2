@@ -15,9 +15,13 @@ contextBridge.exposeInMainWorld('launcher', {
   // Jeu
   launch:         () => ipcRenderer.invoke('launch'),
 
+  // Mises à jour
+  installUpdate:  () => ipcRenderer.invoke('install-update'),
+
   // Events (main → renderer)
   onInstallProgress: (cb) => ipcRenderer.on('install-progress',  (_, d) => cb(d)),
   onLaunchProgress:  (cb) => ipcRenderer.on('launch-progress',   (_, d) => cb(d)),
   onGameClosed:      (cb) => ipcRenderer.on('game-closed',       ()     => cb()),
   onGameLog:         (cb) => ipcRenderer.on('game-log',          (_, d) => cb(d)),
+  onUpdateStatus:    (cb) => ipcRenderer.on('update-status',     (_, d) => cb(d)),
 })
