@@ -1016,8 +1016,92 @@ function buildNeoForgeJvmArgs() {
 }
 
 // ─── IPC : LAUNCH ────────────────────────────────────────────────────────────
+// ─── CONFIGS ─────────────────────────────────────────────────────────────────
+// Beaucoup de mods (owo-lib : simplehats, walkers, craftedcore… qui sérialisent
+// en JSON5 via jankson) rangent leurs options dans des structures IMBRIQUÉES.
+// Écraser bêtement le fichier casse la config : ex. simplehats range
+// "allowHatInHelmetSlot" sous "COMMON". Si la valeur client ne correspond pas à
+// celle du serveur au moment de la connexion, owo affiche
+// "unrecoverable config mismatch" (l'option est synchronisée mais exige un
+// redémarrage client). On force donc la bonne valeur AVANT chaque lancement.
+//
+// Deux modes par entrée de MODPACK.configs :
+//   • { path, content }      → écrit le fichier tel quel (fichier complet)
+//   • { path, merge: {...} } → fusionne EN PROFONDEUR le patch dans le fichier
+//                              existant (JSON5 toléré), en ne touchant QUE les
+//                              clés indiquées. Préserve le reste (préférences
+//                              client, poids de loot, autres valeurs synchronisées).
+
+// Retire les commentaires // et /* */ d'un JSON5 (en respectant les chaînes),
+// puis les éventuelles virgules traînantes. Suffisant pour les fichiers jankson
+// produits par owo-lib (clés entre guillemets).
+function stripJson5(src) {
+  src = src.replace(/^﻿/, '')
+  let out = ''
+  let inStr = false, inLine = false, inBlock = false, esc = false
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i], n = src[i + 1]
+    if (inLine) { if (c === '\n') { inLine = false; out += c } continue }
+    if (inBlock) { if (c === '*' && n === '/') { inBlock = false; i++ } continue }
+    if (inStr) {
+      out += c
+      if (esc) esc = false
+      else if (c === '\\') esc = true
+      else if (c === '"') inStr = false
+      continue
+    }
+    if (c === '"') { inStr = true; out += c; continue }
+    if (c === '/' && n === '/') { inLine = true; i++; continue }
+    if (c === '/' && n === '*') { inBlock = true; i++; continue }
+    out += c
+  }
+  return out.replace(/,(\s*[}\]])/g, '$1')
+}
+
+// Fusion profonde de `patch` dans `base` (objets simples ; tableaux et scalaires
+// du patch remplacent ceux de la base).
+function deepMerge(base, patch) {
+  if (base === null || typeof base !== 'object' || Array.isArray(base)) return patch
+  if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) return patch
+  const out = { ...base }
+  for (const k of Object.keys(patch)) {
+    out[k] = (k in base) ? deepMerge(base[k], patch[k]) : patch[k]
+  }
+  return out
+}
+
+function deployConfigs() {
+  if (!MODPACK.configs || !MODPACK.configs.length) return
+  for (const cfg of MODPACK.configs) {
+    const dest = path.join(GAME_DIR, cfg.path)
+    fs.mkdirSync(path.dirname(dest), { recursive: true })
+
+    if (cfg.merge) {
+      let base = {}
+      if (fs.existsSync(dest)) {
+        try {
+          base = JSON.parse(stripJson5(fs.readFileSync(dest, 'utf8')))
+        } catch (e) {
+          console.log('[RawLauncher] Config illisible, réécriture minimale :', cfg.path, e.message)
+          base = {}
+        }
+      }
+      const merged = deepMerge(base, cfg.merge)
+      fs.writeFileSync(dest, JSON.stringify(merged, null, '\t') + '\n', 'utf8')
+      console.log('[RawLauncher] Config fusionnée :', cfg.path)
+    } else if (typeof cfg.content === 'string') {
+      fs.writeFileSync(dest, cfg.content, 'utf8')
+      console.log('[RawLauncher] Config déployée :', cfg.path)
+    }
+  }
+}
+
 ipcMain.handle('launch', async () => {
   if (!currentToken) return { success: false, error: 'Non connecté' }
+
+  // Applique les configs requises par le serveur à chaque lancement
+  // (corrige aussi les installations existantes sans réinstallation complète)
+  deployConfigs()
 
   const javaExe = await ensureJava21()
   const launcher = new Client()

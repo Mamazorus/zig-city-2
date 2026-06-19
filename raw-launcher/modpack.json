@@ -11,7 +11,7 @@
   "configs": [
     {
       "path": "config/simplehats.json5",
-      "content": "{\n\t// Allow Hat In Helmet Slot\n\t\"allowHatInHelmetSlot\": true\n}\n"
+      "merge": { "COMMON": { "allowHatInHelmetSlot": true } }
     }
   ],
   "mods": [

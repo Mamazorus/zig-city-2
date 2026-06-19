@@ -50,7 +50,7 @@ var init_modpack = __esmMin((() => {
 	port = 25965;
 	configs = [{
 		"path": "config/simplehats.json5",
-		"content": "{\n	// Allow Hat In Helmet Slot\n	\"allowHatInHelmetSlot\": true\n}\n"
+		"merge": { "COMMON": { "allowHatInHelmetSlot": true } }
 	}];
 	mods = [
 		{
@@ -1666,11 +1666,87 @@ function buildNeoForgeJvmArgs() {
 		return null;
 	}
 }
+function stripJson5(src) {
+	src = src.replace(/^﻿/, "");
+	let out = "";
+	let inStr = false, inLine = false, inBlock = false, esc = false;
+	for (let i = 0; i < src.length; i++) {
+		const c = src[i], n = src[i + 1];
+		if (inLine) {
+			if (c === "\n") {
+				inLine = false;
+				out += c;
+			}
+			continue;
+		}
+		if (inBlock) {
+			if (c === "*" && n === "/") {
+				inBlock = false;
+				i++;
+			}
+			continue;
+		}
+		if (inStr) {
+			out += c;
+			if (esc) esc = false;
+			else if (c === "\\") esc = true;
+			else if (c === "\"") inStr = false;
+			continue;
+		}
+		if (c === "\"") {
+			inStr = true;
+			out += c;
+			continue;
+		}
+		if (c === "/" && n === "/") {
+			inLine = true;
+			i++;
+			continue;
+		}
+		if (c === "/" && n === "*") {
+			inBlock = true;
+			i++;
+			continue;
+		}
+		out += c;
+	}
+	return out.replace(/,(\s*[}\]])/g, "$1");
+}
+function deepMerge(base, patch) {
+	if (base === null || typeof base !== "object" || Array.isArray(base)) return patch;
+	if (patch === null || typeof patch !== "object" || Array.isArray(patch)) return patch;
+	const out = { ...base };
+	for (const k of Object.keys(patch)) out[k] = k in base ? deepMerge(base[k], patch[k]) : patch[k];
+	return out;
+}
+function deployConfigs() {
+	if (!MODPACK.configs || !MODPACK.configs.length) return;
+	for (const cfg of MODPACK.configs) {
+		const dest = path.join(GAME_DIR, cfg.path);
+		fs.mkdirSync(path.dirname(dest), { recursive: true });
+		if (cfg.merge) {
+			let base = {};
+			if (fs.existsSync(dest)) try {
+				base = JSON.parse(stripJson5(fs.readFileSync(dest, "utf8")));
+			} catch (e) {
+				console.log("[RawLauncher] Config illisible, réécriture minimale :", cfg.path, e.message);
+				base = {};
+			}
+			const merged = deepMerge(base, cfg.merge);
+			fs.writeFileSync(dest, JSON.stringify(merged, null, "	") + "\n", "utf8");
+			console.log("[RawLauncher] Config fusionnée :", cfg.path);
+		} else if (typeof cfg.content === "string") {
+			fs.writeFileSync(dest, cfg.content, "utf8");
+			console.log("[RawLauncher] Config déployée :", cfg.path);
+		}
+	}
+}
 ipcMain.handle("launch", async () => {
 	if (!currentToken) return {
 		success: false,
 		error: "Non connecté"
 	};
+	deployConfigs();
 	const javaExe = await ensureJava21();
 	const launcher = new Client();
 	const neoForgeJvmArgs = buildNeoForgeJvmArgs();
