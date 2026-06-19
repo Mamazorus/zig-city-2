@@ -9,6 +9,11 @@ contextBridge.exposeInMainWorld('launcher', {
   pickSkinFile:   () => ipcRenderer.invoke('pick-skin-file'),
   uploadSkin:     (payload) => ipcRenderer.invoke('upload-skin', payload),
   resetSkin:      () => ipcRenderer.invoke('reset-skin'),
+  exportSkin:     (payload) => ipcRenderer.invoke('export-skin', payload),
+  libraryList:    () => ipcRenderer.invoke('library-list'),
+  librarySave:    (payload) => ipcRenderer.invoke('library-save', payload),
+  libraryDelete:  (id) => ipcRenderer.invoke('library-delete', id),
+  libraryRename:  (payload) => ipcRenderer.invoke('library-rename', payload),
 
   checkModpack:   () => ipcRenderer.invoke('check-modpack'),
   installModpack: () => ipcRenderer.invoke('install-modpack'),

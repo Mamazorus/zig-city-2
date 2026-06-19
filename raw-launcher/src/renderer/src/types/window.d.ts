@@ -54,6 +54,11 @@ declare global {
       pickSkinFile: () => Promise<{ canceled: boolean; path?: string; name?: string; dataUrl?: string; width?: number; height?: number; error?: string }>
       uploadSkin: (payload: { variant: 'classic' | 'slim'; path?: string; dataUrl?: string }) => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; error?: string; expired?: boolean; loggedOut?: boolean }>
       resetSkin: () => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; skinDataUrl?: string | null; error?: string; expired?: boolean; loggedOut?: boolean }>
+      exportSkin: (payload: { dataUrl: string; name?: string }) => Promise<{ success: boolean; path?: string; canceled?: boolean; error?: string }>
+      libraryList: () => Promise<{ id: string; name: string; variant: 'classic' | 'slim'; createdAt: number; dataUrl: string }[]>
+      librarySave: (payload: { name: string; dataUrl: string; variant: 'classic' | 'slim' }) => Promise<{ success: boolean; id?: string; error?: string }>
+      libraryDelete: (id: string) => Promise<{ success: boolean; error?: string }>
+      libraryRename: (payload: { id: string; name: string }) => Promise<{ success: boolean; error?: string }>
       checkModpack: () => Promise<{ total: number; missingMods: number; needsNeoForge: boolean }>
       installModpack: () => Promise<{ success: boolean; error?: string }>
       launch: () => Promise<{ success: boolean; error?: string }>

@@ -1,6 +1,6 @@
 {
   "name": "raw-launcher",
-  "version": "0.1.5-beta",
+  "version": "0.1.6-beta",
   "description": "Launcher Minecraft custom Zig City 2",
   "main": "out/main/index.js",
   "scripts": {
@@ -16,7 +16,8 @@
     "minecraft-launcher-core": "^3.17.1",
     "msmc": "^3.1.5",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "skinview3d": "^3.4.2"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
@@ -42,11 +43,11 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "assets/icon.ico"
+      "icon": "assets/logo_zig_city.png"
     },
     "mac": {
       "target": "dmg",
-      "icon": "assets/icon.icns"
+      "icon": "assets/logo_zig_city.png"
     },
     "nsis": {
       "oneClick": true

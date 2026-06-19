@@ -22,3 +22,7 @@ Thumbs.db
 # Secrets / env
 .env
 .env.local
+
+# Screenshots / images
+screens/
+logo/

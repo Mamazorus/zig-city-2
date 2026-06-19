@@ -12,6 +12,14 @@
     {
       "path": "config/simplehats.json5",
       "merge": { "COMMON": { "allowHatInHelmetSlot": true } }
+    },
+    {
+      "path": "config/fancymenu/options.txt",
+      "section": "customization",
+      "setLines": {
+        "modpack_mode": "B:modpack_mode = 'true';",
+        "show_customization_overlay": "B:show_customization_overlay = 'false';"
+      }
     }
   ],
   "mods": [

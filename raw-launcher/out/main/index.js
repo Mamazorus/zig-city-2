@@ -51,6 +51,13 @@ var init_modpack = __esmMin((() => {
 	configs = [{
 		"path": "config/simplehats.json5",
 		"merge": { "COMMON": { "allowHatInHelmetSlot": true } }
+	}, {
+		"path": "config/fancymenu/options.txt",
+		"section": "customization",
+		"setLines": {
+			"modpack_mode": "B:modpack_mode = 'true';",
+			"show_customization_overlay": "B:show_customization_overlay = 'false';"
+		}
 	}];
 	mods = [
 		{
@@ -695,12 +702,14 @@ var JAVA_DIR = path.join(GAME_DIR, "runtime", JAVA_RUNTIME_NAME);
 var JAVA_EXE = path.join(JAVA_DIR, "bin", "javaw.exe");
 var win = null;
 var currentToken = null;
+var APP_ICON = path.join(__dirname, "../../assets/logo_zig_city.png");
 function createWindow() {
 	win = new BrowserWindow({
 		width: 1366,
 		height: 883,
 		resizable: false,
 		frame: false,
+		icon: APP_ICON,
 		webPreferences: {
 			preload: path.join(__dirname, "../preload/index.js"),
 			nodeIntegration: false,
@@ -992,6 +1001,7 @@ ipcMain.handle("quit-and-install", () => {
 	autoUpdater.quitAndInstall(true, true);
 });
 app.whenReady().then(() => {
+	app.setAppUserModelId("com.rawstudio.launcher");
 	loadSession();
 	initializeAdmins();
 	setupAutoUpdater();
@@ -1436,6 +1446,126 @@ ipcMain.handle("reset-skin", async () => {
 		};
 	}
 });
+var SKINS_DIR = path.join(GAME_DIR, "skins");
+var LIBRARY_INDEX = path.join(SKINS_DIR, "index.json");
+function loadLibraryIndex() {
+	try {
+		if (fs.existsSync(LIBRARY_INDEX)) return JSON.parse(fs.readFileSync(LIBRARY_INDEX, "utf8"));
+	} catch {}
+	return [];
+}
+function saveLibraryIndex(list) {
+	fs.mkdirSync(SKINS_DIR, { recursive: true });
+	fs.writeFileSync(LIBRARY_INDEX, JSON.stringify(list));
+}
+function dataUrlToBuffer(dataUrl) {
+	return Buffer.from(String(dataUrl).split(",")[1] || "", "base64");
+}
+ipcMain.handle("library-list", () => {
+	const out = [];
+	for (const e of loadLibraryIndex()) try {
+		const buf = fs.readFileSync(path.join(SKINS_DIR, `${e.id}.png`));
+		out.push({
+			id: e.id,
+			name: e.name,
+			variant: normalizeVariant(e.variant),
+			createdAt: e.createdAt || 0,
+			dataUrl: `data:image/png;base64,${buf.toString("base64")}`
+		});
+	} catch {}
+	out.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+	return out;
+});
+ipcMain.handle("library-save", (_, { name, dataUrl, variant } = {}) => {
+	try {
+		const buf = dataUrlToBuffer(dataUrl);
+		if (!isValidSkinSize(pngDimensions(buf))) return {
+			success: false,
+			error: "Skin invalide (PNG 64×64 attendu)."
+		};
+		fs.mkdirSync(SKINS_DIR, { recursive: true });
+		const id = crypto.randomUUID();
+		fs.writeFileSync(path.join(SKINS_DIR, `${id}.png`), buf);
+		const list = loadLibraryIndex();
+		list.push({
+			id,
+			name: String(name || "Skin").slice(0, 60),
+			variant: normalizeVariant(variant),
+			createdAt: Date.now()
+		});
+		saveLibraryIndex(list);
+		return {
+			success: true,
+			id
+		};
+	} catch (e) {
+		return {
+			success: false,
+			error: String(e.message || e)
+		};
+	}
+});
+ipcMain.handle("library-delete", (_, id) => {
+	try {
+		saveLibraryIndex(loadLibraryIndex().filter((e) => e.id !== id));
+		const f = path.join(SKINS_DIR, `${id}.png`);
+		if (fs.existsSync(f)) fs.unlinkSync(f);
+		return { success: true };
+	} catch (e) {
+		return {
+			success: false,
+			error: String(e.message || e)
+		};
+	}
+});
+ipcMain.handle("library-rename", (_, { id, name } = {}) => {
+	try {
+		const list = loadLibraryIndex();
+		const entry = list.find((x) => x.id === id);
+		if (entry) {
+			entry.name = String(name || "Skin").slice(0, 60);
+			saveLibraryIndex(list);
+		}
+		return { success: true };
+	} catch (e) {
+		return {
+			success: false,
+			error: String(e.message || e)
+		};
+	}
+});
+ipcMain.handle("export-skin", async (_, { dataUrl, name } = {}) => {
+	try {
+		const buf = dataUrlToBuffer(dataUrl);
+		if (!isValidSkinSize(pngDimensions(buf))) return {
+			success: false,
+			error: "Skin invalide."
+		};
+		const safe = String(name || "mon-skin").replace(/[^a-z0-9_-]+/gi, "_").slice(0, 40) || "mon-skin";
+		const result = await dialog.showSaveDialog(win, {
+			title: "Exporter le skin en PNG",
+			defaultPath: `${safe}.png`,
+			filters: [{
+				name: "Image PNG",
+				extensions: ["png"]
+			}]
+		});
+		if (result.canceled || !result.filePath) return {
+			success: false,
+			canceled: true
+		};
+		fs.writeFileSync(result.filePath, buf);
+		return {
+			success: true,
+			path: result.filePath
+		};
+	} catch (e) {
+		return {
+			success: false,
+			error: String(e.message || e)
+		};
+	}
+});
 ipcMain.handle("check-modpack", async () => {
 	const modsDir = path.join(GAME_DIR, "mods");
 	fs.mkdirSync(modsDir, { recursive: true });
@@ -1719,6 +1849,35 @@ function deepMerge(base, patch) {
 	for (const k of Object.keys(patch)) out[k] = k in base ? deepMerge(base[k], patch[k]) : patch[k];
 	return out;
 }
+function setConfigLines(filePath, section, setLines) {
+	const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	let content = "";
+	if (fs.existsSync(filePath)) try {
+		content = fs.readFileSync(filePath, "utf8");
+	} catch (e) {
+		content = "";
+	}
+	const pending = [];
+	for (const [key, line] of Object.entries(setLines)) {
+		const re = new RegExp(`^[ \\t]*(?:[A-Za-z]:)?${esc(key)}[ \\t]*=[^\\r\\n]*$`, "m");
+		if (re.test(content)) content = content.replace(re, line);
+		else pending.push(line);
+	}
+	if (pending.length) {
+		const block = pending.join("\n");
+		let secHeaderEnd = -1;
+		if (section) {
+			const m = content.match(new RegExp(`^##\\[${esc(section)}\\][ \\t]*$`, "m"));
+			if (m) secHeaderEnd = m.index + m[0].length;
+		}
+		if (secHeaderEnd >= 0) content = content.slice(0, secHeaderEnd) + "\n" + block + content.slice(secHeaderEnd);
+		else {
+			const header = section ? `##[${section}]\n\n` : "";
+			content = content.trim() === "" ? `${header}${block}\n` : content.replace(/\s*$/, "") + `\n\n${header}${block}\n`;
+		}
+	}
+	fs.writeFileSync(filePath, content, "utf8");
+}
 function deployConfigs() {
 	if (!MODPACK.configs || !MODPACK.configs.length) return;
 	for (const cfg of MODPACK.configs) {
@@ -1738,6 +1897,9 @@ function deployConfigs() {
 		} else if (typeof cfg.content === "string") {
 			fs.writeFileSync(dest, cfg.content, "utf8");
 			console.log("[RawLauncher] Config déployée :", cfg.path);
+		} else if (cfg.setLines && typeof cfg.setLines === "object") {
+			setConfigLines(dest, cfg.section || null, cfg.setLines);
+			console.log("[RawLauncher] Config patchée (lignes) :", cfg.path);
 		}
 	}
 }
