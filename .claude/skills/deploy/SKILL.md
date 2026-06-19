@@ -68,7 +68,7 @@ done
 ## 6 — Vérifier la release publiée
 Via WebFetch sur `https://api.github.com/repos/Mamazorus/zig-city-2/releases?per_page=1`, confirme :
 - `tag_name` = `v<VERSION>` et `draft` = `false`
-- les assets contiennent **`latest.yml`**, **`Raw-Launcher-Setup-<VERSION>.exe`** et **`.exe.blockmap`**
+- les assets contiennent **`latest.yml`**, **`Zig-City-2-Setup-<VERSION>.exe`** et **`.exe.blockmap`**
 
 ## 7 — Rapport final
 Annonce à l'utilisateur :

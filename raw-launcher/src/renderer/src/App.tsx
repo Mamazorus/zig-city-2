@@ -1,10 +1,10 @@
-﻿import { useState, useEffect, useCallback, useRef } from 'react'
+﻿import { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle } from 'react'
 import packData from '../../../modpack.json'
 import AdminDashboard from './AdminDashboard'
 import { resolveCategory, CategoryBadge, NewsFallback, type NewsCategory } from './news'
+import { Avatar, RemoteNewsImage } from './remote-image'
 
 import bgImage from './assets/bg.png'
-import playerImage from './assets/player.png'
 import news1Image from './assets/news-1.png'
 import news2Image from './assets/news-2.png'
 import news3Image from './assets/news-3.png'
@@ -62,7 +62,7 @@ function formatSince(ts: number): string {
 // (64×64 ou 64×32 legacy). Rendu pixel-perfect, sans dépendance externe.
 function drawSkinBody(
   ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
+  img: HTMLImageElement | HTMLCanvasElement,
   variant: 'classic' | 'slim',
   canvasW: number,
   canvasH: number
@@ -110,11 +110,15 @@ function drawSkinBody(
 }
 
 function SkinPreview({
-  src,
+  src = null,
+  sourceCanvas = null,
+  version = 0,
   variant,
   width = 176
 }: {
-  src: string | null
+  src?: string | null
+  sourceCanvas?: HTMLCanvasElement | null
+  version?: number
   variant: 'classic' | 'slim'
   width?: number
 }) {
@@ -126,6 +130,13 @@ function SkinPreview({
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+    // Mode édition en direct : on dessine depuis un canvas source (déjà en mémoire)
+    if (sourceCanvas) {
+      try { drawSkinBody(ctx, sourceCanvas, variant, canvas.width, canvas.height) } catch {}
+      return
+    }
+
     if (!src) return
     const img = new Image()
     img.onload = () => {
@@ -136,7 +147,7 @@ function SkinPreview({
     img.onerror = () => { ctx.clearRect(0, 0, canvas.width, canvas.height) }
     img.src = src
     return () => { img.onload = null; img.onerror = null }
-  }, [src, variant])
+  }, [src, sourceCanvas, version, variant])
 
   return (
     <canvas
@@ -147,6 +158,355 @@ function SkinPreview({
     />
   )
 }
+
+// ── Éditeur de skin pixel par pixel intégré ──────────────────────────────────
+const SKIN_PX = 64                 // dimension logique d'un skin (64×64)
+const EDIT_CELL = 8                // taille d'affichage d'un pixel de skin (px)
+
+const SKIN_PALETTE = [
+  '#000000', '#3a3a3a', '#6e6e6e', '#a8a8a8', '#e6e6e6', '#ffffff',
+  '#5a3417', '#8a4f24', '#c07a3e', '#e7b07a', '#ffd9a8', '#f1c27d',
+  '#7a1f1f', '#c43c3c', '#ff5a5a', '#b5651d', '#e08a2e', '#ffcb45',
+  '#1f5f2a', '#3fa04a', '#7fe06a', '#1f3f7a', '#3a6fc4', '#5aa0ff',
+  '#3d2470', '#6f44c0', '#b48aff', '#1f6f6a', '#2fb0a0', '#0e0b16',
+]
+
+// Repères des zones (couche de base, vue de face) pour s'orienter sur la grille
+const SKIN_GUIDES = [
+  { x: 8, y: 8, w: 8, h: 8 },    // tête
+  { x: 20, y: 20, w: 8, h: 12 }, // corps
+  { x: 44, y: 20, w: 4, h: 12 }, // bras droit
+  { x: 36, y: 52, w: 4, h: 12 }, // bras gauche
+  { x: 4, y: 20, w: 4, h: 12 },  // jambe droite
+  { x: 20, y: 52, w: 4, h: 12 }, // jambe gauche
+  { x: 40, y: 8, w: 8, h: 8 },   // chapeau (overlay tête)
+]
+
+type EditorTool = 'brush' | 'eraser' | 'eyedropper'
+interface SkinEditorHandle { getDataURL: () => string | null }
+
+const SkinEditor = forwardRef<SkinEditorHandle, {
+  loadSrc: string | null
+  loadKey: number
+  variant: 'classic' | 'slim'
+  onVariantChange: (v: 'classic' | 'slim') => void
+}>(function SkinEditor({ loadSrc, loadKey, variant, onVariantChange }, ref) {
+  const workRef = useRef<HTMLCanvasElement | null>(null)   // 64×64 (source de vérité)
+  const gridRef = useRef<HTMLCanvasElement>(null)          // grille zoomée visible
+  const [tool, setTool] = useState<EditorTool>('brush')
+  const [color, setColor] = useState('#c43c3c')
+  const [showGuides, setShowGuides] = useState(true)
+  const [previewVer, setPreviewVer] = useState(0)
+  const [, setHistVer] = useState(0)
+
+  const undoStack = useRef<ImageData[]>([])
+  const redoStack = useRef<ImageData[]>([])
+  const painting = useRef(false)
+  const lastCell = useRef<{ x: number; y: number } | null>(null)
+  const toolRef = useRef(tool)
+  const colorRef = useRef(color)
+  useEffect(() => { toolRef.current = tool }, [tool])
+  useEffect(() => { colorRef.current = color }, [color])
+
+  const workCtx = () => workRef.current!.getContext('2d', { willReadFrequently: true })!
+
+  // Dessine la grille zoomée (damier de transparence + skin + lignes + repères)
+  const drawGrid = useCallback(() => {
+    const grid = gridRef.current
+    const work = workRef.current
+    if (!grid || !work) return
+    const g = grid.getContext('2d')!
+    const S = EDIT_CELL
+    g.clearRect(0, 0, grid.width, grid.height)
+    // damier de transparence
+    for (let y = 0; y < SKIN_PX; y++) {
+      for (let x = 0; x < SKIN_PX; x++) {
+        g.fillStyle = (x + y) % 2 === 0 ? '#2a2733' : '#211e2a'
+        g.fillRect(x * S, y * S, S, S)
+      }
+    }
+    g.imageSmoothingEnabled = false
+    g.drawImage(work, 0, 0, SKIN_PX, SKIN_PX, 0, 0, grid.width, grid.height)
+    // lignes de grille
+    g.strokeStyle = 'rgba(255,255,255,0.06)'
+    g.lineWidth = 1
+    g.beginPath()
+    for (let i = 0; i <= SKIN_PX; i++) {
+      g.moveTo(i * S + 0.5, 0); g.lineTo(i * S + 0.5, grid.height)
+      g.moveTo(0, i * S + 0.5); g.lineTo(grid.width, i * S + 0.5)
+    }
+    g.stroke()
+    if (showGuides) {
+      g.strokeStyle = 'rgba(0,255,225,0.55)'
+      g.lineWidth = 1.5
+      for (const r of SKIN_GUIDES) g.strokeRect(r.x * S, r.y * S, r.w * S, r.h * S)
+    }
+  }, [showGuides])
+
+  const renderAll = useCallback(() => {
+    drawGrid()
+    setPreviewVer(v => v + 1)
+  }, [drawGrid])
+
+  // (Re)charge le skin dans le canvas de travail
+  useEffect(() => {
+    if (!workRef.current) {
+      const c = document.createElement('canvas')
+      c.width = SKIN_PX; c.height = SKIN_PX
+      workRef.current = c
+    }
+    const ctx = workCtx()
+    ctx.clearRect(0, 0, SKIN_PX, SKIN_PX)
+    undoStack.current = []
+    redoStack.current = []
+    setHistVer(v => v + 1)
+
+    if (!loadSrc) { renderAll(); return }
+    const img = new Image()
+    img.onload = () => {
+      ctx.clearRect(0, 0, SKIN_PX, SKIN_PX)
+      ctx.imageSmoothingEnabled = false
+      // 64×32 legacy : dessiné en haut, le reste reste transparent
+      try { ctx.drawImage(img, 0, 0) } catch {}
+      renderAll()
+    }
+    img.onerror = () => renderAll()
+    img.src = loadSrc
+    return () => { img.onload = null; img.onerror = null }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadKey])
+
+  // redessine la grille quand les repères changent
+  useEffect(() => { drawGrid() }, [drawGrid])
+
+  useImperativeHandle(ref, () => ({
+    getDataURL: () => {
+      try { return workRef.current ? workRef.current.toDataURL('image/png') : null } catch { return null }
+    }
+  }), [])
+
+  const cellFromEvent = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const grid = gridRef.current!
+    const rect = grid.getBoundingClientRect()
+    const x = Math.floor((e.clientX - rect.left) / (rect.width / SKIN_PX))
+    const y = Math.floor((e.clientY - rect.top) / (rect.height / SKIN_PX))
+    if (x < 0 || y < 0 || x >= SKIN_PX || y >= SKIN_PX) return null
+    return { x, y }
+  }
+
+  const applyAt = (x: number, y: number) => {
+    const ctx = workCtx()
+    if (toolRef.current === 'eraser') {
+      ctx.clearRect(x, y, 1, 1)
+    } else {
+      ctx.fillStyle = colorRef.current
+      ctx.fillRect(x, y, 1, 1)
+    }
+  }
+
+  // trace une ligne entre deux cellules (évite les trous en déplacement rapide)
+  const paintLine = (a: { x: number; y: number }, b: { x: number; y: number }) => {
+    let { x: x0, y: y0 } = a
+    const { x: x1, y: y1 } = b
+    const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0)
+    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1
+    let err = dx - dy
+    while (true) {
+      applyAt(x0, y0)
+      if (x0 === x1 && y0 === y1) break
+      const e2 = 2 * err
+      if (e2 > -dy) { err -= dy; x0 += sx }
+      if (e2 < dx) { err += dx; y0 += sy }
+    }
+  }
+
+  // getImageData peut lever une SecurityError si le canvas est "tainted"
+  // (skin chargé depuis une URL distante au lieu d'un data URL) → on protège.
+  const snapshot = (): ImageData | null => {
+    try { return workCtx().getImageData(0, 0, SKIN_PX, SKIN_PX) } catch { return null }
+  }
+
+  const pushUndo = () => {
+    const snap = snapshot()
+    if (!snap) return
+    undoStack.current.push(snap)
+    if (undoStack.current.length > 50) undoStack.current.shift()
+    redoStack.current = []
+    setHistVer(v => v + 1)
+  }
+
+  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const cell = cellFromEvent(e)
+    if (!cell) return
+    if (toolRef.current === 'eyedropper') {
+      try {
+        const d = workCtx().getImageData(cell.x, cell.y, 1, 1).data
+        if (d[3] > 0) {
+          const hex = '#' + [d[0], d[1], d[2]].map(n => n.toString(16).padStart(2, '0')).join('')
+          setColor(hex)
+        }
+      } catch {}
+      setTool('brush')
+      return
+    }
+    e.currentTarget.setPointerCapture(e.pointerId)
+    pushUndo()
+    painting.current = true
+    lastCell.current = cell
+    applyAt(cell.x, cell.y)
+    renderAll()
+  }
+
+  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!painting.current) return
+    const cell = cellFromEvent(e)
+    if (!cell) return
+    if (lastCell.current) paintLine(lastCell.current, cell)
+    else applyAt(cell.x, cell.y)
+    lastCell.current = cell
+    renderAll()
+  }
+
+  const endStroke = () => {
+    painting.current = false
+    lastCell.current = null
+  }
+
+  const undo = () => {
+    if (!undoStack.current.length) return
+    const cur = snapshot()
+    if (cur) redoStack.current.push(cur)
+    workCtx().putImageData(undoStack.current.pop()!, 0, 0)
+    setHistVer(v => v + 1)
+    renderAll()
+  }
+
+  const redo = () => {
+    if (!redoStack.current.length) return
+    const cur = snapshot()
+    if (cur) undoStack.current.push(cur)
+    workCtx().putImageData(redoStack.current.pop()!, 0, 0)
+    setHistVer(v => v + 1)
+    renderAll()
+  }
+
+  const toolBtn = (t: EditorTool, label: string, icon: React.ReactNode) => (
+    <button
+      onClick={() => setTool(t)}
+      title={label}
+      className={`flex items-center justify-center size-[34px] rounded-[8px] border transition-colors ${
+        tool === t
+          ? 'border-[rgba(0,255,225,0.5)] bg-[rgba(0,255,225,0.12)] text-white'
+          : 'border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] text-white/55 hover:text-white hover:bg-[rgba(255,255,255,0.07)]'
+      }`}
+    >
+      {icon}
+    </button>
+  )
+
+  const gridSize = SKIN_PX * EDIT_CELL
+
+  return (
+    <div className="flex gap-[20px]">
+      {/* Colonne aperçu + modèle */}
+      <div className="flex flex-col items-center gap-[14px] shrink-0">
+        <div
+          className="relative flex items-end justify-center rounded-[12px] overflow-hidden border border-[rgba(255,255,255,0.08)]"
+          style={{ width: 150, height: 280, background: 'radial-gradient(ellipse 80% 60% at 50% 30%, rgba(0,255,225,0.10) 0%, rgba(14,11,22,0.2) 70%)' }}
+        >
+          <div className="skin-preview-float pb-[14px]">
+            <SkinPreview sourceCanvas={workRef.current} version={previewVer} variant={variant} width={92} />
+          </div>
+          <div className="absolute bottom-0 inset-x-0 h-[34px] pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(0,255,225,0.12), transparent)' }} />
+        </div>
+        <div className="flex flex-col gap-[6px] w-full">
+          <p className="font-ui font-semibold text-[12px] text-white/60 tracking-[-0.3px]">Modèle</p>
+          {(['classic', 'slim'] as const).map(v => (
+            <button
+              key={v}
+              onClick={() => onVariantChange(v)}
+              className={`flex flex-col items-start px-[12px] py-[7px] rounded-[9px] border transition-colors ${
+                variant === v
+                  ? 'border-[rgba(0,255,225,0.5)] bg-[rgba(0,255,225,0.08)]'
+                  : 'border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.06)]'
+              }`}
+            >
+              <span className="font-ui font-semibold text-[13px] text-white">{v === 'classic' ? 'Classique' : 'Fin'}</span>
+              <span className="font-ui text-[10px] text-white/40">{v === 'classic' ? 'Bras larges' : 'Bras fins'}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Colonne édition */}
+      <div className="flex flex-col gap-[12px] min-w-0">
+        {/* Barre d'outils */}
+        <div className="flex items-center gap-[8px] flex-wrap">
+          {toolBtn('brush', 'Pinceau', (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M11 2.5 13.5 5 6.5 12l-3 .5.5-3L11 2.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+            </svg>
+          ))}
+          {toolBtn('eraser', 'Gomme', (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M3 10.5 8 5.5l3.5 3.5-3 3H4.5L3 10.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+              <path d="M8 5.5 10.5 3l3 3L11 8.5" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+            </svg>
+          ))}
+          {toolBtn('eyedropper', 'Pipette', (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M10 2.5 13.5 6 7 12.5l-3 .5.5-3L10 2.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+              <path d="M9 3.5 12.5 7" stroke="currentColor" strokeWidth="1.3"/>
+            </svg>
+          ))}
+          <div className="w-px h-[24px] bg-[rgba(255,255,255,0.1)] mx-[2px]" />
+          <button onClick={undo} disabled={!undoStack.current.length} title="Annuler"
+            className="flex items-center justify-center size-[34px] rounded-[8px] border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] text-white/55 hover:text-white hover:bg-[rgba(255,255,255,0.07)] transition-colors disabled:opacity-30 disabled:hover:bg-[rgba(255,255,255,0.03)]">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4 3 7l3 3M3 7h6.5A3.5 3.5 0 0 1 13 10.5v0A3.5 3.5 0 0 1 9.5 14H6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </button>
+          <button onClick={redo} disabled={!redoStack.current.length} title="Refaire"
+            className="flex items-center justify-center size-[34px] rounded-[8px] border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] text-white/55 hover:text-white hover:bg-[rgba(255,255,255,0.07)] transition-colors disabled:opacity-30 disabled:hover:bg-[rgba(255,255,255,0.03)]">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 4l3 3-3 3M13 7H6.5A3.5 3.5 0 0 0 3 10.5v0A3.5 3.5 0 0 0 6.5 14H10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </button>
+          <div className="w-px h-[24px] bg-[rgba(255,255,255,0.1)] mx-[2px]" />
+          <button onClick={() => setShowGuides(s => !s)} title="Afficher/masquer les repères de zones"
+            className={`flex items-center justify-center size-[34px] rounded-[8px] border transition-colors ${
+              showGuides ? 'border-[rgba(0,255,225,0.5)] bg-[rgba(0,255,225,0.12)] text-white' : 'border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] text-white/55 hover:text-white'
+            }`}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.3"/><path d="M2.5 8h11M8 2.5v11" stroke="currentColor" strokeWidth="1"/></svg>
+          </button>
+        </div>
+
+        {/* Palette + couleur courante */}
+        <div className="flex items-center gap-[10px]">
+          <label className="relative shrink-0 size-[34px] rounded-[8px] border border-[rgba(255,255,255,0.15)] overflow-hidden cursor-pointer" title="Couleur personnalisée" style={{ background: color }}>
+            <input type="color" value={color} onChange={e => setColor(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" />
+          </label>
+          <div className="flex flex-wrap gap-[4px]">
+            {SKIN_PALETTE.map(c => (
+              <button key={c} onClick={() => { setColor(c); setTool('brush') }} title={c}
+                className={`size-[18px] rounded-[4px] border ${color.toLowerCase() === c.toLowerCase() ? 'border-white' : 'border-[rgba(255,255,255,0.15)]'}`}
+                style={{ background: c }} />
+            ))}
+          </div>
+        </div>
+
+        {/* Grille de dessin */}
+        <canvas
+          ref={gridRef}
+          width={gridSize}
+          height={gridSize}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endStroke}
+          onPointerCancel={endStroke}
+          className="rounded-[8px] border border-[rgba(255,255,255,0.1)] touch-none select-none"
+          style={{ width: gridSize, height: gridSize, cursor: 'crosshair', imageRendering: 'pixelated' }}
+        />
+      </div>
+    </div>
+  )
+})
 
 const SHOP_ITEMS = [
   { from: shop1Image, fromQty: 'x16', toQty: 'x5',  alt: true },
@@ -213,18 +573,19 @@ export default function App() {
   const [playersSeen, setPlayersSeen] = useState<string[]>([])
   const initRef = useRef(false) // garde anti double-exécution de l'init (React.StrictMode)
 
-  // ── Changer de skin ──
+  // ── Changer de skin (éditeur intégré) ──
   const [skinModalOpen, setSkinModalOpen] = useState(false)
   const [skinModalClosing, setSkinModalClosing] = useState(false)
-  const [skinInfo, setSkinInfo] = useState<{ variant: 'classic' | 'slim'; skinUrl: string | null } | null>(null)
   const [skinInfoLoading, setSkinInfoLoading] = useState(false)
   const [selectedVariant, setSelectedVariant] = useState<'classic' | 'slim'>('classic')
-  const [pickedSkin, setPickedSkin] = useState<{ path: string; name: string; dataUrl: string } | null>(null)
+  const [editorSrc, setEditorSrc] = useState<string | null>(null)   // skin chargé dans l'éditeur
+  const [editorLoadKey, setEditorLoadKey] = useState(0)             // bump → (re)charge l'éditeur
   const [skinBusy, setSkinBusy] = useState(false)
   const [skinError, setSkinError] = useState<string | null>(null)
   const [skinSuccess, setSkinSuccess] = useState(false)
-  const [skinVersion, setSkinVersion] = useState(0)
-  const skinRequestRef = useRef(false)   // garde anti double-soumission (apply/reset)
+  const [skinVersion, setSkinVersion] = useState(0)                 // cache-buster avatar
+  const skinRequestRef = useRef(false)                              // garde anti double-soumission
+  const editorApiRef = useRef<SkinEditorHandle>(null)
 
   const fetchNews = useCallback(async () => {
     const result = await window.launcher.getNews()
@@ -456,26 +817,24 @@ export default function App() {
     }, 250)
   }
 
+  const sessionMessage = 'Ta session Minecraft a expiré. Reconnecte-toi pour changer de skin.'
+
   const openSkinModal = async () => {
     setProfileMenuOpen(false)
     setSkinModalOpen(true)
     setSkinModalClosing(false)
-    setPickedSkin(null)
     setSkinError(null)
     setSkinSuccess(false)
-    setSkinInfo(null)
+    setEditorSrc(null)
     setSkinInfoLoading(true)
     const info = await window.launcher.getSkinInfo()
     setSkinInfoLoading(false)
     if (info.success) {
-      setSkinInfo({ variant: info.variant ?? 'classic', skinUrl: info.skinUrl ?? null })
       setSelectedVariant(info.variant ?? 'classic')
+      setEditorSrc(info.skinDataUrl ?? info.skinUrl ?? null)
+      setEditorLoadKey(k => k + 1)
     } else {
-      setSkinError(
-        info.expired || info.loggedOut
-          ? 'Ta session Minecraft a expiré. Reconnecte-toi pour changer de skin.'
-          : (info.error ?? 'Impossible de charger ton skin actuel.')
-      )
+      setSkinError(info.expired || info.loggedOut ? sessionMessage : (info.error ?? 'Impossible de charger ton skin actuel.'))
     }
   }
 
@@ -484,7 +843,7 @@ export default function App() {
     setTimeout(() => {
       setSkinModalOpen(false)
       setSkinModalClosing(false)
-      setPickedSkin(null)   // libère le dataUrl base64
+      setEditorSrc(null)   // libère le dataUrl base64
       setSkinError(null)
       setSkinSuccess(false)
     }, 250)
@@ -495,26 +854,27 @@ export default function App() {
     setSkinSuccess(false)
     const res = await window.launcher.pickSkinFile()
     if (res.canceled) return
-    if (res.error || !res.path || !res.dataUrl) {
+    if (res.error || !res.dataUrl) {
       setSkinError(res.error ?? 'Fichier invalide.')
       return
     }
-    setPickedSkin({ path: res.path, name: res.name ?? 'skin.png', dataUrl: res.dataUrl })
+    // Charge le PNG importé dans l'éditeur (modifiable avant envoi)
+    setEditorSrc(res.dataUrl)
+    setEditorLoadKey(k => k + 1)
   }
 
-  const sessionMessage = 'Ta session Minecraft a expiré. Reconnecte-toi pour changer de skin.'
-
   const handleApplySkin = async () => {
-    if (!pickedSkin || skinRequestRef.current) return
+    if (skinRequestRef.current) return
+    const dataUrl = editorApiRef.current?.getDataURL()
+    if (!dataUrl) { setSkinError('Aucun skin à appliquer.'); return }
     skinRequestRef.current = true
     setSkinBusy(true)
     setSkinError(null)
     setSkinSuccess(false)
     try {
-      const res = await window.launcher.uploadSkin({ variant: selectedVariant, path: pickedSkin.path })
+      const res = await window.launcher.uploadSkin({ variant: selectedVariant, dataUrl })
       if (res.success) {
         setSkinSuccess(true)
-        setSkinInfo({ variant: res.variant ?? selectedVariant, skinUrl: res.skinUrl ?? null })
         setSkinVersion(v => v + 1)
       } else {
         setSkinError(res.expired || res.loggedOut ? sessionMessage : (res.error ?? 'Échec du changement de skin.'))
@@ -534,9 +894,9 @@ export default function App() {
     try {
       const res = await window.launcher.resetSkin()
       if (res.success) {
-        setPickedSkin(null)
-        setSkinInfo({ variant: res.variant ?? 'classic', skinUrl: res.skinUrl ?? null })
         setSelectedVariant(res.variant ?? 'classic')
+        setEditorSrc(res.skinDataUrl ?? res.skinUrl ?? null)
+        setEditorLoadKey(k => k + 1)
         setSkinVersion(v => v + 1)
         setSkinSuccess(true)
       } else {
@@ -604,12 +964,7 @@ export default function App() {
                 onClick={() => username && setProfileMenuOpen(v => !v)}
               >
                 <div className="size-[25px] rounded-[4px] overflow-hidden shrink-0">
-                  <img
-                    alt=""
-                    className="w-full h-full object-cover pointer-events-none"
-                    src={username ? `https://mc-heads.net/avatar/${encodeURIComponent(username)}/64${skinVersion ? `?v=${skinVersion}` : ''}` : playerImage}
-                    onError={(e) => { (e.currentTarget as HTMLImageElement).src = playerImage }}
-                  />
+                  <Avatar name={username} version={skinVersion} className="w-full h-full object-cover pointer-events-none" />
                 </div>
                 <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px] whitespace-nowrap">
                   {username || 'Joueur'}
@@ -624,14 +979,9 @@ export default function App() {
                   style={{ minWidth: 216, WebkitAppRegion: 'no-drag' } as React.CSSProperties}
                 >
                   {/* En-tête profil */}
-                  <div className="flex items-center gap-[10px] px-[14px] py-[12px] border-b border-[rgba(255,255,255,0.14)]">
+                  <div className="flex items-center gap-[10px] px-[14px] py-[12px]">
                     <div className="size-[32px] relative rounded shrink-0">
-                      <img
-                        alt=""
-                        className="absolute inset-0 max-w-none object-cover pointer-events-none rounded size-full"
-                        src={username ? `https://mc-heads.net/avatar/${encodeURIComponent(username)}/64${skinVersion ? `?v=${skinVersion}` : ''}` : playerImage}
-                        onError={(e) => { (e.currentTarget as HTMLImageElement).src = playerImage }}
-                      />
+                      <Avatar name={username} version={skinVersion} className="absolute inset-0 max-w-none object-cover pointer-events-none rounded size-full" />
                     </div>
                     <div>
                       <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.56px]">{username}</p>
@@ -666,9 +1016,6 @@ export default function App() {
                       )}
                     </button>
                   </div>
-
-                  {/* Séparation */}
-                  <div className="mx-[8px] border-t border-[rgba(255,255,255,0.14)]" />
 
                   {/* Actions */}
                   <div className="px-[8px] py-[8px] flex flex-col gap-[2px]">
@@ -1024,12 +1371,7 @@ export default function App() {
                     <div className="carousel-track flex items-center" style={{ animationDuration: `${animDuration}s` }}>
                       {carouselItems.map((name, i) => (
                         <div key={i} className="size-[48px] rounded-[8px] shrink-0 overflow-hidden" style={{ marginRight: CAROUSEL_GAP }}>
-                          <img
-                            alt=""
-                            className="size-full object-cover"
-                            src={name ? `https://mc-heads.net/avatar/${encodeURIComponent(name)}/64` : playerImage}
-                            onError={(e) => { (e.currentTarget as HTMLImageElement).src = playerImage }}
-                          />
+                          <Avatar name={name} className="size-full object-cover" />
                         </div>
                       ))}
                     </div>
@@ -1040,9 +1382,8 @@ export default function App() {
 
             {/* ── NOUVEAUTÉS ── */}
             <div className="backdrop-blur-[5.95px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] flex flex-col gap-[16px] items-start overflow-x-clip overflow-y-auto p-[16px] rounded-[16px] shadow-[2px_2px_8px_0px_rgba(0,0,0,0.1)] w-full flex-1 min-h-0">
-              <div className="flex items-center gap-[12px] w-full shrink-0">
+              <div className="flex items-center w-full shrink-0">
                 <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px] whitespace-nowrap">Nouveautés</p>
-                <div className="h-px flex-1 bg-[rgba(255,255,255,0.08)]" />
               </div>
               <div className="grid grid-cols-2 gap-[14px] w-full shrink-0">
                 {(dynamicNews.length > 0 ? dynamicNews as AnyNewsItem[] : NEWS_ITEMS).map((item, i) => {
@@ -1057,19 +1398,14 @@ export default function App() {
                     >
                       {/* Visuel */}
                       <div className="news-card-media relative overflow-hidden shrink-0" style={{ height: 128 }}>
-                        {imgSrc ? (
-                          <img
-                            alt=""
-                            className="news-card-img absolute inset-0 max-w-none object-cover pointer-events-none size-full"
-                            src={imgSrc}
-                            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                          />
-                        ) : (
-                          <NewsFallback category={cat.key} />
-                        )}
+                        <RemoteNewsImage
+                          src={imgSrc}
+                          className="news-card-img absolute inset-0 max-w-none object-cover pointer-events-none size-full"
+                          fallback={<NewsFallback category={cat.key} />}
+                        />
                       </div>
                       {/* Contenu */}
-                      <div className="flex flex-col gap-[8px] p-[14px] flex-1 border-t border-[rgba(255,255,255,0.06)]">
+                      <div className="flex flex-col gap-[8px] p-[14px] flex-1">
                         <CategoryBadge category={cat.key} />
                         <p className="font-ui font-semibold text-[14px] text-white leading-[1.32] tracking-[-0.3px] line-clamp-2 break-words min-h-[37px]">{item.title}</p>
                         <div className="flex items-center gap-[6px] text-white/40">
@@ -1103,12 +1439,7 @@ export default function App() {
                     className={`flex gap-[8px] items-center p-[8px] rounded-[8px] w-full ${i % 2 === 0 ? 'bg-[rgba(255,255,255,0.1)]' : ''}`}
                   >
                     <div className="relative rounded-[8px] shrink-0 size-[48px]">
-                      <img
-                        alt=""
-                        className="absolute inset-0 max-w-none object-cover pointer-events-none rounded-[8px] size-full"
-                        src={`https://mc-heads.net/avatar/${encodeURIComponent(player.name)}/64`}
-                        onError={(e) => { (e.currentTarget as HTMLImageElement).src = playerImage }}
-                      />
+                      <Avatar name={player.name} className="absolute inset-0 max-w-none object-cover pointer-events-none rounded-[8px] size-full" />
                     </div>
                     <div className="flex flex-col items-start">
                       <p className="font-mono font-semibold text-[16px] text-white tracking-[-0.64px]">{player.name}</p>
@@ -1217,24 +1548,18 @@ export default function App() {
 
               {/* Bannière — image nette (ou aplat sobre), séparée du contenu par un hairline */}
               <div className="relative shrink-0 overflow-hidden" style={{ height: modalImg ? 200 : 150 }}>
-                {modalImg ? (
-                  <img
-                    alt=""
-                    className="absolute inset-0 max-w-none object-cover size-full"
-                    src={modalImg}
-                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                  />
-                ) : (
-                  <NewsFallback category={modalCat.key} />
-                )}
+                <RemoteNewsImage
+                  src={modalImg}
+                  className="absolute inset-0 max-w-none object-cover size-full"
+                  fallback={<NewsFallback category={modalCat.key} />}
+                />
               </div>
 
-              {/* Contenu — sur le verre clair, séparé de la bannière */}
-              <div className="flex flex-col overflow-y-auto border-t border-[rgba(255,255,255,0.1)]" style={{ padding: '24px 30px 30px' }}>
+              {/* Contenu — sur le verre clair */}
+              <div className="flex flex-col overflow-y-auto" style={{ padding: '24px 30px 30px' }}>
                 {/* En-tête éditorial : catégorie + méta */}
-                <div className="flex items-center gap-[12px] mb-[14px]">
+                <div className="flex items-center justify-between gap-[12px] mb-[14px]">
                   <CategoryBadge category={modalCat.key} size="md" />
-                  <div className="h-px flex-1 bg-[rgba(255,255,255,0.12)]" />
                   <p className="font-ui text-[12px] text-white/45 tracking-[-0.3px] whitespace-nowrap select-text">
                     {selectedNews.date}{selectedNews.author ? ` · ${selectedNews.author}` : ''}
                   </p>
@@ -1243,119 +1568,80 @@ export default function App() {
                 {/* Titre */}
                 <p className="font-ui font-bold text-[23px] text-white tracking-[-0.9px] leading-[1.18] break-words select-text">{selectedNews.title}</p>
 
-                {/* Filet d'accent */}
-                <div
-                  className="mt-[14px] mb-[18px] rounded-full"
-                  style={{ width: 40, height: 3, background: `rgb(${modalCat.rgb})` }}
-                />
-
                 {/* Corps */}
-                <p className="font-ui text-[15px] text-white/80 leading-[1.78] tracking-[-0.2px] whitespace-pre-line break-words select-text">{selectedNews.body}</p>
+                <p className="mt-[18px] font-ui text-[15px] text-white/80 leading-[1.78] tracking-[-0.2px] whitespace-pre-line break-words select-text">{selectedNews.body}</p>
               </div>
             </div>
           </div>
         )
       })()}
 
-      {/* ── MODALE CHANGER DE SKIN ── */}
-      {skinModalOpen && (() => {
-        const previewSrc = pickedSkin?.dataUrl ?? skinInfo?.skinUrl ?? null
-        return (
+      {/* ── MODALE CHANGER DE SKIN (éditeur intégré) ── */}
+      {skinModalOpen && (
+        <div
+          className={`absolute inset-0 z-50 flex items-center justify-center ${skinModalClosing ? 'modal-backdrop-exit' : 'modal-backdrop-enter'}`}
+          style={{ background: 'rgba(8,8,12,0.55)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' } as React.CSSProperties}
+          onClick={closeSkinModal}
+        >
           <div
-            className={`absolute inset-0 z-50 flex items-center justify-center ${skinModalClosing ? 'modal-backdrop-exit' : 'modal-backdrop-enter'}`}
-            style={{ background: 'rgba(8,8,12,0.55)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' } as React.CSSProperties}
-            onClick={closeSkinModal}
+            className={`relative flex flex-col rounded-[16px] overflow-hidden border border-[rgba(255,255,255,0.16)] ${skinModalClosing ? 'modal-card-exit' : 'modal-card-enter'}`}
+            style={{
+              width: 772,
+              maxHeight: '94vh',
+              background: 'rgba(255,255,255,0.08)',
+              backdropFilter: 'blur(28px) saturate(1.4)',
+              WebkitBackdropFilter: 'blur(28px) saturate(1.4)',
+              boxShadow: '0 30px 90px rgba(0,0,0,0.5)',
+            } as React.CSSProperties}
+            onClick={(e) => e.stopPropagation()}
           >
-            <div
-              className={`relative flex flex-col rounded-[16px] overflow-hidden border border-[rgba(255,255,255,0.16)] ${skinModalClosing ? 'modal-card-exit' : 'modal-card-enter'}`}
-              style={{
-                width: 620,
-                background: 'rgba(255,255,255,0.08)',
-                backdropFilter: 'blur(28px) saturate(1.4)',
-                WebkitBackdropFilter: 'blur(28px) saturate(1.4)',
-                boxShadow: '0 30px 90px rgba(0,0,0,0.5)',
-              } as React.CSSProperties}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* En-tête */}
-              <div className="flex items-center justify-between px-[24px] py-[18px] border-b border-[rgba(255,255,255,0.08)]">
-                <div className="flex items-center gap-[10px]">
-                  <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
-                    <circle cx="8" cy="5.5" r="2.5" stroke="rgba(0,255,225,0.9)" strokeWidth="1.4"/>
-                    <path d="M2.5 13.5C3.2 11.2 5.3 9.8 8 9.8s4.8 1.4 5.5 3.7" stroke="rgba(0,255,225,0.9)" strokeWidth="1.4" strokeLinecap="round"/>
-                  </svg>
-                  <p className="font-ui font-bold text-[18px] text-white tracking-[-0.6px]">Changer de skin</p>
-                </div>
-                <button
-                  className="flex items-center justify-center size-[30px] rounded-full text-white/55 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors"
-                  onClick={closeSkinModal}
-                >
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                    <path d="M1 1L11 11M11 1L1 11" />
-                  </svg>
-                </button>
+            {/* En-tête */}
+            <div className="flex items-center justify-between px-[24px] py-[16px] shrink-0 border-b border-[rgba(255,255,255,0.08)]">
+              <div className="flex items-center gap-[10px]">
+                <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+                  <circle cx="8" cy="5.5" r="2.5" stroke="rgba(0,255,225,0.9)" strokeWidth="1.4"/>
+                  <path d="M2.5 13.5C3.2 11.2 5.3 9.8 8 9.8s4.8 1.4 5.5 3.7" stroke="rgba(0,255,225,0.9)" strokeWidth="1.4" strokeLinecap="round"/>
+                </svg>
+                <p className="font-ui font-bold text-[18px] text-white tracking-[-0.6px]">Changer de skin</p>
               </div>
+              <button
+                className="flex items-center justify-center size-[30px] rounded-full text-white/55 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors"
+                onClick={closeSkinModal}
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M1 1L11 11M11 1L1 11" />
+                </svg>
+              </button>
+            </div>
 
-              {/* Corps */}
-              <div className="flex gap-[24px] p-[24px]">
-                {/* Aperçu personnage */}
-                <div
-                  className="relative shrink-0 flex items-end justify-center rounded-[12px] overflow-hidden border border-[rgba(255,255,255,0.08)]"
-                  style={{ width: 220, height: 300, background: 'radial-gradient(ellipse 80% 60% at 50% 30%, rgba(0,255,225,0.10) 0%, rgba(0,0,0,0.22) 70%)' }}
-                >
-                  {skinInfoLoading && !previewSrc ? (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <svg className="animate-spin text-white/40" style={{ width: 22, height: 22 }} fill="none" viewBox="0 0 24 24">
-                        <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                    </div>
-                  ) : previewSrc ? (
-                    <div className="skin-preview-float pb-[16px]">
-                      <SkinPreview src={previewSrc} variant={selectedVariant} width={120} />
-                    </div>
-                  ) : (
-                    <p className="absolute inset-0 flex items-center justify-center font-ui text-[12px] text-white/30 text-center px-[16px]">
-                      Aperçu indisponible
-                    </p>
-                  )}
-                  <div className="absolute bottom-0 inset-x-0 h-[40px] pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(0,255,225,0.12), transparent)' }} />
+            {/* Corps */}
+            <div className="flex flex-col gap-[14px] p-[24px] overflow-y-auto">
+              {skinInfoLoading ? (
+                <div className="flex items-center justify-center" style={{ height: 320 }}>
+                  <svg className="animate-spin text-white/40" style={{ width: 26, height: 26 }} fill="none" viewBox="0 0 24 24">
+                    <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
                 </div>
-
-                {/* Contrôles */}
-                <div className="flex flex-col flex-1 min-w-0 gap-[16px]">
-                  {/* Modèle */}
-                  <div className="flex flex-col gap-[8px]">
-                    <p className="font-ui font-semibold text-[13px] text-white/70 tracking-[-0.3px]">Modèle du personnage</p>
-                    <div className="flex gap-[8px]">
-                      {(['classic', 'slim'] as const).map((v) => (
-                        <button
-                          key={v}
-                          onClick={() => setSelectedVariant(v)}
-                          className={`flex-1 flex flex-col items-start px-[14px] py-[10px] rounded-[10px] border transition-colors ${selectedVariant === v ? 'border-[rgba(0,255,225,0.5)] bg-[rgba(0,255,225,0.08)]' : 'border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.06)]'}`}
-                        >
-                          <p className="font-ui font-semibold text-[14px] text-white">{v === 'classic' ? 'Classique' : 'Fin'}</p>
-                          <p className="font-ui text-[11px] text-white/40">{v === 'classic' ? 'Bras larges (Steve)' : 'Bras fins (Alex)'}</p>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Choix du fichier */}
+              ) : skinError && !editorSrc ? (
+                <div className="flex flex-col items-center justify-center gap-[12px] text-center" style={{ height: 320 }}>
+                  <p className="font-ui text-[13px] text-[rgba(255,120,120,0.95)] max-w-[420px] leading-snug">{skinError}</p>
                   <button
-                    onClick={handlePickSkin}
-                    disabled={skinBusy}
-                    className="flex flex-col items-center justify-center gap-[6px] w-full py-[18px] rounded-[10px] border border-dashed border-[rgba(255,255,255,0.18)] bg-[rgba(255,255,255,0.02)] hover:bg-[rgba(255,255,255,0.05)] hover:border-[rgba(0,255,225,0.35)] transition-colors disabled:opacity-50"
+                    onClick={openSkinModal}
+                    className="font-ui text-[13px] text-white/70 border border-[rgba(255,255,255,0.15)] px-[16px] py-[8px] rounded-[10px] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors"
                   >
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                      <path d="M10 13V4M10 4L6.5 7.5M10 4l3.5 3.5" stroke="rgba(0,255,225,0.85)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      <path d="M3.5 13v2A1.5 1.5 0 005 16.5h10a1.5 1.5 0 001.5-1.5v-2" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" strokeLinecap="round"/>
-                    </svg>
-                    <p className="font-ui text-[13px] text-white truncate max-w-full px-[12px]">
-                      {pickedSkin ? pickedSkin.name : 'Choisir un fichier PNG'}
-                    </p>
-                    <p className="font-ui text-[11px] text-white/35">Image 64×64 px</p>
+                    Réessayer
                   </button>
+                </div>
+              ) : (
+                <>
+                  <SkinEditor
+                    ref={editorApiRef}
+                    loadSrc={editorSrc}
+                    loadKey={editorLoadKey}
+                    variant={selectedVariant}
+                    onVariantChange={setSelectedVariant}
+                  />
 
                   {/* Messages */}
                   {skinError && (
@@ -1366,37 +1652,52 @@ export default function App() {
                       Skin mis à jour ! Il peut mettre quelques secondes à apparaître partout.
                     </p>
                   )}
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-[10px] mt-auto">
-                    <button
-                      onClick={handleApplySkin}
-                      disabled={!pickedSkin || skinBusy}
-                      className="flex items-center justify-center gap-[8px] flex-1 py-[11px] rounded-[10px] font-ui font-bold text-[14px] text-[#0e0b16] bg-[rgba(0,255,225,0.9)] hover:bg-[rgba(0,255,225,1)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {skinBusy && (
-                        <svg className="animate-spin" style={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24">
-                          <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                      )}
-                      Appliquer le skin
-                    </button>
-                    <button
-                      onClick={handleResetSkin}
-                      disabled={skinBusy}
-                      title="Revenir au skin par défaut"
-                      className="px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[13px] text-white/60 border border-[rgba(255,255,255,0.12)] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors disabled:opacity-40"
-                    >
-                      Réinitialiser
-                    </button>
-                  </div>
-                </div>
-              </div>
+                </>
+              )}
             </div>
+
+            {/* Pied : actions */}
+            {!skinInfoLoading && !(skinError && !editorSrc) && (
+              <div className="flex items-center gap-[10px] px-[24px] py-[16px] shrink-0 border-t border-[rgba(255,255,255,0.08)]">
+                <button
+                  onClick={handlePickSkin}
+                  disabled={skinBusy}
+                  className="flex items-center gap-[8px] px-[16px] py-[11px] rounded-[10px] font-ui font-semibold text-[13px] text-white/75 border border-[rgba(255,255,255,0.14)] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors disabled:opacity-40"
+                >
+                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+                    <path d="M10 13V4M10 4L6.5 7.5M10 4l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M3.5 13v2A1.5 1.5 0 005 16.5h10a1.5 1.5 0 001.5-1.5v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                  Importer un PNG
+                </button>
+
+                <button
+                  onClick={handleResetSkin}
+                  disabled={skinBusy}
+                  title="Revenir au skin par défaut Minecraft"
+                  className="px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[13px] text-white/55 border border-[rgba(255,255,255,0.12)] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors disabled:opacity-40"
+                >
+                  Skin par défaut
+                </button>
+
+                <button
+                  onClick={handleApplySkin}
+                  disabled={skinBusy}
+                  className="flex items-center justify-center gap-[8px] flex-1 py-[11px] rounded-[10px] font-ui font-bold text-[14px] text-[#0e0b16] bg-[rgba(0,255,225,0.9)] hover:bg-[rgba(0,255,225,1)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {skinBusy && (
+                    <svg className="animate-spin" style={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24">
+                      <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  )}
+                  Appliquer le skin
+                </button>
+              </div>
+            )}
           </div>
-        )
-      })()}
+        </div>
+      )}
     </div>
   )
 }

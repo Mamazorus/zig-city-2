@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld("launcher", {
 	quitAndInstall: () => ipcRenderer.invoke("quit-and-install"),
 	onUpdateStatus: (cb) => ipcRenderer.on("update-status", (_, d) => cb(d)),
 	getPlayersSeen: () => ipcRenderer.invoke("get-players-seen"),
+	fetchImage: (url) => ipcRenderer.invoke("fetch-image", url),
 	getFirebaseStatus: () => ipcRenderer.invoke("get-firebase-status"),
 	checkAdmin: () => ipcRenderer.invoke("check-admin"),
 	getNews: () => ipcRenderer.invoke("get-news"),

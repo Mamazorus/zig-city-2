@@ -225,6 +225,67 @@ ipcMain.handle('get-players-seen', () => {
   return Object.keys(loadPlayersSeen())
 })
 
+// ─── PROXY D'IMAGES DISTANTES ─────────────────────────────────────────────────
+// Le moteur de rendu (Chromium) emprunte le proxy / VPN / antivirus du système ;
+// sur certaines machines cela bloque le chargement des <img> distantes (têtes
+// mc-heads, visuels de news) alors que le reste fonctionne. On télécharge donc
+// l'image ici, côté processus principal — Node emprunte le même chemin réseau
+// direct que Firebase (qui, lui, marche) — et on la renvoie en data: URL au
+// renderer. Cache mémoire pour éviter de re-télécharger pendant la session.
+const imageCache = new Map()      // url -> data URL
+const imageInflight = new Map()   // url -> Promise<data URL | null>
+const IMAGE_CACHE_MAX = 250
+
+function fetchImageDataUrl(url, redirects = 0) {
+  if (redirects > 5) return Promise.reject(new Error('Trop de redirections'))
+  return new Promise((resolve, reject) => {
+    let urlObj
+    try { urlObj = new URL(url) } catch { return reject(new Error('URL invalide')) }
+    const proto = urlObj.protocol === 'https:' ? https : http
+    const req = proto.get({
+      hostname: urlObj.hostname,
+      port:     urlObj.port || undefined,
+      path:     urlObj.pathname + urlObj.search,
+      headers:  { 'User-Agent': 'Mozilla/5.0', 'Accept': 'image/*' }
+    }, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        res.resume()
+        const next = new URL(res.headers.location, urlObj).toString()
+        return fetchImageDataUrl(next, redirects + 1).then(resolve, reject)
+      }
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)) }
+      const ct = (res.headers['content-type'] || 'image/png').split(';')[0].trim()
+      if (!ct.startsWith('image/')) { res.resume(); return reject(new Error(`Type inattendu : ${ct}`)) }
+      const chunks = []
+      let size = 0
+      res.on('data', (d) => {
+        size += d.length
+        if (size > 8 * 1024 * 1024) { req.destroy(); reject(new Error('Image trop volumineuse')) }
+        else chunks.push(d)
+      })
+      res.on('end', () => resolve(`data:${ct};base64,${Buffer.concat(chunks).toString('base64')}`))
+    })
+    req.on('error', reject)
+    req.setTimeout(10000, () => { req.destroy(); reject(new Error('Timeout')) })
+  })
+}
+
+ipcMain.handle('fetch-image', (_e, url) => {
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return null
+  if (imageCache.has(url)) return imageCache.get(url)
+  if (imageInflight.has(url)) return imageInflight.get(url)
+  const p = fetchImageDataUrl(url)
+    .then((dataUrl) => {
+      if (imageCache.size >= IMAGE_CACHE_MAX) imageCache.delete(imageCache.keys().next().value)
+      imageCache.set(url, dataUrl)
+      return dataUrl
+    })
+    .catch(() => null)
+    .finally(() => imageInflight.delete(url))
+  imageInflight.set(url, p)
+  return p
+})
+
 // ─── IPC : WINDOW CONTROLS ───────────────────────────────────────────────────
 ipcMain.handle('window-minimize', () => win?.minimize())
 ipcMain.handle('window-maximize', () => win?.isMaximized() ? win.unmaximize() : win.maximize())
@@ -538,6 +599,30 @@ function activeSkin(profileJson) {
   return skins.find((s) => s.state === 'ACTIVE') || skins[0] || null
 }
 
+// Télécharge le PNG du skin et le renvoie en data URL base64. Côté Node : pas de
+// CORS, donc le renderer peut l'éditer (getImageData/toDataURL) sans canvas "tainted".
+function fetchSkinDataUrl(skinUrl) {
+  if (!skinUrl) return Promise.resolve(null)
+  return new Promise((resolve) => {
+    try {
+      const urlObj = new URL(skinUrl)
+      const req = https.get(
+        { hostname: urlObj.hostname, path: urlObj.pathname + urlObj.search, headers: { 'User-Agent': 'Mozilla/5.0' } },
+        (res) => {
+          if (res.statusCode !== 200) { res.resume(); return resolve(null) }
+          const chunks = []
+          res.on('data', (c) => chunks.push(c))
+          res.on('end', () => resolve(`data:image/png;base64,${Buffer.concat(chunks).toString('base64')}`))
+        }
+      )
+      req.on('error', () => resolve(null))
+      req.setTimeout(10000, () => req.destroy())
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
 ipcMain.handle('get-skin-info', async () => {
   if (!currentToken?.access_token) return { success: false, error: 'Non connecté', loggedOut: true }
   try {
@@ -549,6 +634,7 @@ ipcMain.handle('get-skin-info', async () => {
       success: true,
       variant: normalizeVariant(skin?.variant),
       skinUrl: skin?.url || null,
+      skinDataUrl: await fetchSkinDataUrl(skin?.url),
       name: res.json.name,
       uuid: res.json.id
     }
@@ -589,15 +675,24 @@ ipcMain.handle('pick-skin-file', async () => {
   }
 })
 
-ipcMain.handle('upload-skin', async (_, { variant, path: filePath } = {}) => {
+ipcMain.handle('upload-skin', async (_, { variant, path: filePath, dataUrl } = {}) => {
   if (!currentToken?.access_token) return { success: false, error: 'Non connecté', loggedOut: true }
   const v = normalizeVariant(variant)
 
   let buf
-  try {
-    buf = fs.readFileSync(filePath)
-  } catch {
-    return { success: false, error: 'Impossible de lire le fichier (déplacé ou supprimé ?).' }
+  if (dataUrl) {
+    // Skin dessiné dans l'éditeur intégré (data:image/png;base64,...)
+    try {
+      buf = Buffer.from(String(dataUrl).split(',')[1] || '', 'base64')
+    } catch {
+      return { success: false, error: 'Image du skin invalide.' }
+    }
+  } else {
+    try {
+      buf = fs.readFileSync(filePath)
+    } catch {
+      return { success: false, error: 'Impossible de lire le fichier (déplacé ou supprimé ?).' }
+    }
   }
   if (!isValidSkinSize(pngDimensions(buf))) {
     return { success: false, error: 'Le skin doit être un PNG de 64×64 pixels.' }
@@ -630,7 +725,7 @@ ipcMain.handle('reset-skin', async () => {
     if (res.statusCode === 401) return { success: false, error: 'Session Minecraft expirée — reconnecte-toi.', expired: true }
     if (res.statusCode !== 200) return { success: false, error: `Échec de la réinitialisation (HTTP ${res.statusCode}).` }
     const skin = activeSkin(res.json)
-    return { success: true, variant: normalizeVariant(skin?.variant), skinUrl: skin?.url || null }
+    return { success: true, variant: normalizeVariant(skin?.variant), skinUrl: skin?.url || null, skinDataUrl: await fetchSkinDataUrl(skin?.url) }
   } catch (e) {
     return { success: false, error: String(e.message || e) }
   }

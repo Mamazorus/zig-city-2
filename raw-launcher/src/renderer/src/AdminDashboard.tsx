@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import playerImage from './assets/player.png'
 import { NEWS_CATEGORIES, CATEGORY_ORDER, resolveCategory, CategoryBadge, NewsFallback, type NewsCategory } from './news'
+import { Avatar, RemoteNewsImage } from './remote-image'
 
 type AdminTab = 'news' | 'admins'
 
@@ -165,7 +165,7 @@ export default function AdminDashboard({
     <div className="backdrop-blur-[5.95px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[16px] shadow-[2px_2px_8px_0px_rgba(0,0,0,0.1)] flex flex-col h-full overflow-hidden">
 
       {/* ── EN-TÊTE ── */}
-      <div className="flex items-center justify-between px-[24px] py-[16px] border-b border-[rgba(255,255,255,0.08)] shrink-0">
+      <div className="flex items-center justify-between px-[24px] py-[16px] shrink-0">
         {/* Titre de panneau + sous-titre contextuel (le pseudo est déjà dans la barre de nav) */}
         <div className="flex flex-col gap-[2px]">
           <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px] leading-none">Administration</p>
@@ -302,12 +302,7 @@ export default function AdminDashboard({
                     />
                     {form.imageUrl && (
                       <div className="size-[36px] rounded-[8px] overflow-hidden shrink-0 border border-[rgba(255,255,255,0.12)]">
-                        <img
-                          src={form.imageUrl}
-                          alt=""
-                          className="size-full object-cover"
-                          onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                        />
+                        <RemoteNewsImage src={form.imageUrl} className="size-full object-cover" fallback={null} />
                       </div>
                     )}
                   </div>
@@ -372,11 +367,7 @@ export default function AdminDashboard({
                   >
                     {/* Miniature */}
                     <div className="relative size-[48px] rounded-[8px] overflow-hidden shrink-0 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)]">
-                      {item.imageUrl ? (
-                        <img src={item.imageUrl} alt="" className="size-full object-cover" />
-                      ) : (
-                        <NewsFallback category={cat.key} />
-                      )}
+                      <RemoteNewsImage src={item.imageUrl} className="size-full object-cover" fallback={<NewsFallback category={cat.key} />} />
                     </div>
 
                     {/* Info */}
@@ -488,12 +479,7 @@ export default function AdminDashboard({
                     className="flex items-center gap-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[8px] p-[8px] group hover:bg-[rgba(255,255,255,0.06)] hover:border-[rgba(255,255,255,0.12)] transition-colors"
                   >
                     <div className="size-[48px] rounded-[8px] overflow-hidden shrink-0">
-                      <img
-                        src={`https://mc-heads.net/avatar/${encodeURIComponent(name)}/64`}
-                        alt=""
-                        className="size-full object-cover"
-                        onError={e => { (e.currentTarget as HTMLImageElement).src = playerImage }}
-                      />
+                      <Avatar name={name} className="size-full object-cover" />
                     </div>
                     <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px] flex-1">
                       {name}

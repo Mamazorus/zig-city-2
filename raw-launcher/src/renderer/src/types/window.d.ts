@@ -50,10 +50,10 @@ declare global {
       getSession: () => Promise<{ logged: boolean; username?: string; uuid?: string }>
       login: () => Promise<{ success: boolean; username?: string; uuid?: string; error?: string }>
       logout: () => Promise<{ success: boolean }>
-      getSkinInfo: () => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; name?: string; uuid?: string; error?: string; expired?: boolean; loggedOut?: boolean }>
+      getSkinInfo: () => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; skinDataUrl?: string | null; name?: string; uuid?: string; error?: string; expired?: boolean; loggedOut?: boolean }>
       pickSkinFile: () => Promise<{ canceled: boolean; path?: string; name?: string; dataUrl?: string; width?: number; height?: number; error?: string }>
-      uploadSkin: (payload: { variant: 'classic' | 'slim'; path: string }) => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; error?: string; expired?: boolean; loggedOut?: boolean }>
-      resetSkin: () => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; error?: string; expired?: boolean; loggedOut?: boolean }>
+      uploadSkin: (payload: { variant: 'classic' | 'slim'; path?: string; dataUrl?: string }) => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; error?: string; expired?: boolean; loggedOut?: boolean }>
+      resetSkin: () => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; skinDataUrl?: string | null; error?: string; expired?: boolean; loggedOut?: boolean }>
       checkModpack: () => Promise<{ total: number; missingMods: number; needsNeoForge: boolean }>
       installModpack: () => Promise<{ success: boolean; error?: string }>
       launch: () => Promise<{ success: boolean; error?: string }>
@@ -72,6 +72,7 @@ declare global {
       onUpdateStatus: (cb: (data: UpdateStatusData) => void) => void
 
       getPlayersSeen: () => Promise<string[]>
+      fetchImage: (url: string) => Promise<string | null>
 
       getFirebaseStatus: () => Promise<{ configured: boolean }>
       checkAdmin: () => Promise<{ isAdmin: boolean }>

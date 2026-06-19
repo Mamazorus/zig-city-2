@@ -1,7 +1,7 @@
 {
   "name": "raw-launcher",
-  "version": "0.1.3-beta",
-  "description": "Launcher Minecraft custom Raw Studio",
+  "version": "0.1.4-beta",
+  "description": "Launcher Minecraft custom Zig City 2",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -34,7 +34,7 @@
   },
   "build": {
     "appId": "com.rawstudio.launcher",
-    "productName": "Raw Launcher",
+    "productName": "Zig City 2",
     "files": [
       "out/**",
       "modpack.json",

@@ -869,6 +869,76 @@ ipcMain.handle("get-server-status", async () => {
 ipcMain.handle("get-players-seen", () => {
 	return Object.keys(loadPlayersSeen());
 });
+var imageCache = /* @__PURE__ */ new Map();
+var imageInflight = /* @__PURE__ */ new Map();
+var IMAGE_CACHE_MAX = 250;
+function fetchImageDataUrl(url, redirects = 0) {
+	if (redirects > 5) return Promise.reject(/* @__PURE__ */ new Error("Trop de redirections"));
+	return new Promise((resolve, reject) => {
+		let urlObj;
+		try {
+			urlObj = new URL(url);
+		} catch {
+			return reject(/* @__PURE__ */ new Error("URL invalide"));
+		}
+		const req = (urlObj.protocol === "https:" ? https : http).get({
+			hostname: urlObj.hostname,
+			port: urlObj.port || void 0,
+			path: urlObj.pathname + urlObj.search,
+			headers: {
+				"User-Agent": "Mozilla/5.0",
+				"Accept": "image/*"
+			}
+		}, (res) => {
+			if ([
+				301,
+				302,
+				303,
+				307,
+				308
+			].includes(res.statusCode) && res.headers.location) {
+				res.resume();
+				return fetchImageDataUrl(new URL(res.headers.location, urlObj).toString(), redirects + 1).then(resolve, reject);
+			}
+			if (res.statusCode !== 200) {
+				res.resume();
+				return reject(/* @__PURE__ */ new Error(`HTTP ${res.statusCode}`));
+			}
+			const ct = (res.headers["content-type"] || "image/png").split(";")[0].trim();
+			if (!ct.startsWith("image/")) {
+				res.resume();
+				return reject(/* @__PURE__ */ new Error(`Type inattendu : ${ct}`));
+			}
+			const chunks = [];
+			let size = 0;
+			res.on("data", (d) => {
+				size += d.length;
+				if (size > 8 * 1024 * 1024) {
+					req.destroy();
+					reject(/* @__PURE__ */ new Error("Image trop volumineuse"));
+				} else chunks.push(d);
+			});
+			res.on("end", () => resolve(`data:${ct};base64,${Buffer.concat(chunks).toString("base64")}`));
+		});
+		req.on("error", reject);
+		req.setTimeout(1e4, () => {
+			req.destroy();
+			reject(/* @__PURE__ */ new Error("Timeout"));
+		});
+	});
+}
+ipcMain.handle("fetch-image", (_e, url) => {
+	if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return null;
+	if (imageCache.has(url)) return imageCache.get(url);
+	if (imageInflight.has(url)) return imageInflight.get(url);
+	const p = fetchImageDataUrl(url).then((dataUrl) => {
+		if (imageCache.size >= IMAGE_CACHE_MAX) imageCache.delete(imageCache.keys().next().value);
+		imageCache.set(url, dataUrl);
+		return dataUrl;
+	}).catch(() => null).finally(() => imageInflight.delete(url));
+	imageInflight.set(url, p);
+	return p;
+});
 ipcMain.handle("window-minimize", () => win?.minimize());
 ipcMain.handle("window-maximize", () => win?.isMaximized() ? win.unmaximize() : win.maximize());
 ipcMain.handle("window-close", () => win?.close());
@@ -1182,6 +1252,31 @@ function activeSkin(profileJson) {
 	const skins = profileJson?.skins || [];
 	return skins.find((s) => s.state === "ACTIVE") || skins[0] || null;
 }
+function fetchSkinDataUrl(skinUrl) {
+	if (!skinUrl) return Promise.resolve(null);
+	return new Promise((resolve) => {
+		try {
+			const urlObj = new URL(skinUrl);
+			const req = https.get({
+				hostname: urlObj.hostname,
+				path: urlObj.pathname + urlObj.search,
+				headers: { "User-Agent": "Mozilla/5.0" }
+			}, (res) => {
+				if (res.statusCode !== 200) {
+					res.resume();
+					return resolve(null);
+				}
+				const chunks = [];
+				res.on("data", (c) => chunks.push(c));
+				res.on("end", () => resolve(`data:image/png;base64,${Buffer.concat(chunks).toString("base64")}`));
+			});
+			req.on("error", () => resolve(null));
+			req.setTimeout(1e4, () => req.destroy());
+		} catch {
+			resolve(null);
+		}
+	});
+}
 ipcMain.handle("get-skin-info", async () => {
 	if (!currentToken?.access_token) return {
 		success: false,
@@ -1204,6 +1299,7 @@ ipcMain.handle("get-skin-info", async () => {
 			success: true,
 			variant: normalizeVariant(skin?.variant),
 			skinUrl: skin?.url || null,
+			skinDataUrl: await fetchSkinDataUrl(skin?.url),
 			name: res.json.name,
 			uuid: res.json.id
 		};
@@ -1251,7 +1347,7 @@ ipcMain.handle("pick-skin-file", async () => {
 		};
 	}
 });
-ipcMain.handle("upload-skin", async (_, { variant, path: filePath } = {}) => {
+ipcMain.handle("upload-skin", async (_, { variant, path: filePath, dataUrl } = {}) => {
 	if (!currentToken?.access_token) return {
 		success: false,
 		error: "Non connecté",
@@ -1259,7 +1355,15 @@ ipcMain.handle("upload-skin", async (_, { variant, path: filePath } = {}) => {
 	};
 	const v = normalizeVariant(variant);
 	let buf;
-	try {
+	if (dataUrl) try {
+		buf = Buffer.from(String(dataUrl).split(",")[1] || "", "base64");
+	} catch {
+		return {
+			success: false,
+			error: "Image du skin invalide."
+		};
+	}
+	else try {
 		buf = fs.readFileSync(filePath);
 	} catch {
 		return {
@@ -1322,7 +1426,8 @@ ipcMain.handle("reset-skin", async () => {
 		return {
 			success: true,
 			variant: normalizeVariant(skin?.variant),
-			skinUrl: skin?.url || null
+			skinUrl: skin?.url || null,
+			skinDataUrl: await fetchSkinDataUrl(skin?.url)
 		};
 	} catch (e) {
 		return {
