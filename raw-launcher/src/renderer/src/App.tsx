@@ -620,11 +620,11 @@ export default function App() {
               {/* Menu profil */}
               {profileMenuOpen && username && (
                 <div
-                  className="absolute right-0 top-[calc(100%+8px)] z-50 backdrop-blur-[5.95px] bg-[rgba(14,11,22,0.92)] border border-[rgba(255,255,255,0.1)] rounded-[12px] shadow-[2px_4px_24px_0px_rgba(0,0,0,0.55)] overflow-clip"
+                  className="absolute right-0 top-[calc(100%+8px)] z-50 backdrop-blur-[24px] bg-[rgba(255,255,255,0.08)] border border-[rgba(255,255,255,0.16)] rounded-[12px] shadow-[2px_4px_24px_0px_rgba(0,0,0,0.5)] overflow-clip"
                   style={{ minWidth: 216, WebkitAppRegion: 'no-drag' } as React.CSSProperties}
                 >
                   {/* En-tête profil */}
-                  <div className="flex items-center gap-[10px] px-[14px] py-[12px] border-b border-[rgba(255,255,255,0.08)]">
+                  <div className="flex items-center gap-[10px] px-[14px] py-[12px] border-b border-[rgba(255,255,255,0.14)]">
                     <div className="size-[32px] relative rounded shrink-0">
                       <img
                         alt=""
@@ -642,7 +642,7 @@ export default function App() {
                   {/* Statuts */}
                   <div className="px-[8px] py-[8px] flex flex-col gap-[2px]">
                     <button
-                      className={`flex items-center gap-[10px] w-full px-[10px] py-[8px] rounded-[8px] text-left transition-colors ${playerStatus === 'online' ? 'bg-[rgba(255,255,255,0.08)]' : 'hover:bg-[rgba(255,255,255,0.05)]'}`}
+                      className={`flex items-center gap-[10px] w-full px-[10px] py-[8px] rounded-[8px] text-left transition-colors ${playerStatus === 'online' ? 'bg-[rgba(255,255,255,0.16)]' : 'hover:bg-[rgba(255,255,255,0.09)]'}`}
                       onClick={() => setPlayerStatus('online')}
                     >
                       <div className={greenDot} />
@@ -654,7 +654,7 @@ export default function App() {
                       )}
                     </button>
                     <button
-                      className={`flex items-center gap-[10px] w-full px-[10px] py-[8px] rounded-[8px] text-left transition-colors ${playerStatus === 'dnd' ? 'bg-[rgba(255,255,255,0.08)]' : 'hover:bg-[rgba(255,255,255,0.05)]'}`}
+                      className={`flex items-center gap-[10px] w-full px-[10px] py-[8px] rounded-[8px] text-left transition-colors ${playerStatus === 'dnd' ? 'bg-[rgba(255,255,255,0.16)]' : 'hover:bg-[rgba(255,255,255,0.09)]'}`}
                       onClick={() => setPlayerStatus('dnd')}
                     >
                       <div className={redDot} />
@@ -668,12 +668,12 @@ export default function App() {
                   </div>
 
                   {/* Séparation */}
-                  <div className="mx-[8px] border-t border-[rgba(255,255,255,0.08)]" />
+                  <div className="mx-[8px] border-t border-[rgba(255,255,255,0.14)]" />
 
                   {/* Actions */}
                   <div className="px-[8px] py-[8px] flex flex-col gap-[2px]">
                     <button
-                      className="flex items-center gap-[10px] w-full px-[10px] py-[8px] rounded-[8px] text-left hover:bg-[rgba(255,255,255,0.05)] transition-colors"
+                      className="flex items-center gap-[10px] w-full px-[10px] py-[8px] rounded-[8px] text-left hover:bg-[rgba(255,255,255,0.09)] transition-colors"
                       onClick={openSkinModal}
                     >
                       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -1189,25 +1189,24 @@ export default function App() {
         return (
           <div
             className={`absolute inset-0 z-50 flex items-center justify-center ${newsClosing ? 'modal-backdrop-exit' : 'modal-backdrop-enter'}`}
-            style={{ background: 'rgba(14,11,22,0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' } as React.CSSProperties}
+            style={{ background: 'rgba(8,8,12,0.55)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' } as React.CSSProperties}
             onClick={closeNews}
           >
             <div
-              className={`news-modal relative flex flex-col rounded-[16px] overflow-hidden border border-[rgba(255,255,255,0.1)] ${newsClosing ? 'modal-card-exit' : 'modal-card-enter'}`}
+              className={`news-modal relative flex flex-col rounded-[16px] overflow-hidden border border-[rgba(255,255,255,0.16)] ${newsClosing ? 'modal-card-exit' : 'modal-card-enter'}`}
               style={{
                 width: 680,
                 maxHeight: '82vh',
-                background: 'rgba(14,11,22,0.88)',
-                backdropFilter: 'blur(24px)',
-                WebkitBackdropFilter: 'blur(24px)',
-                ['--cat' as string]: modalCat.rgb,
-                boxShadow: `0 30px 90px rgba(0,0,0,0.55), 0 0 60px rgba(${modalCat.rgb},0.10)`,
+                background: 'rgba(255,255,255,0.08)',
+                backdropFilter: 'blur(28px) saturate(1.4)',
+                WebkitBackdropFilter: 'blur(28px) saturate(1.4)',
+                boxShadow: '0 30px 90px rgba(0,0,0,0.5)',
               } as React.CSSProperties}
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Bouton retour — toujours visible */}
+              {/* Bouton retour — sur la bannière, fond neutre pour lisibilité */}
               <button
-                className="absolute top-[16px] left-[16px] z-20 flex items-center gap-[8px] backdrop-blur-[8px] bg-[rgba(14,11,22,0.55)] border border-[rgba(255,255,255,0.14)] px-[14px] py-[8px] rounded-full hover:bg-[rgba(255,255,255,0.12)] active:scale-[0.97] transition-all"
+                className="absolute top-[16px] left-[16px] z-20 flex items-center gap-[8px] backdrop-blur-[8px] bg-[rgba(0,0,0,0.42)] border border-[rgba(255,255,255,0.18)] px-[14px] py-[8px] rounded-full hover:bg-[rgba(0,0,0,0.55)] active:scale-[0.97] transition-all"
                 onClick={closeNews}
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -1216,41 +1215,27 @@ export default function App() {
                 <span className="font-ui font-semibold text-[13px] text-white tracking-[-0.4px]">Retour</span>
               </button>
 
-              {/* Bannière — image nette si présente, sinon aplat sobre cohérent avec la carte.
-                  Voile bas opaque pour un raccord stable, indépendant du visuel. */}
-              {modalImg ? (
-                <div className="relative shrink-0 overflow-hidden" style={{ height: 230 }}>
+              {/* Bannière — image nette (ou aplat sobre), séparée du contenu par un hairline */}
+              <div className="relative shrink-0 overflow-hidden" style={{ height: modalImg ? 200 : 150 }}>
+                {modalImg ? (
                   <img
                     alt=""
                     className="absolute inset-0 max-w-none object-cover size-full"
                     src={modalImg}
                     onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
                   />
-                  <div
-                    className="absolute inset-x-0 bottom-0 pointer-events-none"
-                    style={{ height: '60%', background: 'linear-gradient(to top, rgba(14,11,22,1) 0%, rgba(14,11,22,0.4) 55%, transparent 100%)' }}
-                  />
-                </div>
-              ) : (
-                <div className="relative shrink-0 overflow-hidden" style={{ height: 168 }}>
+                ) : (
                   <NewsFallback category={modalCat.key} />
-                  <div
-                    className="absolute inset-x-0 bottom-0 pointer-events-none"
-                    style={{ height: '60%', background: 'linear-gradient(to top, rgba(14,11,22,1) 0%, rgba(14,11,22,0.4) 55%, transparent 100%)' }}
-                  />
-                </div>
-              )}
+                )}
+              </div>
 
-              {/* Contenu — remonte sur la zone assombrie de la bannière */}
-              <div
-                className="flex flex-col overflow-y-auto"
-                style={{ padding: '0 30px 30px', marginTop: -32 }}
-              >
+              {/* Contenu — sur le verre clair, séparé de la bannière */}
+              <div className="flex flex-col overflow-y-auto border-t border-[rgba(255,255,255,0.1)]" style={{ padding: '24px 30px 30px' }}>
                 {/* En-tête éditorial : catégorie + méta */}
-                <div className="relative z-10 flex items-center gap-[12px] mb-[14px]">
+                <div className="flex items-center gap-[12px] mb-[14px]">
                   <CategoryBadge category={modalCat.key} size="md" />
-                  <div className="h-px flex-1 bg-[rgba(255,255,255,0.1)]" />
-                  <p className="font-ui text-[12px] text-white/40 tracking-[-0.3px] whitespace-nowrap select-text">
+                  <div className="h-px flex-1 bg-[rgba(255,255,255,0.12)]" />
+                  <p className="font-ui text-[12px] text-white/45 tracking-[-0.3px] whitespace-nowrap select-text">
                     {selectedNews.date}{selectedNews.author ? ` · ${selectedNews.author}` : ''}
                   </p>
                 </div>
@@ -1265,7 +1250,7 @@ export default function App() {
                 />
 
                 {/* Corps */}
-                <p className="font-ui text-[15px] text-white/72 leading-[1.78] tracking-[-0.2px] whitespace-pre-line break-words select-text">{selectedNews.body}</p>
+                <p className="font-ui text-[15px] text-white/80 leading-[1.78] tracking-[-0.2px] whitespace-pre-line break-words select-text">{selectedNews.body}</p>
               </div>
             </div>
           </div>
@@ -1278,17 +1263,17 @@ export default function App() {
         return (
           <div
             className={`absolute inset-0 z-50 flex items-center justify-center ${skinModalClosing ? 'modal-backdrop-exit' : 'modal-backdrop-enter'}`}
-            style={{ background: 'rgba(14,11,22,0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' } as React.CSSProperties}
+            style={{ background: 'rgba(8,8,12,0.55)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' } as React.CSSProperties}
             onClick={closeSkinModal}
           >
             <div
-              className={`relative flex flex-col rounded-[16px] overflow-hidden border border-[rgba(255,255,255,0.1)] ${skinModalClosing ? 'modal-card-exit' : 'modal-card-enter'}`}
+              className={`relative flex flex-col rounded-[16px] overflow-hidden border border-[rgba(255,255,255,0.16)] ${skinModalClosing ? 'modal-card-exit' : 'modal-card-enter'}`}
               style={{
                 width: 620,
-                background: 'rgba(14,11,22,0.9)',
-                backdropFilter: 'blur(24px)',
-                WebkitBackdropFilter: 'blur(24px)',
-                boxShadow: '0 30px 90px rgba(0,0,0,0.55), 0 0 60px rgba(0,255,225,0.10)',
+                background: 'rgba(255,255,255,0.08)',
+                backdropFilter: 'blur(28px) saturate(1.4)',
+                WebkitBackdropFilter: 'blur(28px) saturate(1.4)',
+                boxShadow: '0 30px 90px rgba(0,0,0,0.5)',
               } as React.CSSProperties}
               onClick={(e) => e.stopPropagation()}
             >
@@ -1316,7 +1301,7 @@ export default function App() {
                 {/* Aperçu personnage */}
                 <div
                   className="relative shrink-0 flex items-end justify-center rounded-[12px] overflow-hidden border border-[rgba(255,255,255,0.08)]"
-                  style={{ width: 220, height: 300, background: 'radial-gradient(ellipse 80% 60% at 50% 30%, rgba(0,255,225,0.10) 0%, rgba(14,11,22,0.2) 70%)' }}
+                  style={{ width: 220, height: 300, background: 'radial-gradient(ellipse 80% 60% at 50% 30%, rgba(0,255,225,0.10) 0%, rgba(0,0,0,0.22) 70%)' }}
                 >
                   {skinInfoLoading && !previewSrc ? (
                     <div className="absolute inset-0 flex items-center justify-center">

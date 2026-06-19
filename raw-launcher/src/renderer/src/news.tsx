@@ -83,7 +83,7 @@ export function CategoryBadge({
 export function NewsFallback({ category }: { category: NewsCategory }) {
   const meta = NEWS_CATEGORIES[category] ?? NEWS_CATEGORIES.info
   return (
-    <div className="absolute inset-0 flex items-center justify-center" style={{ background: '#14101e' }}>
+    <div className="absolute inset-0 flex items-center justify-center" style={{ background: '#16161b' }}>
       {/* Lueur monochrome très discrète, ancrée sur la teinte de la catégorie */}
       <div
         className="absolute inset-0"

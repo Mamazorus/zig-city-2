@@ -312,7 +312,7 @@ button:hover .icon-adm-trash-lid {
 /* Aplat sombre par défaut : si une image échoue à charger, on voit un fond
    propre (identique au NewsFallback) plutôt qu'un rectangle translucide. */
 .news-card-media {
-  background-color: #14101e;
+  background-color: #16161b;
 }
 
 .news-card-img {

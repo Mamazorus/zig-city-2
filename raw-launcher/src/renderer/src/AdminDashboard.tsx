@@ -406,34 +406,34 @@ export default function AdminDashboard({
                         </button>
                       </div>
                     ) : (
-                      <div className="flex gap-[5px] opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <div className="flex gap-[6px] opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                         <button
-                          className="flex items-center justify-center size-[30px] rounded-[8px] text-white/40 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors"
+                          className="flex items-center justify-center size-[38px] rounded-[10px] text-white/40 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors"
                           onClick={() => openEdit(item)}
                           title="Modifier"
                         >
-                          <svg className="icon-adm-edit" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                          <svg className="icon-adm-edit" width="16" height="16" viewBox="0 0 12 12" fill="currentColor">
                             <path d="M7.9 1.35 10.65 4.1 9.25 5.5 6.5 2.75 7.9 1.35Z" />
                             <path d="M5.85 3.4 8.6 6.15 3.35 11.4l-2.85.6.6-2.85L5.85 3.4Z" />
                           </svg>
                         </button>
                         <button
-                          className="flex items-center justify-center size-[30px] rounded-[8px] text-white/40 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors"
+                          className="flex items-center justify-center size-[38px] rounded-[10px] text-white/40 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors"
                           onClick={() => duplicateNews(item)}
                           disabled={saving}
                           title="Dupliquer"
                         >
-                          <svg className="icon-adm-dup" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-                            <rect className="icon-adm-dup-back" x="3.6" y="0.6" width="7.8" height="7.8" rx="1.7" />
-                            <rect x="0.6" y="3.6" width="7.8" height="7.8" rx="1.7" fill="currentColor" stroke="#0e0b16" strokeWidth="1.1" />
+                          <svg className="icon-adm-dup" width="16" height="16" viewBox="0 0 12 12" fill="none">
+                            <rect className="icon-adm-dup-back" x="3.7" y="0.7" width="7.6" height="7.6" rx="1.6" stroke="currentColor" strokeWidth="1.2" />
+                            <rect x="0.7" y="3.7" width="7.6" height="7.6" rx="1.6" fill="currentColor" />
                           </svg>
                         </button>
                         <button
-                          className="flex items-center justify-center size-[30px] rounded-[8px] text-white/40 hover:text-[rgba(255,120,120,0.95)] hover:bg-[rgba(255,60,60,0.12)] transition-colors"
+                          className="flex items-center justify-center size-[38px] rounded-[10px] text-white/40 hover:text-[rgba(255,120,120,0.95)] hover:bg-[rgba(255,60,60,0.12)] transition-colors"
                           onClick={() => setConfirmDeleteId(item.id)}
                           title="Supprimer"
                         >
-                          <svg className="icon-adm-trash" width="11" height="12" viewBox="0 0 11 12" fill="currentColor">
+                          <svg className="icon-adm-trash" width="15" height="16" viewBox="0 0 11 12" fill="currentColor">
                             <rect className="icon-adm-trash-lid" x="0.6" y="2.1" width="9.8" height="2.2" rx="1.1" />
                             <rect x="3.6" y="0.4" width="3.8" height="2.1" rx="1" />
                             <path d="M1.55 4.6h7.9l-.62 6.1a1.05 1.05 0 0 1-1.04.9H3.21a1.05 1.05 0 0 1-1.04-.9L1.55 4.6Z" />
