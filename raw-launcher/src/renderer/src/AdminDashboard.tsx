@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import playerImage from './assets/player.png'
+import { NEWS_CATEGORIES, CATEGORY_ORDER, resolveCategory, CategoryBadge, NewsFallback, type NewsCategory } from './news'
 
 type AdminTab = 'news' | 'admins'
 
@@ -10,6 +11,7 @@ interface NewsItem {
   body: string
   imageUrl?: string
   author?: string
+  category?: NewsCategory
   createdAt?: number
 }
 
@@ -18,14 +20,15 @@ interface NewsForm {
   date: string
   body: string
   imageUrl: string
+  category: NewsCategory
 }
 
-const EMPTY_FORM: NewsForm = { title: '', date: '', body: '', imageUrl: '' }
+const EMPTY_FORM: NewsForm = { title: '', date: '', body: '', imageUrl: '', category: 'info' }
 
 const inputCls =
   'w-full bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[8px] px-[12px] py-[8px] text-white font-ui text-[14px] tracking-[-0.3px] focus:outline-none focus:border-[rgba(0,255,225,0.4)] placeholder:text-white/25 transition-colors'
 
-const labelCls = 'font-ui text-[12px] text-white/45 tracking-[-0.2px] mb-[5px]'
+const labelCls = 'font-ui text-[12px] text-white/40 tracking-[-0.3px] mb-[6px]'
 
 function todayLabel() {
   const d = new Date()
@@ -77,7 +80,13 @@ export default function AdminDashboard({
   }
 
   const openEdit = (item: NewsItem) => {
-    setForm({ title: item.title, date: item.date, body: item.body, imageUrl: item.imageUrl ?? '' })
+    setForm({
+      title: item.title,
+      date: item.date,
+      body: item.body,
+      imageUrl: item.imageUrl ?? '',
+      category: item.category ?? resolveCategory(item).key,
+    })
     setEditingId(item.id)
     setShowForm(true)
     setConfirmDeleteId(null)
@@ -92,7 +101,7 @@ export default function AdminDashboard({
     if (!form.title.trim() || !form.body.trim()) return
     setSaving(true)
     try {
-      const payload = { title: form.title.trim(), date: form.date.trim(), body: form.body.trim(), imageUrl: form.imageUrl.trim(), author: username }
+      const payload = { title: form.title.trim(), date: form.date.trim(), body: form.body.trim(), imageUrl: form.imageUrl.trim(), category: form.category, author: username }
       if (editingId) {
         await window.launcher.updateNews({ id: editingId, ...payload })
       } else {
@@ -122,6 +131,7 @@ export default function AdminDashboard({
         date: item.date,
         body: item.body,
         imageUrl: item.imageUrl ?? '',
+        category: item.category ?? resolveCategory(item).key,
         author: username,
       }
       await window.launcher.createNews(payload)
@@ -155,24 +165,23 @@ export default function AdminDashboard({
     <div className="backdrop-blur-[5.95px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[16px] shadow-[2px_2px_8px_0px_rgba(0,0,0,0.1)] flex flex-col h-full overflow-hidden">
 
       {/* ── EN-TÊTE ── */}
-      <div className="flex items-center justify-between px-[24px] py-[18px] border-b border-[rgba(255,255,255,0.08)] shrink-0">
-        <div className="flex items-center gap-[12px]">
-          <svg width="18" height="16" viewBox="0 0 18 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M9 1.5L11.5 7.5L17 5L15 13H3L1 5L6.5 7.5L9 1.5Z" fill="rgba(255,255,255,0.6)"/>
-            <rect x="2" y="14" width="14" height="1.5" rx="0.75" fill="rgba(255,255,255,0.6)"/>
-          </svg>
-          <p className="font-ui font-bold text-[18px] text-white tracking-[-0.7px]">Administration</p>
-          <span className="font-ui text-[12px] text-white/30 tracking-[-0.3px]">{username}</span>
+      <div className="flex items-center justify-between px-[24px] py-[16px] border-b border-[rgba(255,255,255,0.08)] shrink-0">
+        {/* Titre de panneau + sous-titre contextuel (le pseudo est déjà dans la barre de nav) */}
+        <div className="flex flex-col gap-[2px]">
+          <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px] leading-none">Administration</p>
+          <p className="font-ui text-[12px] text-white/40 tracking-[-0.3px]">
+            {tab === 'news' ? 'Gestion du contenu' : 'Gestion des accès'}
+          </p>
         </div>
 
-        <div className="flex gap-[3px] bg-[rgba(0,0,0,0.25)] rounded-[10px] p-[3px]">
+        <div className="flex gap-[3px] bg-[rgba(0,0,0,0.22)] border border-[rgba(255,255,255,0.06)] rounded-full p-[3px]">
           {(['news', 'admins'] as AdminTab[]).map(t => (
             <button
               key={t}
-              className={`font-ui text-[13px] px-[14px] py-[6px] rounded-[7px] transition-colors ${
+              className={`font-ui text-[12px] tracking-[-0.3px] px-[14px] h-[28px] rounded-full transition-colors ${
                 tab === t
                   ? 'bg-[rgba(255,255,255,0.12)] text-white font-semibold'
-                  : 'text-white/35 hover:text-white/55'
+                  : 'text-white/40 hover:text-white/70'
               }`}
               onClick={() => { setTab(t); setShowForm(false); setConfirmDeleteId(null); setConfirmRemoveAdmin(null) }}
             >
@@ -190,17 +199,18 @@ export default function AdminDashboard({
           <div className="flex flex-col gap-[14px]">
 
             {/* Barre supérieure */}
-            <div className="flex items-center justify-between shrink-0">
-              <p className="font-ui text-[12px] text-white/35">
+            <div className="flex items-center justify-between h-[34px] shrink-0">
+              <p className="font-ui text-[12px] text-white/40 tracking-[-0.3px]">
                 {news.length} actualité{news.length !== 1 ? 's' : ''} publiée{news.length !== 1 ? 's' : ''}
               </p>
               {!showForm && (
                 <button
-                  className="flex items-center gap-[7px] bg-[rgba(0,255,225,0.08)] border border-[rgba(0,255,225,0.22)] text-[rgba(0,255,225,0.8)] font-ui font-semibold text-[13px] px-[14px] py-[7px] rounded-[9px] hover:bg-[rgba(0,255,225,0.14)] active:scale-[0.97] transition-all"
+                  className="flex items-center gap-[7px] bg-white text-[#0e0b16] font-ui font-bold text-[14px] tracking-[-0.3px] px-[16px] h-[34px] rounded-[12px] hover:bg-white/90 active:scale-[0.98] transition-all"
                   onClick={openCreate}
                 >
-                  <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                    <path d="M5.5 1v9M1 5.5h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+                  <svg className="icon-adm-plus" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                    <rect x="4.85" y="1" width="2.3" height="10" rx="1.15" />
+                    <rect x="1" y="4.85" width="10" height="2.3" rx="1.15" />
                   </svg>
                   Nouvelle actualité
                 </button>
@@ -209,24 +219,25 @@ export default function AdminDashboard({
 
             {/* ── Formulaire ── */}
             {showForm && (
-              <div className="bg-[rgba(0,0,0,0.28)] border border-[rgba(255,255,255,0.1)] rounded-[12px] p-[18px] flex flex-col gap-[12px]">
+              <div className="bg-[rgba(0,0,0,0.28)] border border-[rgba(0,255,225,0.18)] rounded-[12px] p-[18px] flex flex-col gap-[14px]">
                 <div className="flex items-center justify-between">
-                  <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.5px]">
+                  <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px]">
                     {editingId ? 'Modifier l\'actualité' : 'Nouvelle actualité'}
                   </p>
                   <button
-                    className="text-white/35 hover:text-white/65 transition-colors p-[4px]"
+                    className="text-white/40 hover:text-white/70 transition-colors p-[4px]"
                     onClick={cancelForm}
                   >
-                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                      <path d="M1 1l11 11M12 1L1 12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                    <svg className="icon-adm-close" width="13" height="13" viewBox="0 0 13 13" fill="currentColor">
+                      <rect x="5.3" y="-1" width="2.4" height="15" rx="1.2" transform="rotate(45 6.5 6.5)" />
+                      <rect x="5.3" y="-1" width="2.4" height="15" rx="1.2" transform="rotate(-45 6.5 6.5)" />
                     </svg>
                   </button>
                 </div>
 
                 <div className="grid grid-cols-2 gap-[12px]">
                   <div className="flex flex-col">
-                    <p className={labelCls}>Titre *</p>
+                    <p className={labelCls}>Titre <span className="text-white/30">*</span></p>
                     <input
                       className={inputCls}
                       placeholder="Ex : Mise à jour 2.0"
@@ -246,6 +257,41 @@ export default function AdminDashboard({
                 </div>
 
                 <div className="flex flex-col">
+                  <p className={labelCls}>Catégorie</p>
+                  <div className="flex flex-wrap gap-[7px]">
+                    {CATEGORY_ORDER.map(key => {
+                      const meta = NEWS_CATEGORIES[key]
+                      const active = form.category === key
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, category: key }))}
+                          className="flex items-center gap-[7px] rounded-[8px] px-[11px] py-[6px] font-ui text-[12px] font-medium tracking-[-0.2px] transition-all active:scale-[0.97]"
+                          style={{
+                            color: active ? `rgb(${meta.rgb})` : 'rgba(255,255,255,0.5)',
+                            background: active ? `rgba(${meta.rgb},0.12)` : 'rgba(255,255,255,0.04)',
+                            border: `1px solid ${active ? `rgba(${meta.rgb},0.4)` : 'rgba(255,255,255,0.09)'}`,
+                          }}
+                        >
+                          <span
+                            className="rounded-full shrink-0"
+                            style={{
+                              width: 6,
+                              height: 6,
+                              background: `rgb(${meta.rgb})`,
+                              boxShadow: active ? `0 0 7px rgba(${meta.rgb},0.8)` : 'none',
+                              opacity: active ? 1 : 0.55,
+                            }}
+                          />
+                          {meta.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
                   <p className={labelCls}>URL de l'image (optionnel — imgur, discord CDN…)</p>
                   <div className="flex gap-[8px] items-center">
                     <input
@@ -255,7 +301,7 @@ export default function AdminDashboard({
                       onChange={e => setForm(f => ({ ...f, imageUrl: e.target.value }))}
                     />
                     {form.imageUrl && (
-                      <div className="size-[36px] rounded-[6px] overflow-hidden shrink-0 border border-[rgba(255,255,255,0.12)]">
+                      <div className="size-[36px] rounded-[8px] overflow-hidden shrink-0 border border-[rgba(255,255,255,0.12)]">
                         <img
                           src={form.imageUrl}
                           alt=""
@@ -268,7 +314,7 @@ export default function AdminDashboard({
                 </div>
 
                 <div className="flex flex-col">
-                  <p className={labelCls}>Contenu *</p>
+                  <p className={labelCls}>Contenu <span className="text-white/30">*</span></p>
                   <textarea
                     className={`${inputCls} resize-none`}
                     rows={4}
@@ -278,19 +324,19 @@ export default function AdminDashboard({
                   />
                 </div>
 
-                <div className="flex gap-[8px] justify-end pt-[2px]">
+                <div className="flex gap-[8px] justify-end pt-[4px]">
                   <button
-                    className="font-ui text-[13px] text-white/35 px-[14px] py-[7px] rounded-[8px] hover:bg-[rgba(255,255,255,0.05)] transition-colors"
+                    className="font-ui text-[14px] text-white/40 px-[14px] h-[34px] rounded-[12px] hover:bg-[rgba(255,255,255,0.05)] hover:text-white/70 transition-colors"
                     onClick={cancelForm}
                   >
                     Annuler
                   </button>
                   <button
-                    className="font-ui font-semibold text-[13px] bg-[rgba(0,255,225,0.1)] border border-[rgba(0,255,225,0.25)] text-[rgba(0,255,225,0.85)] px-[16px] py-[7px] rounded-[8px] hover:bg-[rgba(0,255,225,0.17)] disabled:opacity-35 active:scale-[0.97] transition-all"
+                    className="font-ui font-bold text-[14px] tracking-[-0.3px] bg-white text-[#0e0b16] px-[18px] h-[34px] rounded-[12px] hover:bg-white/90 disabled:opacity-30 disabled:hover:bg-white active:scale-[0.98] transition-all"
                     disabled={saving || !form.title.trim() || !form.body.trim()}
                     onClick={saveNews}
                   >
-                    {saving ? 'Enregistrement…' : editingId ? 'Enregistrer' : 'Publier →'}
+                    {saving ? 'Enregistrement…' : editingId ? 'Enregistrer' : 'Publier'}
                   </button>
                 </div>
               </div>
@@ -300,40 +346,46 @@ export default function AdminDashboard({
             {loading ? (
               <p className="font-ui text-[13px] text-white/25 text-center py-[40px]">Chargement…</p>
             ) : news.length === 0 ? (
-              <div className="flex flex-col items-center gap-[10px] py-[56px]">
-                <p className="font-ui text-[15px] text-white/20">Aucune actualité publiée</p>
+              <div className="flex flex-col items-center gap-[14px] py-[60px]">
+                <p className="font-ui text-[14px] text-white/30 tracking-[-0.3px]">Aucune actualité publiée pour le moment</p>
                 {!showForm && (
                   <button
-                    className="font-ui text-[13px] text-[rgba(0,255,225,0.5)] hover:text-[rgba(0,255,225,0.8)] transition-colors"
+                    className="flex items-center gap-[7px] bg-white text-[#0e0b16] font-ui font-bold text-[14px] tracking-[-0.3px] px-[16px] h-[34px] rounded-[12px] hover:bg-white/90 active:scale-[0.98] transition-all"
                     onClick={openCreate}
                   >
-                    Créer la première →
+                    <svg className="icon-adm-plus" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                      <rect x="4.85" y="1" width="2.3" height="10" rx="1.15" />
+                      <rect x="1" y="4.85" width="10" height="2.3" rx="1.15" />
+                    </svg>
+                    Créer la première actualité
                   </button>
                 )}
               </div>
             ) : (
-              <div className="flex flex-col gap-[7px]">
-                {news.map(item => (
+              <div className="flex flex-col gap-[8px]">
+                {news.map(item => {
+                  const cat = resolveCategory(item)
+                  return (
                   <div
                     key={item.id}
-                    className="flex items-center gap-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[10px] p-[11px] group hover:border-[rgba(255,255,255,0.13)] transition-colors"
+                    className="flex items-center gap-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[8px] p-[8px] group hover:bg-[rgba(255,255,255,0.06)] hover:border-[rgba(255,255,255,0.12)] transition-colors"
                   >
                     {/* Miniature */}
-                    <div className="size-[50px] rounded-[6px] overflow-hidden shrink-0 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)]">
+                    <div className="relative size-[48px] rounded-[8px] overflow-hidden shrink-0 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)]">
                       {item.imageUrl ? (
                         <img src={item.imageUrl} alt="" className="size-full object-cover" />
                       ) : (
-                        <div
-                          className="size-full"
-                          style={{ background: 'linear-gradient(135deg, rgba(0,255,225,0.18), rgba(255,200,0,0.18))' }}
-                        />
+                        <NewsFallback category={cat.key} />
                       )}
                     </div>
 
                     {/* Info */}
                     <div className="flex-1 min-w-0">
-                      <p className="font-ui font-semibold text-[13px] text-white tracking-[-0.4px] truncate">{item.title}</p>
-                      <p className="font-ui text-[11px] text-white/30 mt-[2px]">{item.date}{item.author ? ` · ${item.author}` : ''}</p>
+                      <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px] truncate">{item.title}</p>
+                      <div className="flex items-center gap-[8px] mt-[4px]">
+                        <CategoryBadge category={cat.key} />
+                        <p className="font-ui text-[12px] text-white/40 truncate tracking-[-0.3px]">{item.date}{item.author ? ` · ${item.author}` : ''}</p>
+                      </div>
                     </div>
 
                     {/* Actions */}
@@ -341,13 +393,13 @@ export default function AdminDashboard({
                       <div className="flex gap-[6px] items-center shrink-0">
                         <span className="font-ui text-[12px] text-white/40">Supprimer ?</span>
                         <button
-                          className="font-ui text-[12px] text-[rgba(255,100,100,0.8)] hover:text-[rgba(255,120,120,1)] px-[10px] py-[5px] rounded-[6px] bg-[rgba(255,60,60,0.1)] border border-[rgba(255,60,60,0.2)] transition-colors"
+                          className="font-ui text-[12px] text-[rgba(255,100,100,0.8)] hover:text-[rgba(255,120,120,1)] px-[10px] py-[5px] rounded-[8px] bg-[rgba(255,60,60,0.1)] border border-[rgba(255,60,60,0.2)] transition-colors"
                           onClick={() => doDeleteNews(item.id)}
                         >
                           Confirmer
                         </button>
                         <button
-                          className="font-ui text-[12px] text-white/30 hover:text-white/60 px-[10px] py-[5px] rounded-[6px] hover:bg-[rgba(255,255,255,0.05)] transition-colors"
+                          className="font-ui text-[12px] text-white/30 hover:text-white/60 px-[10px] py-[5px] rounded-[8px] hover:bg-[rgba(255,255,255,0.05)] transition-colors"
                           onClick={() => setConfirmDeleteId(null)}
                         >
                           Annuler
@@ -356,37 +408,42 @@ export default function AdminDashboard({
                     ) : (
                       <div className="flex gap-[5px] opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                         <button
-                          className="flex items-center justify-center size-[30px] rounded-[6px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.09)] text-white/50 hover:text-white hover:bg-[rgba(255,255,255,0.1)] transition-colors"
+                          className="flex items-center justify-center size-[30px] rounded-[8px] text-white/40 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors"
                           onClick={() => openEdit(item)}
                           title="Modifier"
                         >
-                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                            <path d="M8.5 1.5L10.5 3.5L3.5 10.5H1.5V8.5L8.5 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                          <svg className="icon-adm-edit" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                            <path d="M7.9 1.35 10.65 4.1 9.25 5.5 6.5 2.75 7.9 1.35Z" />
+                            <path d="M5.85 3.4 8.6 6.15 3.35 11.4l-2.85.6.6-2.85L5.85 3.4Z" />
                           </svg>
                         </button>
                         <button
-                          className="flex items-center justify-center size-[30px] rounded-[6px] bg-[rgba(0,255,225,0.05)] border border-[rgba(0,255,225,0.14)] text-[rgba(0,255,225,0.65)] hover:text-[rgba(0,255,225,0.95)] hover:bg-[rgba(0,255,225,0.14)] transition-colors"
+                          className="flex items-center justify-center size-[30px] rounded-[8px] text-white/40 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors"
                           onClick={() => duplicateNews(item)}
                           disabled={saving}
                           title="Dupliquer"
                         >
-                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                            <path d="M4 1H1.5C1.22 1 1 1.22 1 1.5v8C1 9.78 1.22 10 1.5 10h6c.28 0 .5-.22.5-.5V7M8 1H4.5C4.22 1 4 1.22 4 1.5V7h3.5C7.78 7 8 6.78 8 6.5V1.5C8 1.22 7.78 1 7.5 1Z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                          <svg className="icon-adm-dup" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                            <rect className="icon-adm-dup-back" x="3.6" y="0.6" width="7.8" height="7.8" rx="1.7" />
+                            <rect x="0.6" y="3.6" width="7.8" height="7.8" rx="1.7" fill="currentColor" stroke="#0e0b16" strokeWidth="1.1" />
                           </svg>
                         </button>
                         <button
-                          className="flex items-center justify-center size-[30px] rounded-[6px] bg-[rgba(255,60,60,0.07)] border border-[rgba(255,60,60,0.14)] text-[rgba(255,100,100,0.65)] hover:text-[rgba(255,120,120,0.95)] hover:bg-[rgba(255,60,60,0.14)] transition-colors"
+                          className="flex items-center justify-center size-[30px] rounded-[8px] text-white/40 hover:text-[rgba(255,120,120,0.95)] hover:bg-[rgba(255,60,60,0.12)] transition-colors"
                           onClick={() => setConfirmDeleteId(item.id)}
                           title="Supprimer"
                         >
-                          <svg width="11" height="12" viewBox="0 0 11 12" fill="none">
-                            <path d="M.5 3h10M3.5 3V2h4V3M4 5.5v4M7 5.5v4M1.5 3l.7 6.5a1 1 0 001 .9h4.6a1 1 0 001-.9L9.5 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                          <svg className="icon-adm-trash" width="11" height="12" viewBox="0 0 11 12" fill="currentColor">
+                            <rect className="icon-adm-trash-lid" x="0.6" y="2.1" width="9.8" height="2.2" rx="1.1" />
+                            <rect x="3.6" y="0.4" width="3.8" height="2.1" rx="1" />
+                            <path d="M1.55 4.6h7.9l-.62 6.1a1.05 1.05 0 0 1-1.04.9H3.21a1.05 1.05 0 0 1-1.04-.9L1.55 4.6Z" />
                           </svg>
                         </button>
                       </div>
                     )}
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -396,8 +453,8 @@ export default function AdminDashboard({
         {tab === 'admins' && (
           <div className="flex flex-col gap-[14px]">
 
-            <div className="flex items-center justify-between shrink-0">
-              <p className="font-ui text-[12px] text-white/35">
+            <div className="flex items-center h-[34px] shrink-0">
+              <p className="font-ui text-[12px] text-white/40 tracking-[-0.3px]">
                 {admins.length} administrateur{admins.length !== 1 ? 's' : ''}
               </p>
             </div>
@@ -412,7 +469,7 @@ export default function AdminDashboard({
                 onKeyDown={e => e.key === 'Enter' && doAddAdmin()}
               />
               <button
-                className="shrink-0 font-ui font-semibold text-[13px] bg-[rgba(0,255,225,0.08)] border border-[rgba(0,255,225,0.22)] text-[rgba(0,255,225,0.8)] px-[16px] py-[8px] rounded-[9px] hover:bg-[rgba(0,255,225,0.14)] disabled:opacity-35 active:scale-[0.97] transition-all"
+                className="shrink-0 font-ui font-bold text-[14px] tracking-[-0.3px] bg-white text-[#0e0b16] px-[16px] h-[38px] rounded-[12px] hover:bg-white/90 disabled:opacity-30 disabled:hover:bg-white active:scale-[0.98] transition-all"
                 disabled={!newAdminName.trim() || addingAdmin}
                 onClick={doAddAdmin}
               >
@@ -424,13 +481,13 @@ export default function AdminDashboard({
             {loading ? (
               <p className="font-ui text-[13px] text-white/25 text-center py-[40px]">Chargement…</p>
             ) : (
-              <div className="flex flex-col gap-[7px]">
+              <div className="flex flex-col gap-[8px]">
                 {admins.map(name => (
                   <div
                     key={name}
-                    className="flex items-center gap-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[10px] p-[11px]"
+                    className="flex items-center gap-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[8px] p-[8px] group hover:bg-[rgba(255,255,255,0.06)] hover:border-[rgba(255,255,255,0.12)] transition-colors"
                   >
-                    <div className="size-[40px] rounded-[6px] overflow-hidden shrink-0">
+                    <div className="size-[48px] rounded-[8px] overflow-hidden shrink-0">
                       <img
                         src={`https://mc-heads.net/avatar/${encodeURIComponent(name)}/64`}
                         alt=""
@@ -438,43 +495,47 @@ export default function AdminDashboard({
                         onError={e => { (e.currentTarget as HTMLImageElement).src = playerImage }}
                       />
                     </div>
-                    <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.4px] flex-1">
+                    <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px] flex-1">
                       {name}
                       {name === username && (
-                        <span className="font-normal text-[11px] text-white/30 ml-[8px]">(vous)</span>
+                        <span className="font-normal text-[12px] text-white/30 ml-[8px]">(vous)</span>
                       )}
                     </p>
 
                     {name === username ? (
-                      <span className="font-ui text-[11px] text-white/20 px-[10px] py-[5px] rounded-[6px] border border-[rgba(255,255,255,0.06)]">
+                      <span className="font-ui text-[12px] text-white/30 px-[10px] h-[26px] inline-flex items-center rounded-full border border-[rgba(255,255,255,0.08)]">
                         Protégé
                       </span>
                     ) : confirmRemoveAdmin === name ? (
                       <div className="flex gap-[6px] items-center shrink-0">
                         <span className="font-ui text-[12px] text-white/40">Retirer ?</span>
                         <button
-                          className="font-ui text-[12px] text-[rgba(255,100,100,0.8)] px-[10px] py-[5px] rounded-[6px] bg-[rgba(255,60,60,0.1)] border border-[rgba(255,60,60,0.2)] hover:text-[rgba(255,120,120,1)] transition-colors"
+                          className="font-ui text-[12px] text-[rgba(255,100,100,0.8)] px-[10px] py-[5px] rounded-[8px] bg-[rgba(255,60,60,0.1)] border border-[rgba(255,60,60,0.2)] hover:text-[rgba(255,120,120,1)] transition-colors"
                           onClick={() => doRemoveAdmin(name)}
                         >
                           Confirmer
                         </button>
                         <button
-                          className="font-ui text-[12px] text-white/30 hover:text-white/60 px-[10px] py-[5px] rounded-[6px] hover:bg-[rgba(255,255,255,0.05)] transition-colors"
+                          className="font-ui text-[12px] text-white/30 hover:text-white/60 px-[10px] py-[5px] rounded-[8px] hover:bg-[rgba(255,255,255,0.05)] transition-colors"
                           onClick={() => setConfirmRemoveAdmin(null)}
                         >
                           Annuler
                         </button>
                       </div>
                     ) : (
-                      <button
-                        className="flex items-center justify-center size-[30px] rounded-[6px] bg-[rgba(255,60,60,0.07)] border border-[rgba(255,60,60,0.14)] text-[rgba(255,100,100,0.65)] hover:text-[rgba(255,120,120,0.95)] hover:bg-[rgba(255,60,60,0.14)] transition-colors"
-                        onClick={() => setConfirmRemoveAdmin(name)}
-                        title="Retirer les droits admin"
-                      >
-                        <svg width="11" height="12" viewBox="0 0 11 12" fill="none">
-                          <path d="M.5 3h10M3.5 3V2h4V3M4 5.5v4M7 5.5v4M1.5 3l.7 6.5a1 1 0 001 .9h4.6a1 1 0 001-.9L9.5 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                        </svg>
-                      </button>
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <button
+                          className="flex items-center justify-center size-[30px] rounded-[8px] text-white/40 hover:text-[rgba(255,120,120,0.95)] hover:bg-[rgba(255,60,60,0.12)] transition-colors"
+                          onClick={() => setConfirmRemoveAdmin(name)}
+                          title="Retirer les droits admin"
+                        >
+                          <svg className="icon-adm-trash" width="11" height="12" viewBox="0 0 11 12" fill="currentColor">
+                            <rect className="icon-adm-trash-lid" x="0.6" y="2.1" width="9.8" height="2.2" rx="1.1" />
+                            <rect x="3.6" y="0.4" width="3.8" height="2.1" rx="1" />
+                            <path d="M1.55 4.6h7.9l-.62 6.1a1.05 1.05 0 0 1-1.04.9H3.21a1.05 1.05 0 0 1-1.04-.9L1.55 4.6Z" />
+                          </svg>
+                        </button>
+                      </div>
                     )}
                   </div>
                 ))}

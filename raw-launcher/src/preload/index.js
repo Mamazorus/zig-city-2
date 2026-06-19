@@ -5,6 +5,11 @@ contextBridge.exposeInMainWorld('launcher', {
   login:          () => ipcRenderer.invoke('login'),
   logout:         () => ipcRenderer.invoke('logout'),
 
+  getSkinInfo:    () => ipcRenderer.invoke('get-skin-info'),
+  pickSkinFile:   () => ipcRenderer.invoke('pick-skin-file'),
+  uploadSkin:     (payload) => ipcRenderer.invoke('upload-skin', payload),
+  resetSkin:      () => ipcRenderer.invoke('reset-skin'),
+
   checkModpack:   () => ipcRenderer.invoke('check-modpack'),
   installModpack: () => ipcRenderer.invoke('install-modpack'),
 
@@ -20,6 +25,10 @@ contextBridge.exposeInMainWorld('launcher', {
   windowMaximize: () => ipcRenderer.invoke('window-maximize'),
   windowClose:    () => ipcRenderer.invoke('window-close'),
   openExternal:   (url) => ipcRenderer.invoke('open-external', url),
+
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  quitAndInstall:  () => ipcRenderer.invoke('quit-and-install'),
+  onUpdateStatus:  (cb) => ipcRenderer.on('update-status', (_, d) => cb(d)),
 
   getPlayersSeen:    () => ipcRenderer.invoke('get-players-seen'),
 

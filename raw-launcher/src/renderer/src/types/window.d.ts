@@ -22,6 +22,16 @@ interface GameClosedData {
   log?: string
 }
 
+interface UpdateStatusData {
+  status: 'checking' | 'available' | 'not-available' | 'progress' | 'downloaded' | 'error' | 'disabled'
+  version?: string
+  percent?: number
+  transferred?: number
+  total?: number
+  bytesPerSecond?: number
+  message?: string
+}
+
 interface NewsItem {
   id: string
   title: string
@@ -40,6 +50,10 @@ declare global {
       getSession: () => Promise<{ logged: boolean; username?: string; uuid?: string }>
       login: () => Promise<{ success: boolean; username?: string; uuid?: string; error?: string }>
       logout: () => Promise<{ success: boolean }>
+      getSkinInfo: () => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; name?: string; uuid?: string; error?: string; expired?: boolean; loggedOut?: boolean }>
+      pickSkinFile: () => Promise<{ canceled: boolean; path?: string; name?: string; dataUrl?: string; width?: number; height?: number; error?: string }>
+      uploadSkin: (payload: { variant: 'classic' | 'slim'; path: string }) => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; error?: string; expired?: boolean; loggedOut?: boolean }>
+      resetSkin: () => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; error?: string; expired?: boolean; loggedOut?: boolean }>
       checkModpack: () => Promise<{ total: number; missingMods: number; needsNeoForge: boolean }>
       installModpack: () => Promise<{ success: boolean; error?: string }>
       launch: () => Promise<{ success: boolean; error?: string }>
@@ -52,6 +66,10 @@ declare global {
       windowMaximize: () => void
       windowClose: () => void
       openExternal: (url: string) => void
+
+      checkForUpdates: () => Promise<{ status: 'disabled' | 'checking' | 'error'; message?: string }>
+      quitAndInstall: () => void
+      onUpdateStatus: (cb: (data: UpdateStatusData) => void) => void
 
       getPlayersSeen: () => Promise<string[]>
 

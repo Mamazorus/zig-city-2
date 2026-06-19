@@ -1,0 +1,53 @@
+name: Release
+
+# Déclenché quand tu pousses un tag de version, ex :
+#   npm version 0.1.2-beta        (dans raw-launcher/ : bump package.json + crée le tag v0.1.2-beta)
+#   git push --follow-tags        (pousse le commit + le tag → lance ce workflow)
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Nécessaire pour que le workflow puisse créer/publier la Release GitHub.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: raw-launcher   # le projet Electron est dans ce sous-dossier
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22          # vite 8 / electron-vite 5 exigent Node >= 20.19 — 22 LTS est sûr
+          cache: npm
+          cache-dependency-path: raw-launcher/package-lock.json
+
+      # Garde-fou : le tag poussé doit correspondre à la version de package.json,
+      # sinon electron-builder publierait la release sur un autre tag (désync).
+      - name: Vérifie tag == version
+        shell: bash
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          TAG=${GITHUB_REF_NAME#v}
+          echo "package.json=$PKG  |  tag=$TAG"
+          if [ "$PKG" != "$TAG" ]; then
+            echo "::error::Le tag '$TAG' ne correspond pas à la version package.json '$PKG'. Lance 'npm version' DANS raw-launcher/ avant de pousser le tag."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build & publish (Windows)
+        run: npm run publish:win
+        env:
+          # Le GITHUB_TOKEN intégré au workflow a déjà les droits contents:write :
+          # pas besoin de Personal Access Token. electron-builder le lit via GH_TOKEN.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -186,6 +186,84 @@ body {
   animation: icon-crown-lift 0.38s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+/* ── MICRO-ANIMATIONS ICÔNES ADMINISTRATION ──
+   Icônes pleines (currentColor) cohérentes avec la sidebar d'App.tsx.
+   Animations spring déclenchées au survol du BOUTON parent.
+   transform-box: fill-box pour les sous-éléments animés (cf. .sp-finance-bar). */
+
+/* Plus (CTA "Nouvelle actualité") — quart de tour, esprit icon-plus-spin */
+@keyframes adm-plus-spin {
+  0%   { transform: rotate(0deg)  scale(1); }
+  50%  { transform: rotate(95deg) scale(1.05); }
+  100% { transform: rotate(90deg) scale(1); }
+}
+button:hover .icon-adm-plus {
+  animation: adm-plus-spin 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Croix de fermeture — quart de tour + léger rebond */
+@keyframes adm-close-turn {
+  0%   { transform: rotate(0deg)  scale(1); }
+  55%  { transform: rotate(95deg) scale(1.06); }
+  100% { transform: rotate(90deg) scale(1); }
+}
+button:hover .icon-adm-close {
+  animation: adm-close-turn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Crayon (modifier) — "écrit" : wiggle autour de la pointe (bas-gauche) */
+.icon-adm-edit {
+  transform-box: fill-box;
+  transform-origin: bottom left;
+}
+@keyframes adm-edit-write {
+  0%   { transform: translate(0,0)          rotate(0deg)  scale(1); }
+  30%  { transform: translate(0.5px,-0.7px) rotate(-7deg) scale(1.05); }
+  55%  { transform: translate(-0.3px,0.3px) rotate(3deg)  scale(0.99); }
+  78%  { transform: translate(0.2px,-0.2px) rotate(-1.5deg); }
+  100% { transform: translate(0,0)          rotate(0deg)  scale(1); }
+}
+button:hover .icon-adm-edit {
+  animation: adm-edit-write 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Dupliquer — la carte arrière se détache en diagonale */
+.icon-adm-dup-back { transform-box: fill-box; }
+@keyframes adm-dup-pop {
+  0%   { transform: translate(0, 0); }
+  45%  { transform: translate(1.3px, -1.3px); }
+  100% { transform: translate(0, 0); }
+}
+button:hover .icon-adm-dup-back {
+  animation: adm-dup-pop 0.42s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Corbeille (supprimer / retirer admin) — le couvercle se soulève (charnière à gauche) */
+.icon-adm-trash-lid {
+  transform-box: fill-box;
+  transform-origin: left center;
+}
+@keyframes adm-trash-lid-lift {
+  0%   { transform: rotate(0deg)   translateY(0); }
+  40%  { transform: rotate(-24deg) translateY(-0.5px); }
+  70%  { transform: rotate(-14deg) translateY(-0.2px); }
+  100% { transform: rotate(0deg)   translateY(0); }
+}
+button:hover .icon-adm-trash-lid {
+  animation: adm-trash-lid-lift 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Respect de prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  .icon-adm-plus,
+  .icon-adm-close,
+  .icon-adm-edit,
+  .icon-adm-dup-back,
+  .icon-adm-trash-lid {
+    animation: none !important;
+  }
+}
+
 /* ── SCROLLBAR CUSTOM ── */
 ::-webkit-scrollbar {
   width: 4px;
@@ -210,27 +288,40 @@ body {
   background: rgba(0, 255, 225, 0.55);
 }
 
-/* ── NOUVEAUTÉS — hover thumbnail ── */
+/* ── NOUVEAUTÉS — carte éditoriale ── */
 .news-card {
   cursor: pointer;
+  transition:
+    transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+    border-color 0.25s ease,
+    box-shadow 0.3s ease,
+    background-color 0.25s ease;
+  will-change: transform;
+}
+
+.news-card:hover {
+  transform: translateY(-3px);
+  background-color: rgba(255, 255, 255, 0.05);
+  border-color: rgba(var(--cat), 0.4);
+  box-shadow:
+    0 10px 26px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(var(--cat), 0.12),
+    0 0 22px rgba(var(--cat), 0.10);
+}
+
+/* Aplat sombre par défaut : si une image échoue à charger, on voit un fond
+   propre (identique au NewsFallback) plutôt qu'un rectangle translucide. */
+.news-card-media {
+  background-color: #14101e;
 }
 
 .news-card-img {
-  transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
   will-change: transform;
 }
 
 .news-card:hover .news-card-img {
-  transform: scale(1.07);
-}
-
-.news-card-overlay {
-  opacity: 0;
-  transition: opacity 0.22s ease;
-}
-
-.news-card:hover .news-card-overlay {
-  opacity: 1;
+  transform: scale(1.06);
 }
 
 
@@ -431,4 +522,16 @@ body {
 .launch-bar-indeterminate {
   width: 35%;
   animation: launch-bar-sweep 1.6s ease-in-out infinite;
+}
+
+/* ── APERÇU SKIN — léger flottement ── */
+@keyframes skin-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}
+
+.skin-preview-float {
+  animation: skin-float 3.6s ease-in-out infinite;
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.45));
+  will-change: transform;
 }

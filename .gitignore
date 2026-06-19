@@ -6,6 +6,10 @@ raw-launcher/node_modules/
 raw-launcher/out/
 raw-launcher/dist/
 
+# Installeurs / artefacts d'app (publiés via les Releases GitHub, jamais dans le repo)
+*.exe
+*.exe.blockmap
+
 # Logs & cache
 *.log
 .npm

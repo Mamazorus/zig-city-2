@@ -54,7 +54,8 @@
     "publish": {
       "provider": "github",
       "owner": "Mamazorus",
-      "repo": "zig-city-2"
+      "repo": "zig-city-2",
+      "releaseType": "prerelease"
     }
   }
 }

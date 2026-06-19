@@ -1,6 +1,7 @@
 ﻿import { useState, useEffect, useCallback, useRef } from 'react'
 import packData from '../../../modpack.json'
 import AdminDashboard from './AdminDashboard'
+import { resolveCategory, CategoryBadge, NewsFallback, type NewsCategory } from './news'
 
 import bgImage from './assets/bg.png'
 import playerImage from './assets/player.png'
@@ -20,7 +21,7 @@ import shop3Image from './assets/shop-3.png'
 import shop4Image from './assets/shop-4.png'
 import currencyImage from './assets/currency.png'
 
-type Phase = 'loading' | 'logged-out' | 'checking' | 'installing' | 'ready' | 'launching' | 'error'
+type Phase = 'loading' | 'updating' | 'logged-out' | 'checking' | 'installing' | 'ready' | 'launching' | 'error'
 type MainTab = 'home' | 'stats' | 'mods' | 'admin'
 
 interface DynamicNewsItem {
@@ -30,10 +31,11 @@ interface DynamicNewsItem {
   body: string
   imageUrl?: string
   author?: string
+  category?: NewsCategory
   createdAt?: number
 }
 
-type AnyNewsItem = { img?: string; title: string; date: string; body: string; imageUrl?: string; id?: string; author?: string }
+type AnyNewsItem = { img?: string; title: string; date: string; body: string; imageUrl?: string; id?: string; author?: string; category?: NewsCategory }
 
 interface ProgressState {
   percent: number
@@ -56,6 +58,96 @@ function formatSince(ts: number): string {
   return `${Math.floor(min / 60)}h`
 }
 
+// Compose une vue de face du personnage à partir d'un PNG de skin Minecraft
+// (64×64 ou 64×32 legacy). Rendu pixel-perfect, sans dépendance externe.
+function drawSkinBody(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  variant: 'classic' | 'slim',
+  canvasW: number,
+  canvasH: number
+) {
+  const legacy = img.height === 32
+  const armW = variant === 'slim' ? 3 : 4
+
+  // Disposition virtuelle (1 unité = 1 pixel de skin), vue de face :
+  //   largeur 16 = bras(4) + corps(8) + bras(4)   |   hauteur 32 = tête(8) + corps(12) + jambes(12)
+  const VW = 16
+  const VH = 32
+  const scale = Math.max(1, Math.floor(Math.min(canvasW / VW, canvasH / VH)))
+  const offsetX = Math.round((canvasW - VW * scale) / 2)
+  const offsetY = Math.round((canvasH - VH * scale) / 2)
+
+  ctx.imageSmoothingEnabled = false
+
+  // Dessine une région source (sx,sy,sw,sh) à la position virtuelle (dx,dy)
+  const part = (sx: number, sy: number, sw: number, sh: number, dx: number, dy: number) => {
+    ctx.drawImage(img, sx, sy, sw, sh, offsetX + dx * scale, offsetY + dy * scale, sw * scale, sh * scale)
+  }
+
+  // ── Couche de base ──
+  part(8, 8, 8, 8, 4, 0)               // tête
+  part(20, 20, 8, 12, 4, 8)            // corps
+  part(44, 20, armW, 12, 4 - armW, 8)  // bras droit (côté gauche de l'écran)
+  part(4, 20, 4, 12, 4, 20)            // jambe droite
+  if (legacy) {
+    part(44, 20, armW, 12, 12, 8)      // bras gauche (réutilise la région droite)
+    part(4, 20, 4, 12, 8, 20)          // jambe gauche
+  } else {
+    part(36, 52, armW, 12, 12, 8)      // bras gauche
+    part(20, 52, 4, 12, 8, 20)         // jambe gauche
+  }
+
+  // ── Couche overlay (2e couche) ──
+  part(40, 8, 8, 8, 4, 0)              // chapeau / cheveux
+  if (!legacy) {
+    part(20, 36, 8, 12, 4, 8)            // veste
+    part(44, 36, armW, 12, 4 - armW, 8)  // manche droite
+    part(52, 52, armW, 12, 12, 8)        // manche gauche
+    part(4, 36, 4, 12, 4, 20)            // surcouche jambe droite
+    part(4, 52, 4, 12, 8, 20)            // surcouche jambe gauche
+  }
+}
+
+function SkinPreview({
+  src,
+  variant,
+  width = 176
+}: {
+  src: string | null
+  variant: 'classic' | 'slim'
+  width?: number
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    if (!src) return
+    const img = new Image()
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      try { drawSkinBody(ctx, img, variant, canvas.width, canvas.height) } catch {}
+    }
+    // En cas d'échec de chargement (réseau/CORS), on laisse l'aperçu vide proprement
+    img.onerror = () => { ctx.clearRect(0, 0, canvas.width, canvas.height) }
+    img.src = src
+    return () => { img.onload = null; img.onerror = null }
+  }, [src, variant])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={width}
+      height={width * 2}
+      style={{ imageRendering: 'pixelated', width, height: width * 2 }}
+    />
+  )
+}
+
 const SHOP_ITEMS = [
   { from: shop1Image, fromQty: 'x16', toQty: 'x5',  alt: true },
   { from: shop2Image, fromQty: 'x4',  toQty: 'x8',  alt: false },
@@ -63,27 +155,31 @@ const SHOP_ITEMS = [
   { from: shop4Image, fromQty: 'x8',  toQty: 'x4',  alt: false },
 ]
 
-const NEWS_ITEMS = [
+const NEWS_ITEMS: AnyNewsItem[] = [
   {
     img: news1Image,
+    category: 'update',
     title: 'Mise à jour 1.3 — Nouvelles dimensions',
     date: '10 juin 2026',
     body: 'La mise à jour 1.3 est arrivée sur Zig City ! Deux nouvelles dimensions sont désormais accessibles via des portails craftables en fin de partie. Explorez la Dimension de Cristal et la Terre Corrompue, chacune avec ses propres boss, ressources rares et récompenses exclusives pour les plus courageux.',
   },
   {
     img: news2Image,
+    category: 'event',
     title: 'Événement — La Chasse au Dragon',
     date: '5 juin 2026',
     body: "Rejoins notre grand événement PvE de la semaine ! L'Ender Dragon revient dans une version renforcée avec plusieurs phases et des mécaniques inédites. Les 3 meilleurs contributeurs remporteront des items légendaires introuvables nulle part ailleurs sur le serveur.",
   },
   {
     img: news3Image,
+    category: 'shop',
     title: 'Shop — Nouvelles ressources rares',
     date: '1 juin 2026',
     body: "La boutique du serveur accueille cette semaine une sélection de ressources rares issues des nouvelles dimensions. Échangez vos Zigcoins contre du Cristal Brut, de l'Essence Corrompue et des blueprints de structures exclusives.",
   },
   {
     img: news4Image,
+    category: 'infra',
     title: 'Infrastructure — Migration terminée',
     date: '25 mai 2026',
     body: 'La migration vers nos nouveaux serveurs dédiés est un succès complet. Les TPS sont stabilisés à 20, la latence moyenne a été réduite de 40 % et les backups quotidiens sont désormais entièrement automatisés. Merci à tous pour votre patience pendant les fenêtres de maintenance.',
@@ -94,6 +190,9 @@ const pill = 'backdrop-blur-[5.95px] bg-[rgba(255,255,255,0.05)] border border-[
 const iconBtn = 'backdrop-blur-[5.95px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] flex items-center justify-center rounded-full shadow-[1px_1px_6px_0px_rgba(0,0,0,0.2)] size-[48px] shrink-0 transition-colors duration-150 hover:bg-[rgba(255,255,255,0.12)] active:bg-[rgba(255,255,255,0.2)]'
 const greenDot = 'bg-[rgba(0,255,9,0.36)] rounded-full shadow-[0px_0px_8.6px_0px_rgba(9,255,54,0.4)] size-[8px] shrink-0 dot-twinkle'
 const redDot = 'bg-[rgba(255,60,60,0.55)] rounded-full shadow-[0px_0px_8.6px_0px_rgba(255,60,60,0.45)] size-[8px] shrink-0'
+
+// Formatte des octets en Mo pour la progression de la mise à jour.
+const fmtMo = (bytes: number) => `${(bytes / 1048576).toFixed(1)} Mo`
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>('loading')
@@ -112,6 +211,20 @@ export default function App() {
   const [dynamicNews, setDynamicNews] = useState<DynamicNewsItem[]>([])
   const [heroHovered, setHeroHovered] = useState(false)
   const [playersSeen, setPlayersSeen] = useState<string[]>([])
+  const initRef = useRef(false) // garde anti double-exécution de l'init (React.StrictMode)
+
+  // ── Changer de skin ──
+  const [skinModalOpen, setSkinModalOpen] = useState(false)
+  const [skinModalClosing, setSkinModalClosing] = useState(false)
+  const [skinInfo, setSkinInfo] = useState<{ variant: 'classic' | 'slim'; skinUrl: string | null } | null>(null)
+  const [skinInfoLoading, setSkinInfoLoading] = useState(false)
+  const [selectedVariant, setSelectedVariant] = useState<'classic' | 'slim'>('classic')
+  const [pickedSkin, setPickedSkin] = useState<{ path: string; name: string; dataUrl: string } | null>(null)
+  const [skinBusy, setSkinBusy] = useState(false)
+  const [skinError, setSkinError] = useState<string | null>(null)
+  const [skinSuccess, setSkinSuccess] = useState(false)
+  const [skinVersion, setSkinVersion] = useState(0)
+  const skinRequestRef = useRef(false)   // garde anti double-soumission (apply/reset)
 
   const fetchNews = useCallback(async () => {
     const result = await window.launcher.getNews()
@@ -139,6 +252,11 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    // React.StrictMode exécute cet effet deux fois en dev : on ne s'abonne et on
+    // ne lance la recherche de MAJ qu'une seule fois (sinon double check / listeners).
+    if (initRef.current) return
+    initRef.current = true
+
     window.launcher.onInstallProgress((data) => {
       if (data.error) {
         setProgress(null)
@@ -177,6 +295,69 @@ export default function App() {
     })
 
     ;(async () => {
+      // ── PORTE DE MISE À JOUR (obligatoire au démarrage) ──
+      // On interroge GitHub AVANT tout le reste. Si une nouvelle version existe,
+      // elle se télécharge puis l'app redémarre seule sur la version à jour.
+      await new Promise<void>((resolve) => {
+        let settled = false
+        const proceed = () => { if (!settled) { settled = true; resolve() } }
+        // Filet de sécurité : tant que rien n'aboutit, on finit par libérer le joueur
+        // pour ne jamais l'enfermer sur l'overlay. Re-armé à chaque étape qui avance.
+        let timer = setTimeout(proceed, 20000)
+        const rearm = (ms: number) => { clearTimeout(timer); timer = setTimeout(proceed, ms) }
+
+        window.launcher.onUpdateStatus((u) => {
+          switch (u.status) {
+            case 'checking':
+              setPhase('updating')
+              setStatus('Recherche de mises à jour...')
+              setProgress(null)
+              break
+            case 'available':
+              setPhase('updating')
+              setStatus(`Mise à jour ${u.version ?? ''} disponible`)
+              setProgress({ percent: 0, label: '', detail: 'Téléchargement de la mise à jour...' })
+              rearm(180000) // téléchargement en cours : on ne libère pas prématurément
+              break
+            case 'progress':
+              setPhase('updating')
+              setProgress({
+                percent: Math.round(u.percent ?? 0),
+                label: u.bytesPerSecond ? `${fmtMo(u.bytesPerSecond)}/s` : '',
+                detail: u.total
+                  ? `Téléchargement — ${fmtMo(u.transferred ?? 0)} / ${fmtMo(u.total)}`
+                  : 'Téléchargement de la mise à jour...',
+              })
+              rearm(180000) // chaque progrès repousse le filet : pas de blocage tant que ça avance
+              break
+            case 'downloaded':
+              // Si le joueur a déjà été libéré (filet écoulé), ne PAS fermer l'app par
+              // surprise : la MAJ s'installera à la prochaine fermeture (autoInstallOnAppQuit).
+              if (settled) return
+              setPhase('updating')
+              setStatus('Mise à jour prête — redémarrage...')
+              setProgress({ percent: 100, label: '', detail: 'Installation et redémarrage...' })
+              setTimeout(() => window.launcher.quitAndInstall(), 900)
+              // Si l'installation ne ferme pas l'app (antivirus, fichier verrouillé...),
+              // on libère après 15 s pour laisser le joueur entrer malgré tout.
+              rearm(15000)
+              break
+            case 'not-available':
+            case 'error':
+              clearTimeout(timer)
+              proceed() // pas de MAJ (ou échec) → on continue le démarrage normal
+              break
+            default:
+              console.warn('[update] statut inattendu :', u.status)
+          }
+        })
+
+        window.launcher.checkForUpdates().then((res) => {
+          // En dev (non packagé) ou si l'appel échoue d'emblée : on ne bloque pas.
+          if (res?.status === 'disabled' || res?.status === 'error') { clearTimeout(timer); proceed() }
+        }).catch(() => { clearTimeout(timer); proceed() })
+      })
+
       const [session, seenPlayers] = await Promise.all([
         window.launcher.getSession(),
         window.launcher.getPlayersSeen(),
@@ -275,7 +456,99 @@ export default function App() {
     }, 250)
   }
 
-  const isBusy = ['loading', 'checking', 'installing', 'launching'].includes(phase)
+  const openSkinModal = async () => {
+    setProfileMenuOpen(false)
+    setSkinModalOpen(true)
+    setSkinModalClosing(false)
+    setPickedSkin(null)
+    setSkinError(null)
+    setSkinSuccess(false)
+    setSkinInfo(null)
+    setSkinInfoLoading(true)
+    const info = await window.launcher.getSkinInfo()
+    setSkinInfoLoading(false)
+    if (info.success) {
+      setSkinInfo({ variant: info.variant ?? 'classic', skinUrl: info.skinUrl ?? null })
+      setSelectedVariant(info.variant ?? 'classic')
+    } else {
+      setSkinError(
+        info.expired || info.loggedOut
+          ? 'Ta session Minecraft a expiré. Reconnecte-toi pour changer de skin.'
+          : (info.error ?? 'Impossible de charger ton skin actuel.')
+      )
+    }
+  }
+
+  const closeSkinModal = () => {
+    setSkinModalClosing(true)
+    setTimeout(() => {
+      setSkinModalOpen(false)
+      setSkinModalClosing(false)
+      setPickedSkin(null)   // libère le dataUrl base64
+      setSkinError(null)
+      setSkinSuccess(false)
+    }, 250)
+  }
+
+  const handlePickSkin = async () => {
+    setSkinError(null)
+    setSkinSuccess(false)
+    const res = await window.launcher.pickSkinFile()
+    if (res.canceled) return
+    if (res.error || !res.path || !res.dataUrl) {
+      setSkinError(res.error ?? 'Fichier invalide.')
+      return
+    }
+    setPickedSkin({ path: res.path, name: res.name ?? 'skin.png', dataUrl: res.dataUrl })
+  }
+
+  const sessionMessage = 'Ta session Minecraft a expiré. Reconnecte-toi pour changer de skin.'
+
+  const handleApplySkin = async () => {
+    if (!pickedSkin || skinRequestRef.current) return
+    skinRequestRef.current = true
+    setSkinBusy(true)
+    setSkinError(null)
+    setSkinSuccess(false)
+    try {
+      const res = await window.launcher.uploadSkin({ variant: selectedVariant, path: pickedSkin.path })
+      if (res.success) {
+        setSkinSuccess(true)
+        setSkinInfo({ variant: res.variant ?? selectedVariant, skinUrl: res.skinUrl ?? null })
+        setSkinVersion(v => v + 1)
+      } else {
+        setSkinError(res.expired || res.loggedOut ? sessionMessage : (res.error ?? 'Échec du changement de skin.'))
+      }
+    } finally {
+      skinRequestRef.current = false
+      setSkinBusy(false)
+    }
+  }
+
+  const handleResetSkin = async () => {
+    if (skinRequestRef.current) return
+    skinRequestRef.current = true
+    setSkinBusy(true)
+    setSkinError(null)
+    setSkinSuccess(false)
+    try {
+      const res = await window.launcher.resetSkin()
+      if (res.success) {
+        setPickedSkin(null)
+        setSkinInfo({ variant: res.variant ?? 'classic', skinUrl: res.skinUrl ?? null })
+        setSelectedVariant(res.variant ?? 'classic')
+        setSkinVersion(v => v + 1)
+        setSkinSuccess(true)
+      } else {
+        setSkinError(res.expired || res.loggedOut ? sessionMessage : (res.error ?? 'Échec de la réinitialisation.'))
+      }
+    } finally {
+      skinRequestRef.current = false
+      setSkinBusy(false)
+    }
+  }
+
+  const isBusy = ['loading', 'updating', 'checking', 'installing', 'launching'].includes(phase)
 
   const onlineLabel = serverStatus.loading ? '...' : `${serverStatus.online} en ligne`
 
@@ -334,7 +607,7 @@ export default function App() {
                   <img
                     alt=""
                     className="w-full h-full object-cover pointer-events-none"
-                    src={username ? `https://mc-heads.net/avatar/${encodeURIComponent(username)}/64` : playerImage}
+                    src={username ? `https://mc-heads.net/avatar/${encodeURIComponent(username)}/64${skinVersion ? `?v=${skinVersion}` : ''}` : playerImage}
                     onError={(e) => { (e.currentTarget as HTMLImageElement).src = playerImage }}
                   />
                 </div>
@@ -356,7 +629,7 @@ export default function App() {
                       <img
                         alt=""
                         className="absolute inset-0 max-w-none object-cover pointer-events-none rounded size-full"
-                        src={username ? `https://mc-heads.net/avatar/${encodeURIComponent(username)}/64` : playerImage}
+                        src={username ? `https://mc-heads.net/avatar/${encodeURIComponent(username)}/64${skinVersion ? `?v=${skinVersion}` : ''}` : playerImage}
                         onError={(e) => { (e.currentTarget as HTMLImageElement).src = playerImage }}
                       />
                     </div>
@@ -401,10 +674,7 @@ export default function App() {
                   <div className="px-[8px] py-[8px] flex flex-col gap-[2px]">
                     <button
                       className="flex items-center gap-[10px] w-full px-[10px] py-[8px] rounded-[8px] text-left hover:bg-[rgba(255,255,255,0.05)] transition-colors"
-                      onClick={() => {
-                        setProfileMenuOpen(false)
-                        ;(window.launcher as any).openExternal('https://www.minecraft.net/en-us/msaprofile/mygames/editprofile')
-                      }}
+                      onClick={openSkinModal}
                     >
                       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                         <circle cx="8" cy="5.5" r="2.5" stroke="rgba(255,255,255,0.55)" strokeWidth="1.3"/>
@@ -571,6 +841,30 @@ export default function App() {
               {/* État : chargement */}
               {(phase === 'loading' || phase === 'checking') && (
                 <p className="relative z-10 font-ui text-white/50 text-[18px]">Chargement...</p>
+              )}
+
+              {/* État : mise à jour du launcher */}
+              {phase === 'updating' && (
+                <>
+                  <p
+                    className="relative z-10 font-minecraft leading-[normal] whitespace-pre uppercase"
+                    style={{ fontSize: 48, color: '#ffffff', fontFamily: 'MinecraftBold, monospace' }}
+                  >
+                    {`mise à jour`}
+                  </p>
+                  <div className="relative z-10 flex flex-col items-center gap-[8px]" style={{ width: 600 }}>
+                    <p className="font-ui text-white/60 text-[13px] text-center truncate w-full">
+                      {progress?.detail ?? status}
+                      {progress?.label ? ` — ${progress.label}` : ''}
+                    </p>
+                    <div className="w-full h-[3px] bg-[rgba(255,255,255,0.1)] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[rgba(0,255,225,0.8)] rounded-full transition-[width] duration-300 ease-out"
+                        style={{ width: `${progress?.percent ?? 0}%` }}
+                      />
+                    </div>
+                  </div>
+                </>
               )}
 
               {/* État : non connecté */}
@@ -746,37 +1040,47 @@ export default function App() {
 
             {/* ── NOUVEAUTÉS ── */}
             <div className="backdrop-blur-[5.95px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] flex flex-col gap-[16px] items-start overflow-x-clip overflow-y-auto p-[16px] rounded-[16px] shadow-[2px_2px_8px_0px_rgba(0,0,0,0.1)] w-full flex-1 min-h-0">
-              <p className="font-ui font-bold text-[20px] text-white tracking-[-0.8px] whitespace-nowrap shrink-0">Nouveautées</p>
-              <div className="grid grid-cols-2 gap-[16px] w-full shrink-0">
-                {(dynamicNews.length > 0 ? dynamicNews as AnyNewsItem[] : NEWS_ITEMS as AnyNewsItem[]).map((item, i) => {
-                  const imgSrc = (item as any).img ?? (item as any).imageUrl
+              <div className="flex items-center gap-[12px] w-full shrink-0">
+                <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px] whitespace-nowrap">Nouveautés</p>
+                <div className="h-px flex-1 bg-[rgba(255,255,255,0.08)]" />
+              </div>
+              <div className="grid grid-cols-2 gap-[14px] w-full shrink-0">
+                {(dynamicNews.length > 0 ? dynamicNews as AnyNewsItem[] : NEWS_ITEMS).map((item, i) => {
+                  const imgSrc = item.img ?? item.imageUrl
+                  const cat = resolveCategory(item)
                   return (
-                    <div
-                      key={(item as any).id ?? i}
-                      className="news-card relative rounded-[8px] overflow-hidden cursor-pointer"
-                      style={{ height: 264 }}
+                    <article
+                      key={item.id ?? i}
+                      className="news-card group flex flex-col rounded-[12px] overflow-hidden cursor-pointer bg-[rgba(255,255,255,0.035)] border border-[rgba(255,255,255,0.08)]"
+                      style={{ ['--cat' as string]: cat.rgb }}
                       onClick={() => openNews(item)}
                     >
-                      {imgSrc ? (
-                        <img
-                          alt=""
-                          className="news-card-img absolute inset-0 max-w-none object-cover pointer-events-none size-full"
-                          src={imgSrc}
-                        />
-                      ) : (
-                        <div
-                          className="absolute inset-0"
-                          style={{ background: 'linear-gradient(135deg, rgba(0,255,225,0.15) 0%, rgba(255,200,0,0.15) 100%)' }}
-                        />
-                      )}
-                      <div
-                        className="news-card-overlay absolute inset-0 pointer-events-none flex flex-col justify-end p-[14px]"
-                        style={{ background: 'linear-gradient(to top, rgba(14,11,22,0.9) 0%, rgba(14,11,22,0.25) 55%, transparent 100%)' }}
-                      >
-                        <p className="font-ui font-semibold text-[13px] text-white leading-tight tracking-[-0.4px]">{item.title}</p>
-                        <p className="font-ui text-[11px] text-white/45 mt-[3px]">{item.date}</p>
+                      {/* Visuel */}
+                      <div className="news-card-media relative overflow-hidden shrink-0" style={{ height: 128 }}>
+                        {imgSrc ? (
+                          <img
+                            alt=""
+                            className="news-card-img absolute inset-0 max-w-none object-cover pointer-events-none size-full"
+                            src={imgSrc}
+                            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                          />
+                        ) : (
+                          <NewsFallback category={cat.key} />
+                        )}
                       </div>
-                    </div>
+                      {/* Contenu */}
+                      <div className="flex flex-col gap-[8px] p-[14px] flex-1 border-t border-[rgba(255,255,255,0.06)]">
+                        <CategoryBadge category={cat.key} />
+                        <p className="font-ui font-semibold text-[14px] text-white leading-[1.32] tracking-[-0.3px] line-clamp-2 break-words min-h-[37px]">{item.title}</p>
+                        <div className="flex items-center gap-[6px] text-white/40">
+                          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" className="shrink-0">
+                            <rect x="1.5" y="2.5" width="9" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.1" />
+                            <path d="M1.5 5h9M4 1.5v2M8 1.5v2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+                          </svg>
+                          <p className="font-ui text-[11px] tracking-[-0.2px] whitespace-nowrap">{item.date}</p>
+                        </div>
+                      </div>
+                    </article>
                   )
                 })}
               </div>
@@ -823,16 +1127,6 @@ export default function App() {
                   </p>
                 )}
               </div>
-
-              {/* Bouton déconnexion */}
-              {username && (phase === 'ready' || phase === 'error') && (
-                <button
-                  className="mt-auto font-ui text-[11px] text-white/20 hover:text-white/40 transition-colors"
-                  onClick={handleLogout}
-                >
-                  Déconnexion
-                </button>
-              )}
 
               {/* Indicateur occupation */}
               {isBusy && phase !== 'launching' && (
@@ -889,43 +1183,31 @@ export default function App() {
       </div>
 
       {/* ── MODALE NOUVEAUTÉ ── */}
-      {selectedNews !== null && (
-        <div
-          className={`absolute inset-0 z-50 flex items-center justify-center ${newsClosing ? 'modal-backdrop-exit' : 'modal-backdrop-enter'}`}
-          style={{ background: 'rgba(14,11,22,0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' } as React.CSSProperties}
-          onClick={closeNews}
-        >
+      {selectedNews !== null && (() => {
+        const modalImg = selectedNews.img ?? selectedNews.imageUrl
+        const modalCat = resolveCategory(selectedNews)
+        return (
           <div
-            className={`relative flex flex-col rounded-[8px] overflow-hidden shadow-[0px_0px_80px_rgba(0,255,225,0.12)] ${newsClosing ? 'modal-card-exit' : 'modal-card-enter'}`}
-            style={{
-              width: 680,
-              maxHeight: '78vh',
-              background: 'rgba(14,11,22,0.85)',
-              backdropFilter: 'blur(24px)',
-              WebkitBackdropFilter: 'blur(24px)',
-            } as React.CSSProperties}
-            onClick={(e) => e.stopPropagation()}
+            className={`absolute inset-0 z-50 flex items-center justify-center ${newsClosing ? 'modal-backdrop-exit' : 'modal-backdrop-enter'}`}
+            style={{ background: 'rgba(14,11,22,0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' } as React.CSSProperties}
+            onClick={closeNews}
           >
-            {/* Image */}
-            <div className="relative shrink-0 overflow-hidden" style={{ height: 320 }}>
-              {((selectedNews as any).img || (selectedNews as any).imageUrl) ? (
-                <img
-                  alt=""
-                  className="absolute inset-0 max-w-none object-cover size-full"
-                  src={(selectedNews as any).img ?? (selectedNews as any).imageUrl}
-                />
-              ) : (
-                <div
-                  className="absolute inset-0"
-                  style={{ background: 'linear-gradient(135deg, rgba(0,255,225,0.2) 0%, rgba(255,200,0,0.15) 100%)' }}
-                />
-              )}
-              <div
-                className="absolute inset-0 pointer-events-none"
-                style={{ background: 'linear-gradient(to bottom, transparent 50%, rgba(14,11,22,0.85) 100%)' }}
-              />
+            <div
+              className={`news-modal relative flex flex-col rounded-[16px] overflow-hidden border border-[rgba(255,255,255,0.1)] ${newsClosing ? 'modal-card-exit' : 'modal-card-enter'}`}
+              style={{
+                width: 680,
+                maxHeight: '82vh',
+                background: 'rgba(14,11,22,0.88)',
+                backdropFilter: 'blur(24px)',
+                WebkitBackdropFilter: 'blur(24px)',
+                ['--cat' as string]: modalCat.rgb,
+                boxShadow: `0 30px 90px rgba(0,0,0,0.55), 0 0 60px rgba(${modalCat.rgb},0.10)`,
+              } as React.CSSProperties}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Bouton retour — toujours visible */}
               <button
-                className="absolute top-[16px] left-[16px] flex items-center gap-[8px] backdrop-blur-[8px] bg-[rgba(14,11,22,0.5)] border border-[rgba(255,255,255,0.12)] px-[14px] py-[8px] rounded-full hover:bg-[rgba(255,255,255,0.1)] transition-colors"
+                className="absolute top-[16px] left-[16px] z-20 flex items-center gap-[8px] backdrop-blur-[8px] bg-[rgba(14,11,22,0.55)] border border-[rgba(255,255,255,0.14)] px-[14px] py-[8px] rounded-full hover:bg-[rgba(255,255,255,0.12)] active:scale-[0.97] transition-all"
                 onClick={closeNews}
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -933,19 +1215,203 @@ export default function App() {
                 </svg>
                 <span className="font-ui font-semibold text-[13px] text-white tracking-[-0.4px]">Retour</span>
               </button>
-            </div>
 
-            {/* Contenu */}
-            <div className="flex flex-col gap-[12px] p-[28px] overflow-y-auto">
-              <div className="flex items-start justify-between gap-[16px]">
-                <p className="font-ui font-bold text-[21px] text-white tracking-[-0.84px] leading-tight">{selectedNews.title}</p>
-                <p className="font-ui text-[12px] text-white/35 tracking-[-0.3px] whitespace-nowrap mt-[4px]">{selectedNews.date}</p>
+              {/* Bannière — image nette si présente, sinon aplat sobre cohérent avec la carte.
+                  Voile bas opaque pour un raccord stable, indépendant du visuel. */}
+              {modalImg ? (
+                <div className="relative shrink-0 overflow-hidden" style={{ height: 230 }}>
+                  <img
+                    alt=""
+                    className="absolute inset-0 max-w-none object-cover size-full"
+                    src={modalImg}
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                  />
+                  <div
+                    className="absolute inset-x-0 bottom-0 pointer-events-none"
+                    style={{ height: '60%', background: 'linear-gradient(to top, rgba(14,11,22,1) 0%, rgba(14,11,22,0.4) 55%, transparent 100%)' }}
+                  />
+                </div>
+              ) : (
+                <div className="relative shrink-0 overflow-hidden" style={{ height: 168 }}>
+                  <NewsFallback category={modalCat.key} />
+                  <div
+                    className="absolute inset-x-0 bottom-0 pointer-events-none"
+                    style={{ height: '60%', background: 'linear-gradient(to top, rgba(14,11,22,1) 0%, rgba(14,11,22,0.4) 55%, transparent 100%)' }}
+                  />
+                </div>
+              )}
+
+              {/* Contenu — remonte sur la zone assombrie de la bannière */}
+              <div
+                className="flex flex-col overflow-y-auto"
+                style={{ padding: '0 30px 30px', marginTop: -32 }}
+              >
+                {/* En-tête éditorial : catégorie + méta */}
+                <div className="relative z-10 flex items-center gap-[12px] mb-[14px]">
+                  <CategoryBadge category={modalCat.key} size="md" />
+                  <div className="h-px flex-1 bg-[rgba(255,255,255,0.1)]" />
+                  <p className="font-ui text-[12px] text-white/40 tracking-[-0.3px] whitespace-nowrap select-text">
+                    {selectedNews.date}{selectedNews.author ? ` · ${selectedNews.author}` : ''}
+                  </p>
+                </div>
+
+                {/* Titre */}
+                <p className="font-ui font-bold text-[23px] text-white tracking-[-0.9px] leading-[1.18] break-words select-text">{selectedNews.title}</p>
+
+                {/* Filet d'accent */}
+                <div
+                  className="mt-[14px] mb-[18px] rounded-full"
+                  style={{ width: 40, height: 3, background: `rgb(${modalCat.rgb})` }}
+                />
+
+                {/* Corps */}
+                <p className="font-ui text-[15px] text-white/72 leading-[1.78] tracking-[-0.2px] whitespace-pre-line break-words select-text">{selectedNews.body}</p>
               </div>
-              <p className="font-ui text-[14px] text-white/70 leading-[1.7] tracking-[-0.28px]">{selectedNews.body}</p>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
+
+      {/* ── MODALE CHANGER DE SKIN ── */}
+      {skinModalOpen && (() => {
+        const previewSrc = pickedSkin?.dataUrl ?? skinInfo?.skinUrl ?? null
+        return (
+          <div
+            className={`absolute inset-0 z-50 flex items-center justify-center ${skinModalClosing ? 'modal-backdrop-exit' : 'modal-backdrop-enter'}`}
+            style={{ background: 'rgba(14,11,22,0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' } as React.CSSProperties}
+            onClick={closeSkinModal}
+          >
+            <div
+              className={`relative flex flex-col rounded-[16px] overflow-hidden border border-[rgba(255,255,255,0.1)] ${skinModalClosing ? 'modal-card-exit' : 'modal-card-enter'}`}
+              style={{
+                width: 620,
+                background: 'rgba(14,11,22,0.9)',
+                backdropFilter: 'blur(24px)',
+                WebkitBackdropFilter: 'blur(24px)',
+                boxShadow: '0 30px 90px rgba(0,0,0,0.55), 0 0 60px rgba(0,255,225,0.10)',
+              } as React.CSSProperties}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* En-tête */}
+              <div className="flex items-center justify-between px-[24px] py-[18px] border-b border-[rgba(255,255,255,0.08)]">
+                <div className="flex items-center gap-[10px]">
+                  <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+                    <circle cx="8" cy="5.5" r="2.5" stroke="rgba(0,255,225,0.9)" strokeWidth="1.4"/>
+                    <path d="M2.5 13.5C3.2 11.2 5.3 9.8 8 9.8s4.8 1.4 5.5 3.7" stroke="rgba(0,255,225,0.9)" strokeWidth="1.4" strokeLinecap="round"/>
+                  </svg>
+                  <p className="font-ui font-bold text-[18px] text-white tracking-[-0.6px]">Changer de skin</p>
+                </div>
+                <button
+                  className="flex items-center justify-center size-[30px] rounded-full text-white/55 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors"
+                  onClick={closeSkinModal}
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                    <path d="M1 1L11 11M11 1L1 11" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Corps */}
+              <div className="flex gap-[24px] p-[24px]">
+                {/* Aperçu personnage */}
+                <div
+                  className="relative shrink-0 flex items-end justify-center rounded-[12px] overflow-hidden border border-[rgba(255,255,255,0.08)]"
+                  style={{ width: 220, height: 300, background: 'radial-gradient(ellipse 80% 60% at 50% 30%, rgba(0,255,225,0.10) 0%, rgba(14,11,22,0.2) 70%)' }}
+                >
+                  {skinInfoLoading && !previewSrc ? (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <svg className="animate-spin text-white/40" style={{ width: 22, height: 22 }} fill="none" viewBox="0 0 24 24">
+                        <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                    </div>
+                  ) : previewSrc ? (
+                    <div className="skin-preview-float pb-[16px]">
+                      <SkinPreview src={previewSrc} variant={selectedVariant} width={120} />
+                    </div>
+                  ) : (
+                    <p className="absolute inset-0 flex items-center justify-center font-ui text-[12px] text-white/30 text-center px-[16px]">
+                      Aperçu indisponible
+                    </p>
+                  )}
+                  <div className="absolute bottom-0 inset-x-0 h-[40px] pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(0,255,225,0.12), transparent)' }} />
+                </div>
+
+                {/* Contrôles */}
+                <div className="flex flex-col flex-1 min-w-0 gap-[16px]">
+                  {/* Modèle */}
+                  <div className="flex flex-col gap-[8px]">
+                    <p className="font-ui font-semibold text-[13px] text-white/70 tracking-[-0.3px]">Modèle du personnage</p>
+                    <div className="flex gap-[8px]">
+                      {(['classic', 'slim'] as const).map((v) => (
+                        <button
+                          key={v}
+                          onClick={() => setSelectedVariant(v)}
+                          className={`flex-1 flex flex-col items-start px-[14px] py-[10px] rounded-[10px] border transition-colors ${selectedVariant === v ? 'border-[rgba(0,255,225,0.5)] bg-[rgba(0,255,225,0.08)]' : 'border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.06)]'}`}
+                        >
+                          <p className="font-ui font-semibold text-[14px] text-white">{v === 'classic' ? 'Classique' : 'Fin'}</p>
+                          <p className="font-ui text-[11px] text-white/40">{v === 'classic' ? 'Bras larges (Steve)' : 'Bras fins (Alex)'}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Choix du fichier */}
+                  <button
+                    onClick={handlePickSkin}
+                    disabled={skinBusy}
+                    className="flex flex-col items-center justify-center gap-[6px] w-full py-[18px] rounded-[10px] border border-dashed border-[rgba(255,255,255,0.18)] bg-[rgba(255,255,255,0.02)] hover:bg-[rgba(255,255,255,0.05)] hover:border-[rgba(0,255,225,0.35)] transition-colors disabled:opacity-50"
+                  >
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                      <path d="M10 13V4M10 4L6.5 7.5M10 4l3.5 3.5" stroke="rgba(0,255,225,0.85)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M3.5 13v2A1.5 1.5 0 005 16.5h10a1.5 1.5 0 001.5-1.5v-2" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" strokeLinecap="round"/>
+                    </svg>
+                    <p className="font-ui text-[13px] text-white truncate max-w-full px-[12px]">
+                      {pickedSkin ? pickedSkin.name : 'Choisir un fichier PNG'}
+                    </p>
+                    <p className="font-ui text-[11px] text-white/35">Image 64×64 px</p>
+                  </button>
+
+                  {/* Messages */}
+                  {skinError && (
+                    <p className="font-ui text-[12px] text-[rgba(255,120,120,0.95)] leading-snug">{skinError}</p>
+                  )}
+                  {skinSuccess && !skinError && (
+                    <p className="font-ui text-[12px] text-[rgba(120,255,180,0.95)] leading-snug">
+                      Skin mis à jour ! Il peut mettre quelques secondes à apparaître partout.
+                    </p>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-[10px] mt-auto">
+                    <button
+                      onClick={handleApplySkin}
+                      disabled={!pickedSkin || skinBusy}
+                      className="flex items-center justify-center gap-[8px] flex-1 py-[11px] rounded-[10px] font-ui font-bold text-[14px] text-[#0e0b16] bg-[rgba(0,255,225,0.9)] hover:bg-[rgba(0,255,225,1)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {skinBusy && (
+                        <svg className="animate-spin" style={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24">
+                          <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                      )}
+                      Appliquer le skin
+                    </button>
+                    <button
+                      onClick={handleResetSkin}
+                      disabled={skinBusy}
+                      title="Revenir au skin par défaut"
+                      className="px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[13px] text-white/60 border border-[rgba(255,255,255,0.12)] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors disabled:opacity-40"
+                    >
+                      Réinitialiser
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

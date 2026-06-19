@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const { Client } = require('minecraft-launcher-core')
 const path = require('path')
@@ -231,13 +231,58 @@ ipcMain.handle('window-maximize', () => win?.isMaximized() ? win.unmaximize() : 
 ipcMain.handle('window-close', () => win?.close())
 ipcMain.handle('open-external', (_, url) => shell.openExternal(url))
 
-app.whenReady().then(() => {
-  initializeAdmins()
-  createWindow()
+// ─── AUTO-UPDATE (electron-updater + GitHub Releases) ─────────────────────────
+function sendUpdateStatus(payload) {
+  if (win && !win.isDestroyed()) win.webContents.send('update-status', payload)
+}
 
-  if (app.isPackaged) {
-    autoUpdater.checkForUpdatesAndNotify()
+function setupAutoUpdater() {
+  // N'accepter les pré-versions (-beta) QUE si l'app installée est elle-même une
+  // pré-version. Ainsi un futur build stable (ex. 1.0.0) ne proposera pas de betas.
+  autoUpdater.allowPrerelease = app.getVersion().includes('-')
+  autoUpdater.autoDownload = true            // télécharge dès qu'une MAJ est trouvée
+  autoUpdater.autoInstallOnAppQuit = true    // filet de sécurité : installe à la fermeture
+  autoUpdater.logger = console
+
+  autoUpdater.on('checking-for-update', () => sendUpdateStatus({ status: 'checking' }))
+  autoUpdater.on('update-available',     (info) => sendUpdateStatus({ status: 'available', version: info?.version }))
+  autoUpdater.on('update-not-available', () => sendUpdateStatus({ status: 'not-available' }))
+  autoUpdater.on('download-progress',    (p) => sendUpdateStatus({
+    status: 'progress',
+    percent: p.percent,
+    transferred: p.transferred,
+    total: p.total,
+    bytesPerSecond: p.bytesPerSecond
+  }))
+  autoUpdater.on('update-downloaded',    (info) => sendUpdateStatus({ status: 'downloaded', version: info?.version }))
+  autoUpdater.on('error',                (err) => sendUpdateStatus({ status: 'error', message: String(err?.message || err) }))
+}
+
+// Déclenché par le renderer une fois qu'il écoute déjà 'update-status' : évite toute
+// course entre l'émission des events et l'abonnement côté UI.
+ipcMain.handle('check-for-updates', async () => {
+  if (!app.isPackaged) return { status: 'disabled' }   // pas de MAJ en dev
+  try {
+    await autoUpdater.checkForUpdates()
+    return { status: 'checking' }
+  } catch (e) {
+    return { status: 'error', message: String(e?.message || e) }
   }
+})
+
+// Installe la MAJ déjà téléchargée : silencieux (/S) + relance automatique de l'app.
+let updateInstalling = false
+ipcMain.handle('quit-and-install', () => {
+  if (updateInstalling) return          // garde contre les appels multiples
+  updateInstalling = true
+  autoUpdater.quitAndInstall(true, true)
+})
+
+app.whenReady().then(() => {
+  loadSession()          // restaure currentToken dès le démarrage (skin, lancement…)
+  initializeAdmins()
+  setupAutoUpdater()
+  createWindow()
 
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })
@@ -414,6 +459,181 @@ async function exchangeCodeForMinecraftToken(code) {
 ipcMain.handle('logout', () => {
   clearSession()
   return { success: true }
+})
+
+// ─── IPC : SKIN ──────────────────────────────────────────────────────────────
+// Change de skin via l'API officielle Minecraft, exactement comme le vrai
+// launcher : on lit le jeton Minecraft courant (Bearer) et on POST le PNG.
+const MC_PROFILE_URL = 'https://api.minecraftservices.com/minecraft/profile'
+const MC_SKINS_URL = 'https://api.minecraftservices.com/minecraft/profile/skins'
+
+// Requête HTTPS authentifiée renvoyant { statusCode, json, text }
+function mcAuthorizedRequest(method, url, { token, body, contentType } = {}) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url)
+    const headers = {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`
+    }
+    if (body) {
+      headers['Content-Type'] = contentType
+      headers['Content-Length'] = body.length
+    }
+    const req = https.request(
+      { hostname: urlObj.hostname, path: urlObj.pathname + urlObj.search, method, headers },
+      (res) => {
+        const chunks = []
+        res.on('data', (c) => chunks.push(c))
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8')
+          let json = null
+          try { json = JSON.parse(text) } catch {}
+          resolve({ statusCode: res.statusCode, json, text })
+        })
+      }
+    )
+    req.on('error', reject)
+    // Évite un spinner infini côté UI si l'API Minecraft ne répond pas
+    req.setTimeout(15000, () => req.destroy(new Error('Délai réseau dépassé — réessaie.')))
+    if (body) req.write(body)
+    req.end()
+  })
+}
+
+// Construit un corps multipart/form-data { variant, file } pour l'upload de skin
+function buildSkinMultipart(variant, pngBuffer, boundary) {
+  const head =
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="variant"\r\n\r\n` +
+    `${variant}\r\n` +
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="file"; filename="skin.png"\r\n` +
+    `Content-Type: image/png\r\n\r\n`
+  const tail = `\r\n--${boundary}--\r\n`
+  return Buffer.concat([Buffer.from(head, 'utf8'), pngBuffer, Buffer.from(tail, 'utf8')])
+}
+
+// Lit largeur/hauteur depuis l'en-tête IHDR d'un PNG (null si signature invalide)
+function pngDimensions(buf) {
+  const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+  if (buf.length < 24) return null
+  for (let i = 0; i < 8; i++) if (buf[i] !== sig[i]) return null
+  // Le premier chunk d'un PNG est toujours IHDR (type aux octets 12-15)
+  if (buf.toString('ascii', 12, 16) !== 'IHDR') return null
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) }
+}
+
+// Vrai si dimensions valides pour un skin Minecraft (64×64, ou 64×32 legacy)
+function isValidSkinSize(dim) {
+  return !!dim && dim.width === 64 && (dim.height === 64 || dim.height === 32)
+}
+
+// Normalise la variante renvoyée par l'API ("CLASSIC"/"SLIM") vers notre format
+function normalizeVariant(v) {
+  return String(v || 'classic').toLowerCase() === 'slim' ? 'slim' : 'classic'
+}
+
+function activeSkin(profileJson) {
+  const skins = profileJson?.skins || []
+  return skins.find((s) => s.state === 'ACTIVE') || skins[0] || null
+}
+
+ipcMain.handle('get-skin-info', async () => {
+  if (!currentToken?.access_token) return { success: false, error: 'Non connecté', loggedOut: true }
+  try {
+    const res = await mcAuthorizedRequest('GET', MC_PROFILE_URL, { token: currentToken.access_token })
+    if (res.statusCode === 401) return { success: false, error: 'Session expirée', expired: true }
+    if (res.statusCode !== 200 || !res.json) return { success: false, error: `Erreur API (HTTP ${res.statusCode})` }
+    const skin = activeSkin(res.json)
+    return {
+      success: true,
+      variant: normalizeVariant(skin?.variant),
+      skinUrl: skin?.url || null,
+      name: res.json.name,
+      uuid: res.json.id
+    }
+  } catch (e) {
+    return { success: false, error: String(e.message || e) }
+  }
+})
+
+ipcMain.handle('pick-skin-file', async () => {
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Choisir un skin Minecraft',
+    properties: ['openFile'],
+    filters: [{ name: 'Skin Minecraft (PNG)', extensions: ['png'] }]
+  })
+  if (result.canceled || !result.filePaths?.length) return { canceled: true }
+
+  const filePath = result.filePaths[0]
+  try {
+    const buf = fs.readFileSync(filePath)
+    const dim = pngDimensions(buf)
+    if (!dim) return { canceled: false, error: 'Ce fichier n\'est pas un PNG valide.' }
+    if (!isValidSkinSize(dim)) {
+      return {
+        canceled: false,
+        error: `Un skin doit faire 64×64 px (ou 64×32). Détecté : ${dim.width}×${dim.height}.`
+      }
+    }
+    return {
+      canceled: false,
+      path: filePath,
+      name: path.basename(filePath),
+      dataUrl: `data:image/png;base64,${buf.toString('base64')}`,
+      width: dim.width,
+      height: dim.height
+    }
+  } catch (e) {
+    return { canceled: false, error: 'Lecture du fichier impossible : ' + e.message }
+  }
+})
+
+ipcMain.handle('upload-skin', async (_, { variant, path: filePath } = {}) => {
+  if (!currentToken?.access_token) return { success: false, error: 'Non connecté', loggedOut: true }
+  const v = normalizeVariant(variant)
+
+  let buf
+  try {
+    buf = fs.readFileSync(filePath)
+  } catch {
+    return { success: false, error: 'Impossible de lire le fichier (déplacé ou supprimé ?).' }
+  }
+  if (!isValidSkinSize(pngDimensions(buf))) {
+    return { success: false, error: 'Le skin doit être un PNG de 64×64 pixels.' }
+  }
+
+  const boundary = '----RawLauncherSkin' + crypto.randomUUID().replace(/-/g, '')
+  const body = buildSkinMultipart(v, buf, boundary)
+
+  try {
+    const res = await mcAuthorizedRequest('POST', MC_SKINS_URL, {
+      token: currentToken.access_token,
+      body,
+      contentType: `multipart/form-data; boundary=${boundary}`
+    })
+    if (res.statusCode === 401) return { success: false, error: 'Session Minecraft expirée — reconnecte-toi.', expired: true }
+    if (res.statusCode !== 200) {
+      return { success: false, error: `Échec de l'envoi (HTTP ${res.statusCode}). ${(res.text || '').slice(0, 160)}` }
+    }
+    const skin = activeSkin(res.json)
+    return { success: true, variant: normalizeVariant(skin?.variant) || v, skinUrl: skin?.url || null }
+  } catch (e) {
+    return { success: false, error: String(e.message || e) }
+  }
+})
+
+ipcMain.handle('reset-skin', async () => {
+  if (!currentToken?.access_token) return { success: false, error: 'Non connecté', loggedOut: true }
+  try {
+    const res = await mcAuthorizedRequest('DELETE', `${MC_SKINS_URL}/active`, { token: currentToken.access_token })
+    if (res.statusCode === 401) return { success: false, error: 'Session Minecraft expirée — reconnecte-toi.', expired: true }
+    if (res.statusCode !== 200) return { success: false, error: `Échec de la réinitialisation (HTTP ${res.statusCode}).` }
+    const skin = activeSkin(res.json)
+    return { success: true, variant: normalizeVariant(skin?.variant), skinUrl: skin?.url || null }
+  } catch (e) {
+    return { success: false, error: String(e.message || e) }
+  }
 })
 
 // ─── IPC : MODPACK ───────────────────────────────────────────────────────────

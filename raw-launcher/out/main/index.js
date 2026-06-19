@@ -674,7 +674,7 @@ var init_modpack = __esmMin((() => {
 }));
 //#endregion
 //#region src/main/index.js
-var { app, BrowserWindow, ipcMain, shell } = require("electron");
+var { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 var { autoUpdater } = require("electron-updater");
 var { Client } = require("minecraft-launcher-core");
 var path = require("path");
@@ -873,10 +873,59 @@ ipcMain.handle("window-minimize", () => win?.minimize());
 ipcMain.handle("window-maximize", () => win?.isMaximized() ? win.unmaximize() : win.maximize());
 ipcMain.handle("window-close", () => win?.close());
 ipcMain.handle("open-external", (_, url) => shell.openExternal(url));
+function sendUpdateStatus(payload) {
+	if (win && !win.isDestroyed()) win.webContents.send("update-status", payload);
+}
+function setupAutoUpdater() {
+	autoUpdater.allowPrerelease = app.getVersion().includes("-");
+	autoUpdater.autoDownload = true;
+	autoUpdater.autoInstallOnAppQuit = true;
+	autoUpdater.logger = console;
+	autoUpdater.on("checking-for-update", () => sendUpdateStatus({ status: "checking" }));
+	autoUpdater.on("update-available", (info) => sendUpdateStatus({
+		status: "available",
+		version: info?.version
+	}));
+	autoUpdater.on("update-not-available", () => sendUpdateStatus({ status: "not-available" }));
+	autoUpdater.on("download-progress", (p) => sendUpdateStatus({
+		status: "progress",
+		percent: p.percent,
+		transferred: p.transferred,
+		total: p.total,
+		bytesPerSecond: p.bytesPerSecond
+	}));
+	autoUpdater.on("update-downloaded", (info) => sendUpdateStatus({
+		status: "downloaded",
+		version: info?.version
+	}));
+	autoUpdater.on("error", (err) => sendUpdateStatus({
+		status: "error",
+		message: String(err?.message || err)
+	}));
+}
+ipcMain.handle("check-for-updates", async () => {
+	if (!app.isPackaged) return { status: "disabled" };
+	try {
+		await autoUpdater.checkForUpdates();
+		return { status: "checking" };
+	} catch (e) {
+		return {
+			status: "error",
+			message: String(e?.message || e)
+		};
+	}
+});
+var updateInstalling = false;
+ipcMain.handle("quit-and-install", () => {
+	if (updateInstalling) return;
+	updateInstalling = true;
+	autoUpdater.quitAndInstall(true, true);
+});
 app.whenReady().then(() => {
+	loadSession();
 	initializeAdmins();
+	setupAutoUpdater();
 	createWindow();
-	if (app.isPackaged) autoUpdater.checkForUpdatesAndNotify();
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) createWindow();
 	});
@@ -1054,6 +1103,233 @@ async function exchangeCodeForMinecraftToken(code) {
 ipcMain.handle("logout", () => {
 	clearSession();
 	return { success: true };
+});
+var MC_PROFILE_URL = "https://api.minecraftservices.com/minecraft/profile";
+var MC_SKINS_URL = "https://api.minecraftservices.com/minecraft/profile/skins";
+function mcAuthorizedRequest(method, url, { token, body, contentType } = {}) {
+	return new Promise((resolve, reject) => {
+		const urlObj = new URL(url);
+		const headers = {
+			Accept: "application/json",
+			Authorization: `Bearer ${token}`
+		};
+		if (body) {
+			headers["Content-Type"] = contentType;
+			headers["Content-Length"] = body.length;
+		}
+		const req = https.request({
+			hostname: urlObj.hostname,
+			path: urlObj.pathname + urlObj.search,
+			method,
+			headers
+		}, (res) => {
+			const chunks = [];
+			res.on("data", (c) => chunks.push(c));
+			res.on("end", () => {
+				const text = Buffer.concat(chunks).toString("utf8");
+				let json = null;
+				try {
+					json = JSON.parse(text);
+				} catch {}
+				resolve({
+					statusCode: res.statusCode,
+					json,
+					text
+				});
+			});
+		});
+		req.on("error", reject);
+		req.setTimeout(15e3, () => req.destroy(/* @__PURE__ */ new Error("Délai réseau dépassé — réessaie.")));
+		if (body) req.write(body);
+		req.end();
+	});
+}
+function buildSkinMultipart(variant, pngBuffer, boundary) {
+	const head = `--${boundary}\r\nContent-Disposition: form-data; name="variant"\r\n\r\n${variant}\r\n--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="skin.png"\r\nContent-Type: image/png\r\n\r\n`;
+	const tail = `\r\n--${boundary}--\r\n`;
+	return Buffer.concat([
+		Buffer.from(head, "utf8"),
+		pngBuffer,
+		Buffer.from(tail, "utf8")
+	]);
+}
+function pngDimensions(buf) {
+	const sig = [
+		137,
+		80,
+		78,
+		71,
+		13,
+		10,
+		26,
+		10
+	];
+	if (buf.length < 24) return null;
+	for (let i = 0; i < 8; i++) if (buf[i] !== sig[i]) return null;
+	if (buf.toString("ascii", 12, 16) !== "IHDR") return null;
+	return {
+		width: buf.readUInt32BE(16),
+		height: buf.readUInt32BE(20)
+	};
+}
+function isValidSkinSize(dim) {
+	return !!dim && dim.width === 64 && (dim.height === 64 || dim.height === 32);
+}
+function normalizeVariant(v) {
+	return String(v || "classic").toLowerCase() === "slim" ? "slim" : "classic";
+}
+function activeSkin(profileJson) {
+	const skins = profileJson?.skins || [];
+	return skins.find((s) => s.state === "ACTIVE") || skins[0] || null;
+}
+ipcMain.handle("get-skin-info", async () => {
+	if (!currentToken?.access_token) return {
+		success: false,
+		error: "Non connecté",
+		loggedOut: true
+	};
+	try {
+		const res = await mcAuthorizedRequest("GET", MC_PROFILE_URL, { token: currentToken.access_token });
+		if (res.statusCode === 401) return {
+			success: false,
+			error: "Session expirée",
+			expired: true
+		};
+		if (res.statusCode !== 200 || !res.json) return {
+			success: false,
+			error: `Erreur API (HTTP ${res.statusCode})`
+		};
+		const skin = activeSkin(res.json);
+		return {
+			success: true,
+			variant: normalizeVariant(skin?.variant),
+			skinUrl: skin?.url || null,
+			name: res.json.name,
+			uuid: res.json.id
+		};
+	} catch (e) {
+		return {
+			success: false,
+			error: String(e.message || e)
+		};
+	}
+});
+ipcMain.handle("pick-skin-file", async () => {
+	const result = await dialog.showOpenDialog(win, {
+		title: "Choisir un skin Minecraft",
+		properties: ["openFile"],
+		filters: [{
+			name: "Skin Minecraft (PNG)",
+			extensions: ["png"]
+		}]
+	});
+	if (result.canceled || !result.filePaths?.length) return { canceled: true };
+	const filePath = result.filePaths[0];
+	try {
+		const buf = fs.readFileSync(filePath);
+		const dim = pngDimensions(buf);
+		if (!dim) return {
+			canceled: false,
+			error: "Ce fichier n'est pas un PNG valide."
+		};
+		if (!isValidSkinSize(dim)) return {
+			canceled: false,
+			error: `Un skin doit faire 64×64 px (ou 64×32). Détecté : ${dim.width}×${dim.height}.`
+		};
+		return {
+			canceled: false,
+			path: filePath,
+			name: path.basename(filePath),
+			dataUrl: `data:image/png;base64,${buf.toString("base64")}`,
+			width: dim.width,
+			height: dim.height
+		};
+	} catch (e) {
+		return {
+			canceled: false,
+			error: "Lecture du fichier impossible : " + e.message
+		};
+	}
+});
+ipcMain.handle("upload-skin", async (_, { variant, path: filePath } = {}) => {
+	if (!currentToken?.access_token) return {
+		success: false,
+		error: "Non connecté",
+		loggedOut: true
+	};
+	const v = normalizeVariant(variant);
+	let buf;
+	try {
+		buf = fs.readFileSync(filePath);
+	} catch {
+		return {
+			success: false,
+			error: "Impossible de lire le fichier (déplacé ou supprimé ?)."
+		};
+	}
+	if (!isValidSkinSize(pngDimensions(buf))) return {
+		success: false,
+		error: "Le skin doit être un PNG de 64×64 pixels."
+	};
+	const boundary = "----RawLauncherSkin" + crypto.randomUUID().replace(/-/g, "");
+	const body = buildSkinMultipart(v, buf, boundary);
+	try {
+		const res = await mcAuthorizedRequest("POST", MC_SKINS_URL, {
+			token: currentToken.access_token,
+			body,
+			contentType: `multipart/form-data; boundary=${boundary}`
+		});
+		if (res.statusCode === 401) return {
+			success: false,
+			error: "Session Minecraft expirée — reconnecte-toi.",
+			expired: true
+		};
+		if (res.statusCode !== 200) return {
+			success: false,
+			error: `Échec de l'envoi (HTTP ${res.statusCode}). ${(res.text || "").slice(0, 160)}`
+		};
+		const skin = activeSkin(res.json);
+		return {
+			success: true,
+			variant: normalizeVariant(skin?.variant) || v,
+			skinUrl: skin?.url || null
+		};
+	} catch (e) {
+		return {
+			success: false,
+			error: String(e.message || e)
+		};
+	}
+});
+ipcMain.handle("reset-skin", async () => {
+	if (!currentToken?.access_token) return {
+		success: false,
+		error: "Non connecté",
+		loggedOut: true
+	};
+	try {
+		const res = await mcAuthorizedRequest("DELETE", `${MC_SKINS_URL}/active`, { token: currentToken.access_token });
+		if (res.statusCode === 401) return {
+			success: false,
+			error: "Session Minecraft expirée — reconnecte-toi.",
+			expired: true
+		};
+		if (res.statusCode !== 200) return {
+			success: false,
+			error: `Échec de la réinitialisation (HTTP ${res.statusCode}).`
+		};
+		const skin = activeSkin(res.json);
+		return {
+			success: true,
+			variant: normalizeVariant(skin?.variant),
+			skinUrl: skin?.url || null
+		};
+	} catch (e) {
+		return {
+			success: false,
+			error: String(e.message || e)
+		};
+	}
 });
 ipcMain.handle("check-modpack", async () => {
 	const modsDir = path.join(GAME_DIR, "mods");
