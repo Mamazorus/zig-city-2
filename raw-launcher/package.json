@@ -1,7 +1,8 @@
 {
   "name": "raw-launcher",
-  "version": "0.1.6-beta",
+  "version": "0.1.7-beta",
   "description": "Launcher Minecraft custom Zig City 2",
+  "author": "Maël Auzenet",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -36,6 +37,7 @@
   "build": {
     "appId": "com.rawstudio.launcher",
     "productName": "Zig City 2",
+    "copyright": "Copyright © 2026 Maël Auzenet",
     "files": [
       "out/**",
       "modpack.json",
