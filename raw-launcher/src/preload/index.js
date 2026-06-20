@@ -36,15 +36,35 @@ contextBridge.exposeInMainWorld('launcher', {
   onUpdateStatus:  (cb) => ipcRenderer.on('update-status', (_, d) => cb(d)),
 
   getPlayersSeen:    () => ipcRenderer.invoke('get-players-seen'),
+  addPlayersSeen:    (names) => ipcRenderer.invoke('add-players-seen', names),
+  removePlayerSeen:  (name) => ipcRenderer.invoke('remove-player-seen', name),
   fetchImage:        (url) => ipcRenderer.invoke('fetch-image', url),
 
   getFirebaseStatus: () => ipcRenderer.invoke('get-firebase-status'),
   checkAdmin:        () => ipcRenderer.invoke('check-admin'),
   getNews:           () => ipcRenderer.invoke('get-news'),
+  getStats:          () => ipcRenderer.invoke('get-stats'),
   createNews:        (data) => ipcRenderer.invoke('create-news', data),
   updateNews:        (data) => ipcRenderer.invoke('update-news', data),
   deleteNews:        (id) => ipcRenderer.invoke('delete-news', id),
   getAdmins:         () => ipcRenderer.invoke('get-admins'),
   addAdmin:          (username) => ipcRenderer.invoke('add-admin', username),
   removeAdmin:       (username) => ipcRenderer.invoke('remove-admin', username),
+
+  // ── Chat (salons type Discord) ──
+  chatGetChannels:    () => ipcRenderer.invoke('chat-get-channels'),
+  chatCreateChannel:  (data) => ipcRenderer.invoke('chat-create-channel', data),
+  chatUpdateChannel:  (data) => ipcRenderer.invoke('chat-update-channel', data),
+  chatDeleteChannel:  (id) => ipcRenderer.invoke('chat-delete-channel', id),
+  chatSendMessage:    (data) => ipcRenderer.invoke('chat-send-message', data),
+  chatDeleteMessage:  (data) => ipcRenderer.invoke('chat-delete-message', data),
+  chatPickMedia:      () => ipcRenderer.invoke('chat-pick-media'),
+  chatUploadMedia:    (data) => ipcRenderer.invoke('chat-upload-media', data),
+  chatSubscribeChannels:   () => ipcRenderer.invoke('chat-subscribe-channels'),
+  chatUnsubscribeChannels: () => ipcRenderer.invoke('chat-unsubscribe-channels'),
+  chatSubscribe:      (channelId) => ipcRenderer.invoke('chat-subscribe', channelId),
+  chatUnsubscribe:    (channelId) => ipcRenderer.invoke('chat-unsubscribe', channelId),
+  // Abonnements aux flux : renvoient une fonction de nettoyage (retire le listener).
+  onChatChannels:     (cb) => { const h = (_, d) => cb(d); ipcRenderer.on('chat:channels', h); return () => ipcRenderer.removeListener('chat:channels', h) },
+  onChatMessages:     (cb) => { const h = (_, d) => cb(d); ipcRenderer.on('chat:messages', h); return () => ipcRenderer.removeListener('chat:messages', h) },
 })

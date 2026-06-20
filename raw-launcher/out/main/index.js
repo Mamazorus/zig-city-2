@@ -856,8 +856,12 @@ ipcMain.handle("get-server-status", async () => {
 		for (const name of currentNames) if (!times[name]) times[name] = now;
 		savePlayerTimes(times);
 		const seen = loadPlayersSeen();
-		for (const name of currentNames) if (!seen[name]) seen[name] = now;
-		savePlayersSeen(seen);
+		const newcomers = currentNames.filter((name) => !(name in seen));
+		if (newcomers.length) {
+			for (const name of newcomers) seen[name] = now;
+			savePlayersSeen(seen);
+			pushPlayersSeen(newcomers).catch(() => {});
+		}
 		return {
 			online: status.players?.online ?? 0,
 			max: status.players?.max ?? 0,
@@ -875,12 +879,41 @@ ipcMain.handle("get-server-status", async () => {
 		};
 	}
 });
-ipcMain.handle("get-players-seen", () => {
-	return Object.keys(loadPlayersSeen());
+ipcMain.handle("get-players-seen", async () => {
+	const local = loadPlayersSeen();
+	if (!isFirebaseConfigured()) return Object.keys(local);
+	try {
+		const [remote, hidden] = await Promise.all([fetchSharedPlayersSeen(), fetchHiddenPlayers()]);
+		const localOnly = Object.keys(local).filter((n) => !(n in remote) && !(n in hidden));
+		if (localOnly.length) pushPlayersSeen(localOnly).catch(() => {});
+		const merged = {
+			...remote,
+			...local
+		};
+		for (const n of Object.keys(hidden)) delete merged[n];
+		savePlayersSeen(merged);
+		return Object.keys(merged);
+	} catch {
+		return Object.keys(local);
+	}
 });
 var imageCache = /* @__PURE__ */ new Map();
 var imageInflight = /* @__PURE__ */ new Map();
 var IMAGE_CACHE_MAX = 250;
+function isBlockedImageHost(hostname) {
+	const h = (hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
+	if (h === "localhost" || h.endsWith(".localhost")) return true;
+	const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+	if (m) {
+		const a = +m[1], b = +m[2];
+		if (a === 0 || a === 127 || a === 10) return true;
+		if (a === 169 && b === 254) return true;
+		if (a === 172 && b >= 16 && b <= 31) return true;
+		if (a === 192 && b === 168) return true;
+	}
+	if (h === "::1" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80")) return true;
+	return false;
+}
 function fetchImageDataUrl(url, redirects = 0) {
 	if (redirects > 5) return Promise.reject(/* @__PURE__ */ new Error("Trop de redirections"));
 	return new Promise((resolve, reject) => {
@@ -890,6 +923,7 @@ function fetchImageDataUrl(url, redirects = 0) {
 		} catch {
 			return reject(/* @__PURE__ */ new Error("URL invalide"));
 		}
+		if (isBlockedImageHost(urlObj.hostname)) return reject(/* @__PURE__ */ new Error("Hôte non autorisé"));
 		const req = (urlObj.protocol === "https:" ? https : http).get({
 			hostname: urlObj.hostname,
 			port: urlObj.port || void 0,
@@ -1002,8 +1036,10 @@ ipcMain.handle("quit-and-install", () => {
 });
 app.whenReady().then(() => {
 	app.setAppUserModelId("com.rawstudio.launcher");
-	loadSession();
+	const restoredUser = loadSession();
+	if (restoredUser) recordPlayerSeen(restoredUser);
 	initializeAdmins();
+	initializeChannels();
 	setupAutoUpdater();
 	createWindow();
 	app.on("activate", () => {
@@ -1048,6 +1084,7 @@ ipcMain.handle("login", async () => {
 		const token = await exchangeCodeForMinecraftToken(await openMicrosoftLogin());
 		currentToken = token;
 		saveSession(token);
+		recordPlayerSeen(token.name);
 		return {
 			success: true,
 			username: token.name,
@@ -1990,6 +2027,7 @@ ipcMain.handle("launch", async () => {
 });
 var FIREBASE_DATABASE_URL = "https://zig-base-default-rtdb.europe-west1.firebasedatabase.app";
 var FIREBASE_SECRET = "kC9FjebZUTe2rh6RPkjWWjx0YP6NIvXnbMmrOEgm";
+var FIREBASE_STORAGE_BUCKET = "zig-base.firebasestorage.app";
 function isFirebaseConfigured() {
 	return FIREBASE_DATABASE_URL.startsWith("https://") && !FIREBASE_DATABASE_URL.includes("YOUR-PROJECT-ID") && !FIREBASE_SECRET.includes("YOUR-DATABASE-SECRET");
 }
@@ -2015,6 +2053,7 @@ function firebaseRequest(method, fbPath, data, useAuth) {
 			let body = "";
 			res.on("data", (c) => body += c);
 			res.on("end", () => {
+				if (res.statusCode < 200 || res.statusCode >= 300) return reject(/* @__PURE__ */ new Error(`Firebase HTTP ${res.statusCode}: ${String(body).slice(0, 200)}`));
 				try {
 					resolve(JSON.parse(body));
 				} catch {
@@ -2026,6 +2065,84 @@ function firebaseRequest(method, fbPath, data, useAuth) {
 		if (payload !== null) req.write(payload);
 		req.end();
 	});
+}
+var PLAYER_NAME_RE = /^[A-Za-z0-9_]{1,16}$/;
+function isValidPlayerName(n) {
+	return PLAYER_NAME_RE.test(n) && !/^\d+$/.test(n);
+}
+function sanitizePlayerNames(input) {
+	const arr = Array.isArray(input) ? input : String(input ?? "").split(/[\s,;]+/);
+	const seen = /* @__PURE__ */ new Set();
+	const out = [];
+	for (const raw of arr) {
+		const n = String(raw ?? "").trim();
+		if (isValidPlayerName(n) && !seen.has(n)) {
+			seen.add(n);
+			out.push(n);
+		}
+	}
+	return out;
+}
+function normalizeFbMap(data) {
+	if (!data || typeof data !== "object") return {};
+	if (Array.isArray(data)) {
+		const out = {};
+		data.forEach((v, i) => {
+			if (v != null) out[String(i)] = v;
+		});
+		return out;
+	}
+	return data;
+}
+async function fetchSharedPlayersSeen() {
+	return normalizeFbMap(await firebaseRequest("GET", "/playersSeen", null, false));
+}
+async function fetchHiddenPlayers() {
+	return normalizeFbMap(await firebaseRequest("GET", "/playersHidden", null, false));
+}
+async function pushPlayersSeen(rawNames) {
+	if (!isFirebaseConfigured()) return {
+		added: [],
+		skipped: []
+	};
+	const names = sanitizePlayerNames(rawNames);
+	if (!names.length) return {
+		added: [],
+		skipped: []
+	};
+	let remote = {}, hidden = {};
+	try {
+		[remote, hidden] = await Promise.all([fetchSharedPlayersSeen(), fetchHiddenPlayers()]);
+	} catch {
+		remote = {};
+		hidden = {};
+	}
+	const now = Date.now();
+	const patch = {};
+	const added = [];
+	for (const n of names) if (!(n in remote) && !(n in hidden)) {
+		patch[n] = now;
+		added.push(n);
+	}
+	if (added.length) {
+		await firebaseRequest("PATCH", "/playersSeen", patch, true);
+		const local = loadPlayersSeen();
+		for (const n of added) if (!local[n]) local[n] = now;
+		savePlayersSeen(local);
+	}
+	return {
+		added,
+		skipped: names.filter((n) => !added.includes(n))
+	};
+}
+function recordPlayerSeen(name) {
+	if (!name || !isValidPlayerName(name)) return;
+	const local = loadPlayersSeen();
+	if (!(name in local)) {
+		local[name] = Date.now();
+		savePlayersSeen(local);
+	}
+	Promise.resolve().then(() => pushPlayersSeen([name])).catch(() => {});
 }
 async function initializeAdmins() {
 	if (!isFirebaseConfigured()) return;
@@ -2078,10 +2195,42 @@ ipcMain.handle("get-news", async () => {
 		};
 	}
 });
+ipcMain.handle("get-stats", async () => {
+	if (!isFirebaseConfigured()) return {
+		success: false,
+		players: [],
+		updatedAt: null,
+		error: "Firebase non configuré"
+	};
+	try {
+		const [data, meta] = await Promise.all([firebaseRequest("GET", "/stats", null, false), firebaseRequest("GET", "/statsMeta", null, false)]);
+		const map = normalizeFbMap(data);
+		return {
+			success: true,
+			players: Object.entries(map).filter(([, stats]) => stats && typeof stats === "object").map(([name, stats]) => ({
+				name,
+				stats
+			})),
+			updatedAt: meta && typeof meta === "object" && typeof meta.updatedAt === "number" ? meta.updatedAt : null
+		};
+	} catch (e) {
+		return {
+			success: false,
+			players: [],
+			updatedAt: null,
+			error: e.message
+		};
+	}
+});
 ipcMain.handle("create-news", async (_, newsData) => {
 	if (!isFirebaseConfigured()) return {
 		success: false,
 		error: "Firebase non configuré"
+	};
+	const gate = await requireAdminSession();
+	if (!gate.ok) return {
+		success: false,
+		error: gate.error
 	};
 	try {
 		return {
@@ -2103,6 +2252,11 @@ ipcMain.handle("update-news", async (_, { id, ...newsData }) => {
 		success: false,
 		error: "Firebase non configuré"
 	};
+	const gate = await requireAdminSession();
+	if (!gate.ok) return {
+		success: false,
+		error: gate.error
+	};
 	try {
 		await firebaseRequest("PATCH", `/news/${id}`, newsData, true);
 		return { success: true };
@@ -2117,6 +2271,11 @@ ipcMain.handle("delete-news", async (_, id) => {
 	if (!isFirebaseConfigured()) return {
 		success: false,
 		error: "Firebase non configuré"
+	};
+	const gate = await requireAdminSession();
+	if (!gate.ok) return {
+		success: false,
+		error: gate.error
 	};
 	try {
 		await firebaseRequest("DELETE", `/news/${id}`, null, true);
@@ -2151,6 +2310,11 @@ ipcMain.handle("add-admin", async (_, username) => {
 		success: false,
 		error: "Firebase non configuré"
 	};
+	const gate = await requireAdminSession();
+	if (!gate.ok) return {
+		success: false,
+		error: gate.error
+	};
 	try {
 		await firebaseRequest("PUT", `/admins/${username}`, true, true);
 		return { success: true };
@@ -2166,6 +2330,15 @@ ipcMain.handle("remove-admin", async (_, username) => {
 		success: false,
 		error: "Firebase non configuré"
 	};
+	const gate = await requireAdminSession();
+	if (!gate.ok) return {
+		success: false,
+		error: gate.error
+	};
+	if (username === "Mamazorus") return {
+		success: false,
+		error: "L'administrateur principal ne peut pas être retiré."
+	};
 	try {
 		await firebaseRequest("DELETE", `/admins/${username}`, null, true);
 		return { success: true };
@@ -2175,6 +2348,770 @@ ipcMain.handle("remove-admin", async (_, username) => {
 			error: e.message
 		};
 	}
+});
+ipcMain.handle("add-players-seen", async (_, names) => {
+	if (!isFirebaseConfigured()) return {
+		success: false,
+		error: "Firebase non configuré",
+		added: [],
+		skipped: [],
+		invalid: 0
+	};
+	try {
+		const valid = sanitizePlayerNames(names);
+		const invalid = (Array.isArray(names) ? names : String(names ?? "").split(/[\s,;]+/)).map((s) => String(s ?? "").trim()).filter(Boolean).filter((t) => !valid.includes(t)).length;
+		if (valid.length) {
+			const unhide = {};
+			for (const n of valid) unhide[n] = null;
+			await firebaseRequest("PATCH", "/playersHidden", unhide, true);
+		}
+		const res = await pushPlayersSeen(valid);
+		return {
+			success: true,
+			added: res.added,
+			skipped: res.skipped,
+			invalid
+		};
+	} catch (e) {
+		return {
+			success: false,
+			error: e.message,
+			added: [],
+			skipped: [],
+			invalid: 0
+		};
+	}
+});
+ipcMain.handle("remove-player-seen", async (_, name) => {
+	if (!isFirebaseConfigured()) return {
+		success: false,
+		error: "Firebase non configuré"
+	};
+	const n = String(name ?? "").trim();
+	if (!n) return {
+		success: false,
+		error: "Nom vide"
+	};
+	try {
+		await firebaseRequest("PUT", `/playersHidden/${encodeURIComponent(n)}`, true, true);
+		await firebaseRequest("DELETE", `/playersSeen/${encodeURIComponent(n)}`, null, true);
+		const local = loadPlayersSeen();
+		if (n in local) {
+			delete local[n];
+			savePlayersSeen(local);
+		}
+		return { success: true };
+	} catch (e) {
+		return {
+			success: false,
+			error: e.message
+		};
+	}
+});
+var CHAT_MEDIA_MAX = 4 * 1024 * 1024;
+var CHAT_ALLOWED_MIME = [
+	"image/png",
+	"image/jpeg",
+	"image/gif",
+	"image/webp"
+];
+var CHAT_TEXT_MAX = 2e3;
+var DEFAULT_CHANNELS = [
+	{
+		id: "annonces",
+		name: "annonces",
+		description: "Annonces officielles du serveur",
+		type: "announce"
+	},
+	{
+		id: "general",
+		name: "général",
+		description: "Discussion générale",
+		type: "open"
+	},
+	{
+		id: "entraide",
+		name: "entraide",
+		description: "Questions & entraide entre joueurs",
+		type: "open"
+	},
+	{
+		id: "medias",
+		name: "médias",
+		description: "Partagez vos screenshots et vos builds",
+		type: "open"
+	}
+];
+function sanitizeChannelId(raw) {
+	return String(raw ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+}
+function isValidPushId(id) {
+	return typeof id === "string" && id.length > 0 && id.length < 64 && !/[.#$/[\]]/.test(id);
+}
+async function initializeChannels() {
+	if (!isFirebaseConfigured()) return;
+	try {
+		const existing = await firebaseRequest("GET", "/chat/channels", null, false);
+		if (!existing || existing === "null" || typeof existing === "object" && Object.keys(existing).length === 0) {
+			const now = Date.now();
+			const seed = {};
+			DEFAULT_CHANNELS.forEach((c, i) => {
+				seed[c.id] = {
+					name: c.name,
+					description: c.description,
+					type: c.type,
+					order: i,
+					createdAt: now,
+					createdBy: "system"
+				};
+			});
+			await firebaseRequest("PUT", "/chat/channels", seed, true);
+			console.log("[Chat] Salons par défaut initialisés");
+		}
+	} catch (e) {
+		console.log("[Chat] Impossible d'initialiser les salons :", e.message);
+	}
+}
+function chatSessionUser() {
+	const username = loadSession();
+	if (!username) return null;
+	return {
+		username,
+		uuid: currentToken?.uuid ?? null
+	};
+}
+async function chatIsAdmin(username) {
+	if (!username) return false;
+	try {
+		return await firebaseRequest("GET", `/admins/${username}`, null, false) === true;
+	} catch {
+		return false;
+	}
+}
+async function requireAdminSession() {
+	const u = chatSessionUser();
+	if (!u) return {
+		ok: false,
+		error: "Reconnecte-toi."
+	};
+	if (!await chatIsAdmin(u.username)) return {
+		ok: false,
+		error: "Réservé aux administrateurs."
+	};
+	return {
+		ok: true,
+		user: u
+	};
+}
+function detectImageMime(buf) {
+	if (!buf || buf.length < 12) return null;
+	if (buf[0] === 137 && buf[1] === 80 && buf[2] === 78 && buf[3] === 71) return "image/png";
+	if (buf[0] === 255 && buf[1] === 216 && buf[2] === 255) return "image/jpeg";
+	if (buf[0] === 71 && buf[1] === 73 && buf[2] === 70 && buf[3] === 56) return "image/gif";
+	if (buf[0] === 82 && buf[1] === 73 && buf[2] === 70 && buf[3] === 70 && buf[8] === 87 && buf[9] === 69 && buf[10] === 66 && buf[11] === 80) return "image/webp";
+	return null;
+}
+function chatSanitizeMedia(m) {
+	if (!m || typeof m !== "object") return null;
+	const url = String(m.url ?? "").trim();
+	if (!/^https?:\/\//i.test(url)) return null;
+	const isBucketUrl = url.startsWith(`https://firebasestorage.googleapis.com/v0/b/${FIREBASE_STORAGE_BUCKET}/o/`);
+	const out = {
+		kind: m.kind === "upload" && isBucketUrl ? "upload" : "link",
+		url: url.slice(0, 1024)
+	};
+	if (typeof m.mime === "string") out.mime = m.mime.slice(0, 40);
+	if (Number.isFinite(m.w) && m.w > 0) out.w = Math.round(m.w);
+	if (Number.isFinite(m.h) && m.h > 0) out.h = Math.round(m.h);
+	return out;
+}
+ipcMain.handle("chat-get-channels", async () => {
+	if (!isFirebaseConfigured()) return {
+		success: false,
+		channels: []
+	};
+	try {
+		const map = normalizeFbMap(await firebaseRequest("GET", "/chat/channels", null, false));
+		return {
+			success: true,
+			channels: Object.entries(map).filter(([, c]) => c && typeof c === "object").map(([id, c]) => ({
+				id,
+				...c
+			})).sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || (a.createdAt || 0) - (b.createdAt || 0))
+		};
+	} catch (e) {
+		return {
+			success: false,
+			channels: [],
+			error: e.message
+		};
+	}
+});
+ipcMain.handle("chat-create-channel", async (_, payload) => {
+	if (!isFirebaseConfigured()) return {
+		success: false,
+		error: "Firebase non configuré"
+	};
+	const u = chatSessionUser();
+	if (!u) return {
+		success: false,
+		error: "Reconnecte-toi pour gérer les salons."
+	};
+	if (!await chatIsAdmin(u.username)) return {
+		success: false,
+		error: "Réservé aux administrateurs."
+	};
+	const name = String(payload?.name ?? "").trim().slice(0, 40);
+	if (!name) return {
+		success: false,
+		error: "Nom de salon requis."
+	};
+	let id = sanitizeChannelId(payload?.id || name);
+	if (!id) return {
+		success: false,
+		error: "Nom de salon invalide."
+	};
+	const type = payload?.type === "announce" ? "announce" : "open";
+	const description = String(payload?.description ?? "").trim().slice(0, 200);
+	try {
+		const existing = normalizeFbMap(await firebaseRequest("GET", "/chat/channels", null, false));
+		if (existing[id]) {
+			let n = 2;
+			while (existing[`${id}-${n}`]) n++;
+			id = `${id}-${n}`;
+		}
+		const order = Object.keys(existing).length;
+		await firebaseRequest("PUT", `/chat/channels/${id}`, {
+			name,
+			description,
+			type,
+			order,
+			createdAt: Date.now(),
+			createdBy: u.username
+		}, true);
+		return {
+			success: true,
+			id
+		};
+	} catch (e) {
+		return {
+			success: false,
+			error: e.message
+		};
+	}
+});
+ipcMain.handle("chat-update-channel", async (_, payload) => {
+	if (!isFirebaseConfigured()) return {
+		success: false,
+		error: "Firebase non configuré"
+	};
+	const u = chatSessionUser();
+	if (!u) return {
+		success: false,
+		error: "Reconnecte-toi pour gérer les salons."
+	};
+	if (!await chatIsAdmin(u.username)) return {
+		success: false,
+		error: "Réservé aux administrateurs."
+	};
+	const id = sanitizeChannelId(payload?.id);
+	if (!id) return {
+		success: false,
+		error: "Salon introuvable."
+	};
+	const patch = {};
+	if (typeof payload.name === "string" && payload.name.trim()) patch.name = payload.name.trim().slice(0, 40);
+	if (typeof payload.description === "string") patch.description = payload.description.trim().slice(0, 200);
+	if (payload.type === "open" || payload.type === "announce") patch.type = payload.type;
+	if (Number.isFinite(payload.order)) patch.order = Math.round(payload.order);
+	if (!Object.keys(patch).length) return { success: true };
+	try {
+		await firebaseRequest("PATCH", `/chat/channels/${id}`, patch, true);
+		return { success: true };
+	} catch (e) {
+		return {
+			success: false,
+			error: e.message
+		};
+	}
+});
+ipcMain.handle("chat-delete-channel", async (_, id) => {
+	if (!isFirebaseConfigured()) return {
+		success: false,
+		error: "Firebase non configuré"
+	};
+	const u = chatSessionUser();
+	if (!u) return {
+		success: false,
+		error: "Reconnecte-toi pour gérer les salons."
+	};
+	if (!await chatIsAdmin(u.username)) return {
+		success: false,
+		error: "Réservé aux administrateurs."
+	};
+	const cid = sanitizeChannelId(id);
+	if (!cid) return {
+		success: false,
+		error: "Salon introuvable."
+	};
+	try {
+		await firebaseRequest("DELETE", `/chat/channels/${cid}`, null, true);
+		await firebaseRequest("DELETE", `/chat/messages/${cid}`, null, true);
+		return { success: true };
+	} catch (e) {
+		return {
+			success: false,
+			error: e.message
+		};
+	}
+});
+ipcMain.handle("chat-send-message", async (_, payload) => {
+	if (!isFirebaseConfigured()) return {
+		success: false,
+		error: "Firebase non configuré"
+	};
+	const u = chatSessionUser();
+	if (!u) return {
+		success: false,
+		error: "Reconnecte-toi pour écrire."
+	};
+	const cid = sanitizeChannelId(payload?.channelId);
+	if (!cid) return {
+		success: false,
+		error: "Salon invalide."
+	};
+	let channel;
+	try {
+		channel = await firebaseRequest("GET", `/chat/channels/${cid}`, null, false);
+	} catch {}
+	if (!channel || typeof channel !== "object") return {
+		success: false,
+		error: "Salon introuvable."
+	};
+	if (channel.type === "announce" && !await chatIsAdmin(u.username)) return {
+		success: false,
+		error: "Ce salon est en lecture seule."
+	};
+	const text = String(payload?.text ?? "").trim().slice(0, CHAT_TEXT_MAX);
+	const media = chatSanitizeMedia(payload?.media);
+	if (!text && !media) return {
+		success: false,
+		error: "Message vide."
+	};
+	const msg = {
+		author: u.username,
+		uuid: u.uuid || null,
+		text,
+		ts: Date.now()
+	};
+	if (media) msg.media = media;
+	try {
+		return {
+			success: true,
+			id: (await firebaseRequest("POST", `/chat/messages/${cid}`, msg, true))?.name
+		};
+	} catch (e) {
+		return {
+			success: false,
+			error: e.message
+		};
+	}
+});
+ipcMain.handle("chat-delete-message", async (_, payload) => {
+	if (!isFirebaseConfigured()) return {
+		success: false,
+		error: "Firebase non configuré"
+	};
+	const u = chatSessionUser();
+	if (!u) return {
+		success: false,
+		error: "Reconnecte-toi."
+	};
+	const cid = sanitizeChannelId(payload?.channelId);
+	const mid = String(payload?.messageId ?? "").trim();
+	if (!cid || !isValidPushId(mid)) return {
+		success: false,
+		error: "Message introuvable."
+	};
+	try {
+		const msg = await firebaseRequest("GET", `/chat/messages/${cid}/${mid}`, null, false);
+		if (!msg || typeof msg !== "object") return { success: true };
+		if (!await chatIsAdmin(u.username) && msg.author !== u.username) return {
+			success: false,
+			error: "Action non autorisée."
+		};
+		await firebaseRequest("DELETE", `/chat/messages/${cid}/${mid}`, null, true);
+		return { success: true };
+	} catch (e) {
+		return {
+			success: false,
+			error: e.message
+		};
+	}
+});
+ipcMain.handle("chat-pick-media", async () => {
+	try {
+		const r = await dialog.showOpenDialog(win, {
+			title: "Choisir une image",
+			properties: ["openFile"],
+			filters: [{
+				name: "Images",
+				extensions: [
+					"png",
+					"jpg",
+					"jpeg",
+					"gif",
+					"webp"
+				]
+			}]
+		});
+		if (r.canceled || !r.filePaths?.length) return { canceled: true };
+		const fp = r.filePaths[0];
+		const buf = fs.readFileSync(fp);
+		if (buf.length > CHAT_MEDIA_MAX) return {
+			canceled: false,
+			error: "Image trop lourde (max 4 Mo)."
+		};
+		let ext = path.extname(fp).slice(1).toLowerCase();
+		const mime = ext === "jpg" ? "image/jpeg" : `image/${ext}`;
+		if (!CHAT_ALLOWED_MIME.includes(mime)) return {
+			canceled: false,
+			error: "Format non supporté (PNG, JPEG, GIF, WebP)."
+		};
+		return {
+			canceled: false,
+			dataUrl: `data:${mime};base64,${buf.toString("base64")}`,
+			mime,
+			name: path.basename(fp),
+			size: buf.length
+		};
+	} catch (e) {
+		return {
+			canceled: false,
+			error: e.message
+		};
+	}
+});
+function chatStorageUpload(urlString, buffer, contentType, redirects = 0) {
+	if (redirects > 5) return Promise.reject(/* @__PURE__ */ new Error("Trop de redirections (Storage)"));
+	return new Promise((resolve, reject) => {
+		let urlObj;
+		try {
+			urlObj = new URL(urlString);
+		} catch {
+			return reject(/* @__PURE__ */ new Error("URL Storage invalide"));
+		}
+		const req = https.request({
+			hostname: urlObj.hostname,
+			path: urlObj.pathname + urlObj.search,
+			method: "POST",
+			headers: {
+				"Content-Type": contentType,
+				"Content-Length": buffer.length
+			}
+		}, (res) => {
+			if ([
+				301,
+				302,
+				303,
+				307,
+				308
+			].includes(res.statusCode) && res.headers.location) {
+				res.resume();
+				return chatStorageUpload(new URL(res.headers.location, urlObj).toString(), buffer, contentType, redirects + 1).then(resolve, reject);
+			}
+			let body = "";
+			res.on("data", (c) => body += c);
+			res.on("end", () => {
+				if (res.statusCode < 200 || res.statusCode >= 300) return reject(/* @__PURE__ */ new Error(`Storage HTTP ${res.statusCode}`));
+				try {
+					resolve(JSON.parse(body));
+				} catch {
+					reject(/* @__PURE__ */ new Error("Réponse Storage invalide"));
+				}
+			});
+		});
+		req.on("error", reject);
+		req.setTimeout(3e4, () => {
+			req.destroy();
+			reject(/* @__PURE__ */ new Error("Délai dépassé (upload)"));
+		});
+		req.write(buffer);
+		req.end();
+	});
+}
+ipcMain.handle("chat-upload-media", async (_, payload) => {
+	if (!isFirebaseConfigured()) return {
+		success: false,
+		error: "Firebase non configuré"
+	};
+	if (FIREBASE_STORAGE_BUCKET.includes("YOUR-")) return {
+		success: false,
+		error: "Bucket Storage non configuré."
+	};
+	if (!chatSessionUser()) return {
+		success: false,
+		error: "Reconnecte-toi pour envoyer un média."
+	};
+	const cid = sanitizeChannelId(payload?.channelId);
+	if (!cid) return {
+		success: false,
+		error: "Salon invalide."
+	};
+	const m = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(String(payload?.dataUrl ?? ""));
+	if (!m) return {
+		success: false,
+		error: "Image invalide."
+	};
+	const mime = (payload?.mime || m[1] || "").toLowerCase();
+	if (!CHAT_ALLOWED_MIME.includes(mime)) return {
+		success: false,
+		error: "Format non supporté (PNG, JPEG, GIF, WebP)."
+	};
+	let buffer;
+	try {
+		buffer = m[2] ? Buffer.from(m[3], "base64") : Buffer.from(decodeURIComponent(m[3]));
+	} catch {
+		return {
+			success: false,
+			error: "Image illisible."
+		};
+	}
+	if (!buffer.length) return {
+		success: false,
+		error: "Image vide."
+	};
+	if (buffer.length > CHAT_MEDIA_MAX) return {
+		success: false,
+		error: "Image trop lourde (max 4 Mo)."
+	};
+	const realMime = detectImageMime(buffer);
+	if (!realMime || !CHAT_ALLOWED_MIME.includes(realMime)) return {
+		success: false,
+		error: "Fichier image non reconnu (PNG, JPEG, GIF, WebP)."
+	};
+	const ext = realMime === "image/jpeg" ? "jpg" : realMime.split("/")[1];
+	const objectPath = `chat-media/${cid}/${Date.now()}-${crypto.randomBytes(8).toString("hex")}.${ext}`;
+	try {
+		const res = await chatStorageUpload(`https://firebasestorage.googleapis.com/v0/b/${FIREBASE_STORAGE_BUCKET}/o?name=${encodeURIComponent(objectPath)}`, buffer, realMime);
+		const token = String(res?.downloadTokens ?? "").split(",")[0];
+		if (!token) return {
+			success: false,
+			error: "Upload sans jeton de téléchargement."
+		};
+		return {
+			success: true,
+			url: `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_STORAGE_BUCKET}/o/${encodeURIComponent(objectPath)}?alt=media&token=${token}`,
+			mime: realMime
+		};
+	} catch (e) {
+		return {
+			success: false,
+			error: e.message
+		};
+	}
+});
+function startRtdbStream(fbPath, query, onMap) {
+	let map = {};
+	let req = null;
+	let closed = false;
+	let buffer = "";
+	let retry = 0;
+	let reconnectTimer = null;
+	let idleTimer = null;
+	let emitTimer = null;
+	const scheduleEmit = () => {
+		if (emitTimer || closed) return;
+		emitTimer = setTimeout(() => {
+			emitTimer = null;
+			if (!closed) onMap(map);
+		}, 50);
+	};
+	const armIdle = () => {
+		if (idleTimer) clearTimeout(idleTimer);
+		idleTimer = setTimeout(() => {
+			if (req) try {
+				req.destroy();
+			} catch {}
+		}, 65e3);
+	};
+	const applyEvent = (event, payload) => {
+		if (event === "put") {
+			const p = String(payload?.path ?? "/");
+			if (p === "/" || p === "") map = normalizeFbMap(payload?.data);
+			else {
+				const key = p.replace(/^\//, "").split("/")[0];
+				if (!key) return;
+				if (payload?.data === null || payload?.data === void 0) delete map[key];
+				else map[key] = payload.data;
+			}
+			scheduleEmit();
+		} else if (event === "patch") {
+			const key = String(payload?.path ?? "/").replace(/^\//, "").split("/")[0];
+			if (key) map[key] = Object.assign({}, map[key], payload?.data || {});
+			else map = Object.assign({}, map, payload?.data || {});
+			scheduleEmit();
+		} else if (event === "cancel" || event === "auth_revoked") {
+			if (req) try {
+				req.destroy();
+			} catch {}
+		}
+	};
+	const processBlock = (block) => {
+		let event = null;
+		const datas = [];
+		for (const line of block.split("\n")) if (line.startsWith("event:")) event = line.slice(6).trim();
+		else if (line.startsWith("data:")) datas.push(line.slice(5).replace(/^ /, ""));
+		if (!event) return;
+		const raw = datas.join("\n");
+		let payload = null;
+		if (raw && raw !== "null") try {
+			payload = JSON.parse(raw);
+		} catch {
+			payload = null;
+		}
+		applyEvent(event, payload || {});
+	};
+	const scheduleReconnect = () => {
+		if (closed || reconnectTimer) return;
+		if (idleTimer) {
+			clearTimeout(idleTimer);
+			idleTimer = null;
+		}
+		const delay = Math.min(3e4, 1e3 * Math.pow(2, retry));
+		retry++;
+		reconnectTimer = setTimeout(() => {
+			reconnectTimer = null;
+			buffer = "";
+			connect();
+		}, delay);
+	};
+	const connect = (urlString) => {
+		if (closed) return;
+		let urlObj;
+		try {
+			urlObj = new URL(urlString || `${FIREBASE_DATABASE_URL}${fbPath}.json${query}`);
+		} catch {
+			return;
+		}
+		req = https.request({
+			hostname: urlObj.hostname,
+			path: urlObj.pathname + urlObj.search,
+			method: "GET",
+			headers: { "Accept": "text/event-stream" }
+		}, (res) => {
+			if ([
+				301,
+				302,
+				303,
+				307,
+				308
+			].includes(res.statusCode) && res.headers.location) {
+				res.resume();
+				return connect(new URL(res.headers.location, urlObj).toString());
+			}
+			if (res.statusCode !== 200) {
+				res.resume();
+				scheduleReconnect();
+				return;
+			}
+			req.setTimeout(0);
+			retry = 0;
+			armIdle();
+			res.setEncoding("utf8");
+			res.on("data", (chunk) => {
+				armIdle();
+				buffer += chunk.replace(/\r\n/g, "\n");
+				let idx;
+				while ((idx = buffer.indexOf("\n\n")) !== -1) {
+					const block = buffer.slice(0, idx);
+					buffer = buffer.slice(idx + 2);
+					if (block.trim()) processBlock(block);
+				}
+			});
+			res.on("end", scheduleReconnect);
+			res.on("error", scheduleReconnect);
+		});
+		req.on("error", scheduleReconnect);
+		req.setTimeout(3e4, () => {
+			try {
+				req.destroy();
+			} catch {}
+			scheduleReconnect();
+		});
+		req.end();
+	};
+	connect();
+	return { close() {
+		closed = true;
+		if (req) {
+			try {
+				req.destroy();
+			} catch {}
+			req = null;
+		}
+		if (reconnectTimer) clearTimeout(reconnectTimer);
+		if (idleTimer) clearTimeout(idleTimer);
+		if (emitTimer) clearTimeout(emitTimer);
+	} };
+}
+var chatChannelsStream = null;
+var chatMsgStream = null;
+var chatActiveChannelId = null;
+function sendToRenderer(channel, data) {
+	if (win && !win.isDestroyed()) win.webContents.send(channel, data);
+}
+ipcMain.handle("chat-subscribe-channels", () => {
+	if (!isFirebaseConfigured()) return { success: false };
+	if (chatChannelsStream) return { success: true };
+	chatChannelsStream = startRtdbStream("/chat/channels", `?auth=${encodeURIComponent(FIREBASE_SECRET)}`, (map) => {
+		sendToRenderer("chat:channels", Object.entries(map).filter(([, c]) => c && typeof c === "object").map(([id, c]) => ({
+			id,
+			...c
+		})).sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || (a.createdAt || 0) - (b.createdAt || 0)));
+	});
+	return { success: true };
+});
+ipcMain.handle("chat-unsubscribe-channels", () => {
+	if (chatChannelsStream) {
+		chatChannelsStream.close();
+		chatChannelsStream = null;
+	}
+	return { success: true };
+});
+ipcMain.handle("chat-subscribe", (_, channelId) => {
+	if (!isFirebaseConfigured()) return { success: false };
+	const cid = sanitizeChannelId(channelId);
+	if (!cid) return {
+		success: false,
+		error: "Salon invalide."
+	};
+	if (chatMsgStream) {
+		chatMsgStream.close();
+		chatMsgStream = null;
+	}
+	chatActiveChannelId = cid;
+	const q = `?orderBy=${encodeURIComponent("\"$key\"")}&limitToLast=200&auth=${encodeURIComponent(FIREBASE_SECRET)}`;
+	chatMsgStream = startRtdbStream(`/chat/messages/${cid}`, q, (map) => {
+		sendToRenderer("chat:messages", {
+			channelId: cid,
+			messages: Object.entries(map).filter(([, m]) => m && typeof m === "object").map(([id, m]) => ({
+				id,
+				...m
+			})).sort((a, b) => (a.ts || 0) - (b.ts || 0) || (a.id < b.id ? -1 : 1))
+		});
+	});
+	return { success: true };
+});
+ipcMain.handle("chat-unsubscribe", (_, channelId) => {
+	const cid = sanitizeChannelId(channelId);
+	if (cid && chatActiveChannelId && cid !== chatActiveChannelId) return { success: true };
+	if (chatMsgStream) {
+		chatMsgStream.close();
+		chatMsgStream = null;
+	}
+	chatActiveChannelId = null;
+	return { success: true };
 });
 function downloadFile(url, dest, redirects = 0) {
 	if (redirects > 10) return Promise.reject(/* @__PURE__ */ new Error("Trop de redirections"));

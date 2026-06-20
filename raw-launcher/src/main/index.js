@@ -209,12 +209,16 @@ ipcMain.handle('get-server-status', async () => {
     }
     savePlayerTimes(times)
 
-    // Historique persistant de tous les joueurs vus
+    // Historique persistant des joueurs vus (cache local). On ne pousse vers
+    // l'historique partagé que les joueurs encore inconnus de CE launcher : en
+    // régime permanent (tous déjà en cache) aucun appel réseau n'est émis.
     const seen = loadPlayersSeen()
-    for (const name of currentNames) {
-      if (!seen[name]) seen[name] = now
+    const newcomers = currentNames.filter(name => !(name in seen))
+    if (newcomers.length) {
+      for (const name of newcomers) seen[name] = now
+      savePlayersSeen(seen)
+      pushPlayersSeen(newcomers).catch(() => {})
     }
-    savePlayersSeen(seen)
 
     return {
       online: status.players?.online ?? 0,
@@ -226,8 +230,24 @@ ipcMain.handle('get-server-status', async () => {
   }
 })
 
-ipcMain.handle('get-players-seen', () => {
-  return Object.keys(loadPlayersSeen())
+ipcMain.handle('get-players-seen', async () => {
+  const local = loadPlayersSeen()
+  if (!isFirebaseConfigured()) return Object.keys(local)
+  try {
+    const [remote, hidden] = await Promise.all([fetchSharedPlayersSeen(), fetchHiddenPlayers()])
+    // Migre vers le partagé les joueurs vus uniquement en local (hors masqués)
+    const localOnly = Object.keys(local).filter(n => !(n in remote) && !(n in hidden))
+    if (localOnly.length) pushPlayersSeen(localOnly).catch(() => {})
+    // Fusionne (partagé ∪ local), retire les joueurs masqués (suppression admin
+    // durable : purge aussi le cache local), rafraîchit le cache hors-ligne
+    const merged = { ...remote, ...local }
+    for (const n of Object.keys(hidden)) delete merged[n]
+    savePlayersSeen(merged)
+    return Object.keys(merged)
+  } catch {
+    // Hors-ligne : on retombe sur le cache local
+    return Object.keys(local)
+  }
 })
 
 // ─── PROXY D'IMAGES DISTANTES ─────────────────────────────────────────────────
@@ -241,11 +261,30 @@ const imageCache = new Map()      // url -> data URL
 const imageInflight = new Map()   // url -> Promise<data URL | null>
 const IMAGE_CACHE_MAX = 250
 
+// Bloque les cibles internes (anti-SSRF) : IP littérales loopback/privées/link-local/
+// métadonnées cloud. Filtrage best-effort sur IP littérale ; les noms d'hôtes publics
+// légitimes (mc-heads, firebasestorage, CDN des news) passent normalement.
+function isBlockedImageHost(hostname) {
+  const h = (hostname || '').toLowerCase().replace(/^\[|\]$/g, '')
+  if (h === 'localhost' || h.endsWith('.localhost')) return true
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h)
+  if (m) {
+    const a = +m[1], b = +m[2]
+    if (a === 0 || a === 127 || a === 10) return true
+    if (a === 169 && b === 254) return true            // link-local + métadonnées cloud
+    if (a === 172 && b >= 16 && b <= 31) return true
+    if (a === 192 && b === 168) return true
+  }
+  if (h === '::1' || h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe80')) return true
+  return false
+}
+
 function fetchImageDataUrl(url, redirects = 0) {
   if (redirects > 5) return Promise.reject(new Error('Trop de redirections'))
   return new Promise((resolve, reject) => {
     let urlObj
     try { urlObj = new URL(url) } catch { return reject(new Error('URL invalide')) }
+    if (isBlockedImageHost(urlObj.hostname)) return reject(new Error('Hôte non autorisé'))
     const proto = urlObj.protocol === 'https:' ? https : http
     const req = proto.get({
       hostname: urlObj.hostname,
@@ -348,8 +387,10 @@ app.whenReady().then(() => {
   // Identité d'app Windows : indispensable pour que la barre des tâches affiche
   // l'icône/nom du launcher (sinon Windows regroupe sous « Electron »). No-op ailleurs.
   app.setAppUserModelId('com.rawstudio.launcher')
-  loadSession()          // restaure currentToken dès le démarrage (skin, lancement…)
+  const restoredUser = loadSession()   // restaure currentToken dès le démarrage (skin, lancement…)
+  if (restoredUser) recordPlayerSeen(restoredUser)  // garde le joueur dans l'historique partagé
   initializeAdmins()
+  initializeChannels()
   setupAutoUpdater()
   createWindow()
 
@@ -392,6 +433,7 @@ ipcMain.handle('login', async () => {
     const token = await exchangeCodeForMinecraftToken(code)
     currentToken = token
     saveSession(token)
+    recordPlayerSeen(token.name)   // sa tête apparaît dans le carrousel partagé
     return { success: true, username: token.name, uuid: token.uuid }
   } catch (e) {
     return { success: false, error: String(e.message || e) }
@@ -1340,6 +1382,11 @@ ipcMain.handle('launch', async () => {
 // 4. Secret : Paramètres du projet → Comptes de service → Secrets de base de données (section "Legacy")
 const FIREBASE_DATABASE_URL = 'https://zig-base-default-rtdb.europe-west1.firebasedatabase.app'
 const FIREBASE_SECRET = 'kC9FjebZUTe2rh6RPkjWWjx0YP6NIvXnbMmrOEgm'
+// Bucket Firebase Storage (médias du chat). À CONFIRMER dans la console Firebase →
+// Storage (l'URL gs:// affichée en haut). Les projets récents utilisent
+// `zig-base.firebasestorage.app` ; les anciens `zig-base.appspot.com`. Si l'upload
+// renvoie un 404, basculer sur l'autre valeur.
+const FIREBASE_STORAGE_BUCKET = 'zig-base.firebasestorage.app'
 
 function isFirebaseConfigured() {
   return (
@@ -1377,6 +1424,9 @@ function firebaseRequest(method, fbPath, data, useAuth) {
       let body = ''
       res.on('data', c => body += c)
       res.on('end', () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return reject(new Error(`Firebase HTTP ${res.statusCode}: ${String(body).slice(0, 200)}`))
+        }
         try { resolve(JSON.parse(body)) }
         catch { resolve(body || null) }
       })
@@ -1386,6 +1436,88 @@ function firebaseRequest(method, fbPath, data, useAuth) {
     if (payload !== null) req.write(payload)
     req.end()
   })
+}
+
+// ─── HISTORIQUE PARTAGÉ DES JOUEURS VUS (carrousel d'accueil) ─────────────────
+// Le carrousel affiche les têtes des joueurs qui se sont déjà connectés au
+// serveur. Le ping SLP ne donne que les joueurs EN LIGNE à l'instant T, et le
+// fichier players-seen.json est purement local → un nouvel install n'a aucune
+// tête (que des Steve). On centralise donc l'historique dans Firebase
+// (/playersSeen = { pseudo: premièreVue }) : chaque launcher y pousse les joueurs
+// vus en ligne + son propre pseudo, et tout le monde lit la liste complète.
+// Les pseudos Minecraft ([A-Za-z0-9_], 1-16) sont des clés Firebase valides. On
+// rejette en plus les pseudos purement numériques : Realtime Database coerce un
+// objet à clés entières en TABLEAU au GET, ce qui polluerait la liste.
+const PLAYER_NAME_RE = /^[A-Za-z0-9_]{1,16}$/
+function isValidPlayerName(n) { return PLAYER_NAME_RE.test(n) && !/^\d+$/.test(n) }
+
+function sanitizePlayerNames(input) {
+  const arr = Array.isArray(input) ? input : String(input ?? '').split(/[\s,;]+/)
+  const seen = new Set()
+  const out = []
+  for (const raw of arr) {
+    const n = String(raw ?? '').trim()
+    if (isValidPlayerName(n) && !seen.has(n)) { seen.add(n); out.push(n) }
+  }
+  return out
+}
+
+// Normalise une réponse Firebase en objet { clé: valeur } : rejette les non-objets
+// et reconvertit les tableaux (coercition Realtime DB) en filtrant les trous null.
+function normalizeFbMap(data) {
+  if (!data || typeof data !== 'object') return {}
+  if (Array.isArray(data)) {
+    const out = {}
+    data.forEach((v, i) => { if (v != null) out[String(i)] = v })
+    return out
+  }
+  return data
+}
+
+// Historique partagé + liste des pseudos masqués (lecture publique). Lèvent en
+// cas d'erreur réseau (le caller décide du repli hors-ligne).
+async function fetchSharedPlayersSeen() {
+  return normalizeFbMap(await firebaseRequest('GET', '/playersSeen', null, false))
+}
+async function fetchHiddenPlayers() {
+  return normalizeFbMap(await firebaseRequest('GET', '/playersHidden', null, false))
+}
+
+// Pousse les pseudos non encore présents (et non masqués) dans l'historique
+// partagé, en préservant les horodatages existants. Met à jour le cache local.
+// Renvoie { added, skipped }.
+async function pushPlayersSeen(rawNames) {
+  if (!isFirebaseConfigured()) return { added: [], skipped: [] }
+  const names = sanitizePlayerNames(rawNames)
+  if (!names.length) return { added: [], skipped: [] }
+
+  let remote = {}, hidden = {}
+  try { [remote, hidden] = await Promise.all([fetchSharedPlayersSeen(), fetchHiddenPlayers()]) }
+  catch { remote = {}; hidden = {} }
+
+  const now = Date.now()
+  const patch = {}
+  const added = []
+  for (const n of names) {
+    if (!(n in remote) && !(n in hidden)) { patch[n] = now; added.push(n) }
+  }
+
+  if (added.length) {
+    await firebaseRequest('PATCH', '/playersSeen', patch, true)
+    const local = loadPlayersSeen()
+    for (const n of added) if (!local[n]) local[n] = now
+    savePlayersSeen(local)
+  }
+  return { added, skipped: names.filter(n => !added.includes(n)) }
+}
+
+// Enregistre un joueur : cache local IMMÉDIAT (sa tête apparaît dès le prochain
+// chargement même avant la synchro réseau) puis push partagé non bloquant.
+function recordPlayerSeen(name) {
+  if (!name || !isValidPlayerName(name)) return
+  const local = loadPlayersSeen()
+  if (!(name in local)) { local[name] = Date.now(); savePlayersSeen(local) }
+  Promise.resolve().then(() => pushPlayersSeen([name])).catch(() => {})
 }
 
 async function initializeAdmins() {
@@ -1429,8 +1561,34 @@ ipcMain.handle('get-news', async () => {
   }
 })
 
+// ─── IPC : STATISTIQUES (classement) ─────────────────────────────────────────
+// Les stats détaillées ne sont PAS accessibles par le ping du jeu (SLP ne donne
+// que les pseudos en ligne). Un exporteur tourne côté serveur (tools/zig-stats-
+// exporter) : il lit les fichiers world/stats/*.json et publie un classement dans
+// Firebase /stats = { pseudo: { play_time, distance, mined, ... } }. Le launcher
+// se contente de relire ce nœud (lecture publique, pas d'auth requise).
+ipcMain.handle('get-stats', async () => {
+  if (!isFirebaseConfigured()) return { success: false, players: [], updatedAt: null, error: 'Firebase non configuré' }
+  try {
+    const [data, meta] = await Promise.all([
+      firebaseRequest('GET', '/stats', null, false),
+      firebaseRequest('GET', '/statsMeta', null, false)
+    ])
+    const map = normalizeFbMap(data)
+    const players = Object.entries(map)
+      .filter(([, stats]) => stats && typeof stats === 'object')
+      .map(([name, stats]) => ({ name, stats }))
+    const updatedAt = (meta && typeof meta === 'object' && typeof meta.updatedAt === 'number') ? meta.updatedAt : null
+    return { success: true, players, updatedAt }
+  } catch (e) {
+    return { success: false, players: [], updatedAt: null, error: e.message }
+  }
+})
+
 ipcMain.handle('create-news', async (_, newsData) => {
   if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
   try {
     const result = await firebaseRequest('POST', '/news', { ...newsData, createdAt: Date.now() }, true)
     return { success: true, id: result?.name }
@@ -1441,6 +1599,8 @@ ipcMain.handle('create-news', async (_, newsData) => {
 
 ipcMain.handle('update-news', async (_, { id, ...newsData }) => {
   if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
   try {
     await firebaseRequest('PATCH', `/news/${id}`, newsData, true)
     return { success: true }
@@ -1451,6 +1611,8 @@ ipcMain.handle('update-news', async (_, { id, ...newsData }) => {
 
 ipcMain.handle('delete-news', async (_, id) => {
   if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
   try {
     await firebaseRequest('DELETE', `/news/${id}`, null, true)
     return { success: true }
@@ -1471,6 +1633,8 @@ ipcMain.handle('get-admins', async () => {
 
 ipcMain.handle('add-admin', async (_, username) => {
   if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
   try {
     await firebaseRequest('PUT', `/admins/${username}`, true, true)
     return { success: true }
@@ -1481,12 +1645,548 @@ ipcMain.handle('add-admin', async (_, username) => {
 
 ipcMain.handle('remove-admin', async (_, username) => {
   if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  if (username === 'Mamazorus') return { success: false, error: 'L\'administrateur principal ne peut pas être retiré.' }
   try {
     await firebaseRequest('DELETE', `/admins/${username}`, null, true)
     return { success: true }
   } catch (e) {
     return { success: false, error: e.message }
   }
+})
+
+// ─── IPC : HISTORIQUE PARTAGÉ DES JOUEURS (carrousel) ─────────────────────────
+// Ajout manuel par un admin (un ou plusieurs pseudos collés, séparés par
+// espaces / virgules / retours à la ligne) pour amorcer l'historique du serveur.
+ipcMain.handle('add-players-seen', async (_, names) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré', added: [], skipped: [], invalid: 0 }
+  try {
+    const valid = sanitizePlayerNames(names)
+    const rawTokens = (Array.isArray(names) ? names : String(names ?? '').split(/[\s,;]+/))
+      .map(s => String(s ?? '').trim()).filter(Boolean)
+    const invalid = rawTokens.filter(t => !valid.includes(t)).length
+    // Un ajout admin explicite lève un éventuel masquage (annule le tombstone)
+    if (valid.length) {
+      const unhide = {}
+      for (const n of valid) unhide[n] = null
+      await firebaseRequest('PATCH', '/playersHidden', unhide, true)
+    }
+    const res = await pushPlayersSeen(valid)
+    return { success: true, added: res.added, skipped: res.skipped, invalid }
+  } catch (e) {
+    return { success: false, error: e.message, added: [], skipped: [], invalid: 0 }
+  }
+})
+
+ipcMain.handle('remove-player-seen', async (_, name) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const n = String(name ?? '').trim()
+  if (!n) return { success: false, error: 'Nom vide' }
+  try {
+    // Tombstone : marque le pseudo comme masqué AVANT de le retirer, pour que
+    // pushPlayersSeen et la lecture ne le ré-injectent pas (cache local des
+    // autres launchers, joueur encore en ligne…). Suppression durable.
+    await firebaseRequest('PUT', `/playersHidden/${encodeURIComponent(n)}`, true, true)
+    await firebaseRequest('DELETE', `/playersSeen/${encodeURIComponent(n)}`, null, true)
+    const local = loadPlayersSeen()
+    if (n in local) { delete local[n]; savePlayersSeen(local) }
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+// ─── CHAT (salons type Discord) ───────────────────────────────────────────────
+// Espace communautaire : plusieurs salons, messages en temps réel (streaming SSE
+// de Realtime Database), médias (Firebase Storage + liens). Comme pour /news et
+// /admins, TOUTES les écritures passent par le main (secret legacy) ; l'auteur
+// d'un message vient de la SESSION (currentToken), jamais du renderer (anti-spoof).
+//
+// Modèle de données :
+//   /chat/channels/{id}        = { name, description, type:'open'|'announce', order, createdAt, createdBy }
+//   /chat/messages/{id}/{push} = { author, uuid, text, media?, ts }
+//       media = { kind:'upload'|'link', url, mime?, w?, h? }
+
+const CHAT_MEDIA_MAX = 4 * 1024 * 1024
+const CHAT_ALLOWED_MIME = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+const CHAT_TEXT_MAX = 2000
+
+// Salons semés au premier démarrage si /chat/channels est vide.
+const DEFAULT_CHANNELS = [
+  { id: 'annonces', name: 'annonces', description: 'Annonces officielles du serveur',     type: 'announce' },
+  { id: 'general',  name: 'général',  description: 'Discussion générale',                  type: 'open' },
+  { id: 'entraide', name: 'entraide', description: 'Questions & entraide entre joueurs',   type: 'open' },
+  { id: 'medias',   name: 'médias',   description: 'Partagez vos screenshots et vos builds', type: 'open' },
+]
+
+// Clé Firebase valide : pas de . # $ [ ] / — on dérive un slug court et lisible.
+function sanitizeChannelId(raw) {
+  return String(raw ?? '').trim().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')   // retire les accents (é→e)
+    .replace(/[^a-z0-9_-]+/g, '-')                       // tout le reste → tiret
+    .replace(/^-+|-+$/g, '').slice(0, 40)
+}
+
+// Push ID Firebase (clé de message) : pas de . # $ [ ] /
+function isValidPushId(id) {
+  return typeof id === 'string' && id.length > 0 && id.length < 64 && !/[.#$/[\]]/.test(id)
+}
+
+async function initializeChannels() {
+  if (!isFirebaseConfigured()) return
+  try {
+    const existing = await firebaseRequest('GET', '/chat/channels', null, false)
+    if (!existing || existing === 'null' || (typeof existing === 'object' && Object.keys(existing).length === 0)) {
+      const now = Date.now()
+      const seed = {}
+      DEFAULT_CHANNELS.forEach((c, i) => {
+        seed[c.id] = { name: c.name, description: c.description, type: c.type, order: i, createdAt: now, createdBy: 'system' }
+      })
+      await firebaseRequest('PUT', '/chat/channels', seed, true)
+      console.log('[Chat] Salons par défaut initialisés')
+    }
+  } catch (e) {
+    console.log('[Chat] Impossible d\'initialiser les salons :', e.message)
+  }
+}
+
+// Identité authentifiée (depuis la session locale), source de vérité de l'auteur.
+function chatSessionUser() {
+  const username = loadSession()           // (re)charge currentToken + renvoie le pseudo
+  if (!username) return null
+  return { username, uuid: currentToken?.uuid ?? null }
+}
+
+async function chatIsAdmin(username) {
+  if (!username) return false
+  try {
+    const v = await firebaseRequest('GET', `/admins/${username}`, null, false)
+    return v === true
+  } catch { return false }
+}
+
+// Garde admin réutilisable : exige une session authentifiée ET un compte admin.
+// Vérifiée CÔTÉ MAIN — l'unique rempart, puisque le secret legacy bypass les règles.
+async function requireAdminSession() {
+  const u = chatSessionUser()
+  if (!u) return { ok: false, error: 'Reconnecte-toi.' }
+  if (!(await chatIsAdmin(u.username))) return { ok: false, error: 'Réservé aux administrateurs.' }
+  return { ok: true, user: u }
+}
+
+// Détecte le vrai type d'image d'après les magic bytes (anti-usurpation du MIME).
+function detectImageMime(buf) {
+  if (!buf || buf.length < 12) return null
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png'
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg'
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) return 'image/gif'
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+      buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return 'image/webp'
+  return null
+}
+
+// Normalise/valide un objet média venant du renderer (lien collé ou upload déjà fait).
+function chatSanitizeMedia(m) {
+  if (!m || typeof m !== 'object') return null
+  const url = String(m.url ?? '').trim()
+  if (!/^https?:\/\//i.test(url)) return null
+  // Le badge 'upload' n'est honoré que si l'URL pointe vraiment vers notre bucket
+  // (sinon on rétrograde en 'link' : un renderer ne peut pas usurper un média « hébergé »).
+  const isBucketUrl = url.startsWith(`https://firebasestorage.googleapis.com/v0/b/${FIREBASE_STORAGE_BUCKET}/o/`)
+  const out = { kind: (m.kind === 'upload' && isBucketUrl) ? 'upload' : 'link', url: url.slice(0, 1024) }
+  if (typeof m.mime === 'string') out.mime = m.mime.slice(0, 40)
+  if (Number.isFinite(m.w) && m.w > 0) out.w = Math.round(m.w)
+  if (Number.isFinite(m.h) && m.h > 0) out.h = Math.round(m.h)
+  return out
+}
+
+// ── Gestion des salons (admin uniquement, vérifié côté main) ──
+ipcMain.handle('chat-get-channels', async () => {
+  if (!isFirebaseConfigured()) return { success: false, channels: [] }
+  try {
+    const map = normalizeFbMap(await firebaseRequest('GET', '/chat/channels', null, false))
+    const channels = Object.entries(map)
+      .filter(([, c]) => c && typeof c === 'object')
+      .map(([id, c]) => ({ id, ...c }))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || (a.createdAt || 0) - (b.createdAt || 0))
+    return { success: true, channels }
+  } catch (e) {
+    return { success: false, channels: [], error: e.message }
+  }
+})
+
+ipcMain.handle('chat-create-channel', async (_, payload) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const u = chatSessionUser()
+  if (!u) return { success: false, error: 'Reconnecte-toi pour gérer les salons.' }
+  if (!(await chatIsAdmin(u.username))) return { success: false, error: 'Réservé aux administrateurs.' }
+  const name = String(payload?.name ?? '').trim().slice(0, 40)
+  if (!name) return { success: false, error: 'Nom de salon requis.' }
+  let id = sanitizeChannelId(payload?.id || name)
+  if (!id) return { success: false, error: 'Nom de salon invalide.' }
+  const type = payload?.type === 'announce' ? 'announce' : 'open'
+  const description = String(payload?.description ?? '').trim().slice(0, 200)
+  try {
+    const existing = normalizeFbMap(await firebaseRequest('GET', '/chat/channels', null, false))
+    if (existing[id]) {                       // évite d'écraser un salon : suffixe -2, -3…
+      let n = 2
+      while (existing[`${id}-${n}`]) n++
+      id = `${id}-${n}`
+    }
+    const order = Object.keys(existing).length
+    await firebaseRequest('PUT', `/chat/channels/${id}`, {
+      name, description, type, order, createdAt: Date.now(), createdBy: u.username
+    }, true)
+    return { success: true, id }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle('chat-update-channel', async (_, payload) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const u = chatSessionUser()
+  if (!u) return { success: false, error: 'Reconnecte-toi pour gérer les salons.' }
+  if (!(await chatIsAdmin(u.username))) return { success: false, error: 'Réservé aux administrateurs.' }
+  const id = sanitizeChannelId(payload?.id)
+  if (!id) return { success: false, error: 'Salon introuvable.' }
+  const patch = {}
+  if (typeof payload.name === 'string' && payload.name.trim()) patch.name = payload.name.trim().slice(0, 40)
+  if (typeof payload.description === 'string') patch.description = payload.description.trim().slice(0, 200)
+  if (payload.type === 'open' || payload.type === 'announce') patch.type = payload.type
+  if (Number.isFinite(payload.order)) patch.order = Math.round(payload.order)
+  if (!Object.keys(patch).length) return { success: true }
+  try {
+    await firebaseRequest('PATCH', `/chat/channels/${id}`, patch, true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle('chat-delete-channel', async (_, id) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const u = chatSessionUser()
+  if (!u) return { success: false, error: 'Reconnecte-toi pour gérer les salons.' }
+  if (!(await chatIsAdmin(u.username))) return { success: false, error: 'Réservé aux administrateurs.' }
+  const cid = sanitizeChannelId(id)
+  if (!cid) return { success: false, error: 'Salon introuvable.' }
+  try {
+    await firebaseRequest('DELETE', `/chat/channels/${cid}`, null, true)
+    await firebaseRequest('DELETE', `/chat/messages/${cid}`, null, true)   // purge les messages
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+// ── Messages ──
+ipcMain.handle('chat-send-message', async (_, payload) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const u = chatSessionUser()
+  if (!u) return { success: false, error: 'Reconnecte-toi pour écrire.' }
+  const cid = sanitizeChannelId(payload?.channelId)
+  if (!cid) return { success: false, error: 'Salon invalide.' }
+  let channel
+  try { channel = await firebaseRequest('GET', `/chat/channels/${cid}`, null, false) } catch {}
+  if (!channel || typeof channel !== 'object') return { success: false, error: 'Salon introuvable.' }
+  if (channel.type === 'announce' && !(await chatIsAdmin(u.username))) {
+    return { success: false, error: 'Ce salon est en lecture seule.' }
+  }
+  const text = String(payload?.text ?? '').trim().slice(0, CHAT_TEXT_MAX)
+  const media = chatSanitizeMedia(payload?.media)
+  if (!text && !media) return { success: false, error: 'Message vide.' }
+  const msg = { author: u.username, uuid: u.uuid || null, text, ts: Date.now() }
+  if (media) msg.media = media
+  try {
+    const res = await firebaseRequest('POST', `/chat/messages/${cid}`, msg, true)   // → { name: pushId }
+    return { success: true, id: res?.name }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle('chat-delete-message', async (_, payload) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const u = chatSessionUser()
+  if (!u) return { success: false, error: 'Reconnecte-toi.' }
+  const cid = sanitizeChannelId(payload?.channelId)
+  const mid = String(payload?.messageId ?? '').trim()
+  if (!cid || !isValidPushId(mid)) return { success: false, error: 'Message introuvable.' }
+  try {
+    const msg = await firebaseRequest('GET', `/chat/messages/${cid}/${mid}`, null, false)
+    if (!msg || typeof msg !== 'object') return { success: true }   // déjà supprimé
+    const admin = await chatIsAdmin(u.username)
+    if (!admin && msg.author !== u.username) return { success: false, error: 'Action non autorisée.' }
+    await firebaseRequest('DELETE', `/chat/messages/${cid}/${mid}`, null, true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+// ── Médias : sélection (dialog) + upload Firebase Storage ──
+ipcMain.handle('chat-pick-media', async () => {
+  try {
+    const r = await dialog.showOpenDialog(win, {
+      title: 'Choisir une image',
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }]
+    })
+    if (r.canceled || !r.filePaths?.length) return { canceled: true }
+    const fp = r.filePaths[0]
+    const buf = fs.readFileSync(fp)
+    if (buf.length > CHAT_MEDIA_MAX) return { canceled: false, error: 'Image trop lourde (max 4 Mo).' }
+    let ext = path.extname(fp).slice(1).toLowerCase()
+    const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`
+    if (!CHAT_ALLOWED_MIME.includes(mime)) return { canceled: false, error: 'Format non supporté (PNG, JPEG, GIF, WebP).' }
+    return { canceled: false, dataUrl: `data:${mime};base64,${buf.toString('base64')}`, mime, name: path.basename(fp), size: buf.length }
+  } catch (e) {
+    return { canceled: false, error: e.message }
+  }
+})
+
+// Upload binaire vers Firebase Storage (REST, non authentifié — autorisé par les
+// règles Storage scopées /chat-media). Suit les redirects comme downloadFile.
+function chatStorageUpload(urlString, buffer, contentType, redirects = 0) {
+  if (redirects > 5) return Promise.reject(new Error('Trop de redirections (Storage)'))
+  return new Promise((resolve, reject) => {
+    let urlObj
+    try { urlObj = new URL(urlString) } catch { return reject(new Error('URL Storage invalide')) }
+    const req = https.request({
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: 'POST',
+      headers: { 'Content-Type': contentType, 'Content-Length': buffer.length }
+    }, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        res.resume()
+        return chatStorageUpload(new URL(res.headers.location, urlObj).toString(), buffer, contentType, redirects + 1).then(resolve, reject)
+      }
+      let body = ''
+      res.on('data', c => body += c)
+      res.on('end', () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(`Storage HTTP ${res.statusCode}`))
+        try { resolve(JSON.parse(body)) } catch { reject(new Error('Réponse Storage invalide')) }
+      })
+    })
+    req.on('error', reject)
+    req.setTimeout(30000, () => { req.destroy(); reject(new Error('Délai dépassé (upload)')) })
+    req.write(buffer)
+    req.end()
+  })
+}
+
+ipcMain.handle('chat-upload-media', async (_, payload) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  if (!FIREBASE_STORAGE_BUCKET || FIREBASE_STORAGE_BUCKET.includes('YOUR-')) {
+    return { success: false, error: 'Bucket Storage non configuré.' }
+  }
+  const u = chatSessionUser()
+  if (!u) return { success: false, error: 'Reconnecte-toi pour envoyer un média.' }
+  const cid = sanitizeChannelId(payload?.channelId)
+  if (!cid) return { success: false, error: 'Salon invalide.' }
+  const m = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(String(payload?.dataUrl ?? ''))
+  if (!m) return { success: false, error: 'Image invalide.' }
+  const mime = (payload?.mime || m[1] || '').toLowerCase()
+  if (!CHAT_ALLOWED_MIME.includes(mime)) return { success: false, error: 'Format non supporté (PNG, JPEG, GIF, WebP).' }
+  let buffer
+  try { buffer = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3])) }
+  catch { return { success: false, error: 'Image illisible.' } }
+  if (!buffer.length) return { success: false, error: 'Image vide.' }
+  if (buffer.length > CHAT_MEDIA_MAX) return { success: false, error: 'Image trop lourde (max 4 Mo).' }
+  // Le type réel vient des magic bytes, pas de l'en-tête fourni par le renderer.
+  const realMime = detectImageMime(buffer)
+  if (!realMime || !CHAT_ALLOWED_MIME.includes(realMime)) {
+    return { success: false, error: 'Fichier image non reconnu (PNG, JPEG, GIF, WebP).' }
+  }
+  const ext = realMime === 'image/jpeg' ? 'jpg' : realMime.split('/')[1]
+  const objectPath = `chat-media/${cid}/${Date.now()}-${crypto.randomBytes(8).toString('hex')}.${ext}`
+  try {
+    const res = await chatStorageUpload(
+      `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_STORAGE_BUCKET}/o?name=${encodeURIComponent(objectPath)}`,
+      buffer, realMime
+    )
+    const token = String(res?.downloadTokens ?? '').split(',')[0]
+    if (!token) return { success: false, error: 'Upload sans jeton de téléchargement.' }
+    const url = `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_STORAGE_BUCKET}/o/${encodeURIComponent(objectPath)}?alt=media&token=${token}`
+    return { success: true, url, mime: realMime }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+// ── Temps réel : client SSE de Realtime Database REST ──
+// On n'utilise PAS firebaseRequest (qui bufferise tout et parse à la fin) : un flux
+// SSE ne se termine jamais. Ce client maintient une map en mémoire, applique les
+// évènements put/patch, et ré-émet la map complète (debouncée) au renderer.
+function startRtdbStream(fbPath, query, onMap) {
+  let map = {}
+  let req = null
+  let closed = false
+  let buffer = ''
+  let retry = 0
+  let reconnectTimer = null
+  let idleTimer = null
+  let emitTimer = null
+
+  const scheduleEmit = () => {
+    if (emitTimer || closed) return
+    emitTimer = setTimeout(() => { emitTimer = null; if (!closed) onMap(map) }, 50)
+  }
+
+  const armIdle = () => {
+    if (idleTimer) clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => { if (req) try { req.destroy() } catch {} }, 65000)
+  }
+
+  const applyEvent = (event, payload) => {
+    if (event === 'put') {
+      const p = String(payload?.path ?? '/')
+      if (p === '/' || p === '') {
+        map = normalizeFbMap(payload?.data)
+      } else {
+        const key = p.replace(/^\//, '').split('/')[0]
+        if (!key) return
+        if (payload?.data === null || payload?.data === undefined) delete map[key]
+        else map[key] = payload.data
+      }
+      scheduleEmit()
+    } else if (event === 'patch') {
+      const p = String(payload?.path ?? '/').replace(/^\//, '')
+      const key = p.split('/')[0]
+      if (key) map[key] = Object.assign({}, map[key], payload?.data || {})
+      else map = Object.assign({}, map, payload?.data || {})
+      scheduleEmit()
+    } else if (event === 'cancel' || event === 'auth_revoked') {
+      if (req) try { req.destroy() } catch {}
+    }
+    // keep-alive : ignoré (sert seulement à réarmer le timer d'inactivité)
+  }
+
+  const processBlock = (block) => {
+    let event = null
+    const datas = []
+    for (const line of block.split('\n')) {
+      if (line.startsWith('event:')) event = line.slice(6).trim()
+      else if (line.startsWith('data:')) datas.push(line.slice(5).replace(/^ /, ''))
+    }
+    if (!event) return
+    const raw = datas.join('\n')
+    let payload = null
+    if (raw && raw !== 'null') { try { payload = JSON.parse(raw) } catch { payload = null } }
+    applyEvent(event, payload || {})
+  }
+
+  const scheduleReconnect = () => {
+    if (closed || reconnectTimer) return
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null }
+    const delay = Math.min(30000, 1000 * Math.pow(2, retry))
+    retry++
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; buffer = ''; connect() }, delay)
+  }
+
+  const connect = (urlString) => {
+    if (closed) return
+    let urlObj
+    try { urlObj = new URL(urlString || `${FIREBASE_DATABASE_URL}${fbPath}.json${query}`) }
+    catch { return }
+    req = https.request({
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: 'GET',
+      headers: { 'Accept': 'text/event-stream' }
+    }, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        res.resume()
+        return connect(new URL(res.headers.location, urlObj).toString())
+      }
+      if (res.statusCode !== 200) { res.resume(); scheduleReconnect(); return }
+      req.setTimeout(0)        // flux long établi : on relâche le garde-temps de connexion
+      retry = 0
+      armIdle()
+      res.setEncoding('utf8')
+      res.on('data', (chunk) => {
+        armIdle()
+        buffer += chunk.replace(/\r\n/g, '\n')
+        let idx
+        while ((idx = buffer.indexOf('\n\n')) !== -1) {
+          const block = buffer.slice(0, idx)
+          buffer = buffer.slice(idx + 2)
+          if (block.trim()) processBlock(block)
+        }
+      })
+      res.on('end', scheduleReconnect)
+      res.on('error', scheduleReconnect)
+    })
+    req.on('error', scheduleReconnect)
+    req.setTimeout(30000, () => { try { req.destroy() } catch {}; scheduleReconnect() })   // garde-temps avant établissement
+    req.end()
+  }
+
+  connect()
+
+  return {
+    close() {
+      closed = true
+      if (req) { try { req.destroy() } catch {} req = null }
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      if (idleTimer) clearTimeout(idleTimer)
+      if (emitTimer) clearTimeout(emitTimer)
+    }
+  }
+}
+
+let chatChannelsStream = null
+let chatMsgStream = null
+let chatActiveChannelId = null
+
+function sendToRenderer(channel, data) {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, data)
+}
+
+ipcMain.handle('chat-subscribe-channels', () => {
+  if (!isFirebaseConfigured()) return { success: false }
+  if (chatChannelsStream) return { success: true }     // déjà actif (idempotent)
+  chatChannelsStream = startRtdbStream('/chat/channels', `?auth=${encodeURIComponent(FIREBASE_SECRET)}`, (map) => {
+    const channels = Object.entries(map)
+      .filter(([, c]) => c && typeof c === 'object')
+      .map(([id, c]) => ({ id, ...c }))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || (a.createdAt || 0) - (b.createdAt || 0))
+    sendToRenderer('chat:channels', channels)
+  })
+  return { success: true }
+})
+
+ipcMain.handle('chat-unsubscribe-channels', () => {
+  if (chatChannelsStream) { chatChannelsStream.close(); chatChannelsStream = null }
+  return { success: true }
+})
+
+ipcMain.handle('chat-subscribe', (_, channelId) => {
+  if (!isFirebaseConfigured()) return { success: false }
+  const cid = sanitizeChannelId(channelId)
+  if (!cid) return { success: false, error: 'Salon invalide.' }
+  if (chatMsgStream) { chatMsgStream.close(); chatMsgStream = null }   // exclusif : un seul salon écouté
+  chatActiveChannelId = cid
+  const q = `?orderBy=${encodeURIComponent('"$key"')}&limitToLast=200&auth=${encodeURIComponent(FIREBASE_SECRET)}`
+  chatMsgStream = startRtdbStream(`/chat/messages/${cid}`, q, (map) => {
+    const messages = Object.entries(map)
+      .filter(([, m]) => m && typeof m === 'object')
+      .map(([id, m]) => ({ id, ...m }))
+      .sort((a, b) => (a.ts || 0) - (b.ts || 0) || (a.id < b.id ? -1 : 1))
+    sendToRenderer('chat:messages', { channelId: cid, messages })
+  })
+  return { success: true }
+})
+
+ipcMain.handle('chat-unsubscribe', (_, channelId) => {
+  const cid = sanitizeChannelId(channelId)
+  if (cid && chatActiveChannelId && cid !== chatActiveChannelId) return { success: true }  // unsubscribe obsolète (StrictMode)
+  if (chatMsgStream) { chatMsgStream.close(); chatMsgStream = null }
+  chatActiveChannelId = null
+  return { success: true }
 })
 
 // ─── DOWNLOAD ────────────────────────────────────────────────────────────────

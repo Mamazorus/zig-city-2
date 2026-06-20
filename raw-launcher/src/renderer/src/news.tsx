@@ -56,7 +56,7 @@ export function CategoryBadge({
   return (
     <span
       className={`inline-flex items-center self-start whitespace-nowrap rounded-full font-ui font-semibold uppercase ${
-        md ? 'gap-[7px] text-[11px] px-[11px] py-[5px] tracking-[0.7px]' : 'gap-[6px] text-[10px] px-[9px] py-[3px] tracking-[0.6px]'
+        md ? 'gap-[7px] text-[13px] px-[11px] py-[5px] tracking-[0.7px]' : 'gap-[6px] text-[12px] px-[9px] py-[3px] tracking-[0.6px]'
       }`}
       style={{
         color: `rgb(${meta.rgb})`,

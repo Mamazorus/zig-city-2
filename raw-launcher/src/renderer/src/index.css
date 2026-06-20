@@ -186,6 +186,18 @@ body {
   animation: icon-crown-lift 0.38s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+/* Chat: petit "pop" avec légère rotation, esprit spring de la sidebar */
+@keyframes icon-chat-pop {
+  0%   { transform: scale(1)    rotate(0deg); }
+  40%  { transform: scale(1.12) rotate(-5deg); }
+  70%  { transform: scale(1)    rotate(2deg); }
+  100% { transform: scale(1)    rotate(0deg); }
+}
+
+.group:hover .icon-chat {
+  animation: icon-chat-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
 /* ── MICRO-ANIMATIONS ICÔNES ADMINISTRATION ──
    Icônes pleines (currentColor) cohérentes avec la sidebar d'App.tsx.
    Animations spring déclenchées au survol du BOUTON parent.
@@ -336,21 +348,22 @@ button:hover .icon-adm-trash-lid {
   to   { opacity: 0; }
 }
 
+/* Remontée douce depuis le bas — la carte émerge sans rebond ni dépassement,
+   décélération « expo » qui se pose en silence (murmuré, pas spring). */
 @keyframes modal-card-in {
-  0%   { opacity: 0; transform: scale(0.90) translateY(18px); }
-  65%  { transform: scale(1.025) translateY(-4px); }
-  100% { opacity: 1; transform: scale(1) translateY(0); }
+  0%   { opacity: 0; transform: translateY(26px) scale(0.985); }
+  100% { opacity: 1; transform: translateY(0)    scale(1); }
 }
 
 @keyframes modal-card-out {
-  0%   { opacity: 1; transform: scale(1) translateY(0); }
-  100% { opacity: 0; transform: scale(0.93) translateY(12px); }
+  0%   { opacity: 1; transform: translateY(0)    scale(1); }
+  100% { opacity: 0; transform: translateY(14px) scale(0.99); }
 }
 
-.modal-backdrop-enter { animation: modal-backdrop-in  0.22s ease forwards; }
+.modal-backdrop-enter { animation: modal-backdrop-in  0.3s  ease forwards; }
 .modal-backdrop-exit  { animation: modal-backdrop-out 0.22s ease forwards; }
-.modal-card-enter     { animation: modal-card-in  0.38s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
-.modal-card-exit      { animation: modal-card-out 0.22s cubic-bezier(0.4, 0, 1, 1) forwards; }
+.modal-card-enter     { animation: modal-card-in  0.44s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.modal-card-exit      { animation: modal-card-out 0.2s  cubic-bezier(0.4, 0, 1, 1) forwards; }
 
 /* ── ÉTOILES DÉCORATIVES ── */
 @keyframes star-float-1 {

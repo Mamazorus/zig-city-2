@@ -1,8 +1,10 @@
-﻿import { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle } from 'react'
+﻿import { useState, useEffect, useMemo, useCallback, useRef, forwardRef, useImperativeHandle } from 'react'
 import { SkinViewer } from 'skinview3d'
 import { Raycaster, Vector2, MOUSE, type Object3D } from 'three'
 import packData from '../../../modpack.json'
 import AdminDashboard from './AdminDashboard'
+import StatsPage from './Stats'
+import ChatPanel from './ChatPanel'
 import { resolveCategory, CategoryBadge, NewsFallback, type NewsCategory } from './news'
 import { Avatar, RemoteNewsImage } from './remote-image'
 
@@ -24,7 +26,7 @@ import shop4Image from './assets/shop-4.png'
 import currencyImage from './assets/currency.png'
 
 type Phase = 'loading' | 'updating' | 'logged-out' | 'checking' | 'installing' | 'ready' | 'launching' | 'error'
-type MainTab = 'home' | 'stats' | 'mods' | 'admin'
+type MainTab = 'home' | 'stats' | 'chat' | 'admin'
 
 interface DynamicNewsItem {
   id: string
@@ -751,7 +753,7 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
           onModelUp={model3DUp}
         />
 
-        <p className="absolute bottom-[10px] inset-x-0 text-center font-ui text-[10px] text-white/45 pointer-events-none leading-tight px-[8px]">
+        <p className="absolute bottom-[10px] inset-x-0 text-center font-ui text-[12px] text-white/45 pointer-events-none leading-tight px-[8px]">
           Clic gauche : peindre • Clic droit : pivoter • molette : zoom
         </p>
       </div>
@@ -770,8 +772,8 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
                   : 'border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.06)]'
               }`}
             >
-              <span className="font-ui font-semibold text-[13px] text-white">{v === 'classic' ? 'Classique' : 'Fin'}</span>
-              <span className="font-ui text-[10px] text-white/40">{v === 'classic' ? 'Bras larges' : 'Bras fins'}</span>
+              <span className="font-ui font-semibold text-[14px] text-white">{v === 'classic' ? 'Classique' : 'Fin'}</span>
+              <span className="font-ui text-[12px] text-white/40">{v === 'classic' ? 'Bras larges' : 'Bras fins'}</span>
             </button>
           ))}
         </div>
@@ -784,7 +786,7 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
                 key={l}
                 onClick={() => setPaintLayer(l)}
                 title={l === 'overlay' ? 'Le 2e calque (chapeau, veste, manches…) qui ressort en 3D' : 'Le corps du personnage'}
-                className={`flex-1 px-[10px] py-[8px] rounded-[10px] border font-ui text-[12px] font-semibold transition-colors ${
+                className={`flex-1 px-[10px] py-[8px] rounded-[10px] border font-ui text-[14px] font-semibold transition-colors ${
                   paintLayer === l
                     ? 'border-[rgba(0,255,225,0.5)] bg-[rgba(0,255,225,0.08)] text-white'
                     : 'border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] text-white/60 hover:bg-[rgba(255,255,255,0.06)]'
@@ -842,7 +844,7 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
         {/* Repères de zones */}
         <button
           onClick={() => setShowGuides(s => !s)}
-          className={`flex items-center gap-[8px] px-[12px] py-[8px] rounded-[10px] border font-ui text-[12px] font-semibold transition-colors ${
+          className={`flex items-center gap-[8px] px-[12px] py-[8px] rounded-[10px] border font-ui text-[14px] font-semibold transition-colors ${
             showGuides ? 'border-[rgba(0,255,225,0.5)] bg-[rgba(0,255,225,0.08)] text-white' : 'border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] text-white/55 hover:text-white'
           }`}
         >
@@ -854,17 +856,17 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
 
         {/* Couleur */}
         <div className="flex items-center justify-between">
-          <p className="font-ui font-semibold text-[12px] text-white/60 tracking-[-0.3px]">Couleur</p>
+          <p className="font-ui font-semibold text-[14px] text-white/60 tracking-[-0.3px]">Couleur</p>
           <div className="flex items-center gap-[7px]">
             <div className="size-[20px] rounded-[5px] border border-[rgba(255,255,255,0.2)]" style={{ background: color }} />
-            <span className="font-mono text-[11px] text-white/55 uppercase">{color}</span>
+            <span className="font-mono text-[13px] text-white/55 uppercase">{color}</span>
           </div>
         </div>
         <ColorPicker color={color} onChange={setColor} />
 
         {/* Couleurs récentes */}
         <div className="flex flex-col gap-[6px]">
-          <p className="font-ui text-[11px] text-white/40 tracking-[-0.3px]">Couleurs récentes</p>
+          <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px]">Couleurs récentes</p>
           <div className="flex flex-wrap gap-[5px]">
             {recentColors.map((c, i) => (
               <button
@@ -881,7 +883,7 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
         {/* Patron à plat — petit, en bas de colonne pour combler l'espace */}
         <div className="flex flex-col gap-[6px] mt-auto">
           <div className="flex items-center justify-between">
-            <p className="font-ui text-[11px] text-white/40 tracking-[-0.3px]">Patron à plat</p>
+            <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px]">Patron à plat</p>
             <button
               onClick={() => setShowFlat(s => !s)}
               title="Afficher / masquer le patron"
@@ -979,6 +981,16 @@ export default function App() {
   const [dynamicNews, setDynamicNews] = useState<DynamicNewsItem[]>([])
   const [heroHovered, setHeroHovered] = useState(false)
   const [playersSeen, setPlayersSeen] = useState<string[]>([])
+  // Têtes affichées dans le carrousel : on mélange pour la variété et on plafonne
+  // (chaque tête = une requête mc-heads) sans toucher à l'historique complet.
+  const carouselNames = useMemo(() => {
+    const a = [...playersSeen]
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[a[i], a[j]] = [a[j], a[i]]
+    }
+    return a.slice(0, 48)
+  }, [playersSeen])
   const initRef = useRef(false) // garde anti double-exécution de l'init (React.StrictMode)
 
   // ── Changer de skin (éditeur intégré) ──
@@ -1174,6 +1186,18 @@ export default function App() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [profileMenuOpen])
 
+  // Recharge l'historique partagé (n'actualise l'état que si l'ensemble a changé,
+  // pour ne pas re-mélanger le carrousel ni re-télécharger les têtes à chaque appel).
+  const refreshPlayersSeen = async () => {
+    const list = await window.launcher.getPlayersSeen()
+    if (!Array.isArray(list)) return
+    setPlayersSeen(prev => {
+      const a = new Set(prev)
+      if (a.size === list.length && list.every(x => a.has(x))) return prev
+      return list
+    })
+  }
+
   const handleLogin = async () => {
     setPhase('checking')
     setStatus('Ouverture du login Microsoft...')
@@ -1184,6 +1208,7 @@ export default function App() {
       const [adminResult] = await Promise.all([
         window.launcher.checkAdmin(),
         fetchNews(),
+        refreshPlayersSeen(),   // sa propre tête apparaît sans redémarrage
       ])
       setIsAdmin(adminResult.isAdmin)
       await checkAndInstall()
@@ -1444,7 +1469,7 @@ export default function App() {
                     </div>
                     <div>
                       <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.56px]">{username}</p>
-                      <p className="font-ui text-[12px] text-white/40">Compte Minecraft</p>
+                      <p className="font-ui text-[14px] text-white/40">Compte Minecraft</p>
                     </div>
                   </div>
 
@@ -1565,25 +1590,15 @@ export default function App() {
                 </svg>
               </button>
 
+              {/* Icône bulle de message (espace de discussion / salons) */}
               <button
-                className={`${iconBtn} group ${activeTab === 'mods' ? '!bg-[rgba(255,255,255,0.15)]' : ''}`}
-                onClick={() => setActiveTab('mods')}
+                className={`${iconBtn} group ${activeTab === 'chat' ? '!bg-[rgba(255,255,255,0.15)]' : ''}`}
+                onClick={() => setActiveTab('chat')}
+                title="Discussion"
               >
-
-                <div style={{ position: 'relative', width: 23, height: 18 }}>
-                  <svg className="sp-mktg-body" viewBox="0 0 166.099 181" fill="none" overflow="visible"
-                    style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', width: 14, height: 15 }}>
-                    <path d="M57.9131 107.025V161.698C57.9131 170.425 50.839 177.5 42.1123 177.5C33.3855 177.5 26.3105 170.425 26.3105 161.698V107.025H57.9131Z" fill="white" stroke="white" strokeWidth="7"/>
-                    <path d="M21.6406 42.688H71.9512V107.044H21.6406C11.6219 107.044 3.50011 98.9226 3.5 88.9038V60.8286C3.50017 50.8099 11.6219 42.6882 21.6406 42.688Z" fill="white" stroke="white" strokeWidth="7"/>
-                    <path d="M152.55 4.81071L76.5145 41.21C74.0774 42.3766 72.5264 44.8387 72.5264 47.5406V102.621C72.5264 105.21 73.9519 107.589 76.2352 108.81L152.271 149.472C156.946 151.973 162.599 148.585 162.599 143.283V11.1414C162.599 5.97637 157.209 2.58052 152.55 4.81071Z" fill="white" stroke="white" strokeWidth="7"/>
-                  </svg>
-                  <svg className="sp-mktg-waves" viewBox="0 0 70 110" fill="none" overflow="visible"
-                    style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', width: 7, height: 12, pointerEvents: 'none' }}>
-                    <line className="sp-mktg-wave sp-mktg-wave--1" x1="8" y1="22" x2="30" y2="10" stroke="white" strokeWidth="14" strokeLinecap="round"/>
-                    <line className="sp-mktg-wave sp-mktg-wave--2" x1="8" y1="55" x2="34" y2="55" stroke="white" strokeWidth="14" strokeLinecap="round"/>
-                    <line className="sp-mktg-wave sp-mktg-wave--3" x1="8" y1="88" x2="30" y2="100" stroke="white" strokeWidth="14" strokeLinecap="round"/>
-                  </svg>
-                </div>
+                <svg className="icon-chat" width="21" height="20" viewBox="0 0 24 22" fill="white">
+                  <path d="M12 2C6.2 2 1.5 5.6 1.5 10c0 2.2 1.2 4.2 3.1 5.6-.2 1.5-.9 2.9-2 4 .12.07.27.1.42.1 1.9 0 3.7-.7 5.06-1.9 1.2.32 2.5.5 3.92.5 5.8 0 10.5-3.6 10.5-8S17.8 2 12 2Z"/>
+                </svg>
               </button>
 
               {/* Bouton admin (couronne) — visible uniquement pour les admins */}
@@ -1622,7 +1637,17 @@ export default function App() {
               <AdminDashboard username={username} onNewsUpdated={fetchNews} />
             </div>
           )}
-          <main className={`flex flex-col gap-[16px] flex-1 min-h-0 min-w-0 relative ${activeTab === 'admin' ? 'hidden' : ''} ${heroHovered ? 'hero-hovered' : ''}`}>
+          {activeTab === 'stats' && (
+            <div className="flex-1 min-h-0 min-w-0">
+              <StatsPage />
+            </div>
+          )}
+          {activeTab === 'chat' && (
+            <div className="flex-1 min-h-0 min-w-0">
+              <ChatPanel username={username} isAdmin={isAdmin} onlinePlayers={serverStatus.players} />
+            </div>
+          )}
+          <main className={`flex flex-col gap-[16px] flex-1 min-h-0 min-w-0 relative ${activeTab === 'admin' || activeTab === 'stats' || activeTab === 'chat' ? 'hidden' : ''} ${heroHovered ? 'hero-hovered' : ''}`}>
 
             {/* ── CARTE HERO ── */}
             <div
@@ -1659,7 +1684,7 @@ export default function App() {
                     {`mise à jour`}
                   </p>
                   <div className="relative z-10 flex flex-col items-center gap-[8px]" style={{ width: 600 }}>
-                    <p className="font-ui text-white/60 text-[13px] text-center truncate w-full">
+                    <p className="font-ui text-white/60 text-[14px] text-center truncate w-full">
                       {progress?.detail ?? status}
                       {progress?.label ? ` — ${progress.label}` : ''}
                     </p>
@@ -1701,7 +1726,7 @@ export default function App() {
                     {`rejoindre zig city  !`}
                   </p>
                   <div className="relative z-10 flex flex-col items-center gap-[8px]" style={{ width: 600 }}>
-                    <p className="font-ui text-white/60 text-[13px] text-center truncate w-full">
+                    <p className="font-ui text-white/60 text-[14px] text-center truncate w-full">
                       {progress?.detail ?? status}
                       {progress ? ` — ${progress.label}` : ''}
                     </p>
@@ -1806,7 +1831,7 @@ export default function App() {
               const CAROUSEL_GAP = 80
               const ITEM_SIZE = 48
               const MIN_ITEMS = 12
-              const rawList = playersSeen.length > 0 ? playersSeen : []
+              const rawList = carouselNames.length > 0 ? carouselNames : []
               const singleSet: (string | null)[] = rawList.length === 0
                 ? Array.from({ length: MIN_ITEMS }).map(() => null)
                 : rawList.length < MIN_ITEMS
@@ -1872,7 +1897,7 @@ export default function App() {
                             <rect x="1.5" y="2.5" width="9" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.1" />
                             <path d="M1.5 5h9M4 1.5v2M8 1.5v2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
                           </svg>
-                          <p className="font-ui text-[11px] tracking-[-0.2px] whitespace-nowrap">{item.date}</p>
+                          <p className="font-ui text-[13px] tracking-[-0.2px] whitespace-nowrap">{item.date}</p>
                         </div>
                       </div>
                     </article>
@@ -1883,7 +1908,7 @@ export default function App() {
           </main>
 
           {/* ── PANNEAU DROIT ── */}
-          <aside className="flex flex-col gap-[16px] h-full shrink-0" style={{ width: 304 }}>
+          <aside className={`flex flex-col gap-[16px] h-full shrink-0 ${activeTab === 'stats' || activeTab === 'chat' ? 'hidden' : ''}`} style={{ width: 304 }}>
 
             {/* Liste des joueurs en ligne */}
             <div className="backdrop-blur-[5.95px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] flex flex-col gap-[22px] items-start overflow-x-clip overflow-y-auto p-[16px] rounded-[16px] shadow-[2px_2px_8px_0px_rgba(0,0,0,0.1)] w-full flex-1 min-h-0">
@@ -1909,10 +1934,10 @@ export default function App() {
                   </div>
                 ))}
                 {!serverStatus.loading && serverStatus.players.length === 0 && serverStatus.online > 0 && (
-                  <p className="font-mono text-[13px] text-white/30">{serverStatus.online} joueur(s) en ligne</p>
+                  <p className="font-mono text-[14px] text-white/30">{serverStatus.online} joueur(s) en ligne</p>
                 )}
                 {!serverStatus.loading && serverStatus.online === 0 && (
-                  <p className="font-mono text-[13px] text-white/30">
+                  <p className="font-mono text-[14px] text-white/30">
                     {serverStatus.error ? 'Serveur hors ligne' : 'Aucun joueur en ligne'}
                   </p>
                 )}
@@ -1920,7 +1945,7 @@ export default function App() {
 
               {/* Indicateur occupation */}
               {isBusy && phase !== 'launching' && (
-                <div className="flex items-center gap-[8px] text-white/30 font-ui text-[12px] mt-auto">
+                <div className="flex items-center gap-[8px] text-white/30 font-ui text-[14px] mt-auto">
                   <svg className="animate-spin" style={{ width: 12, height: 12 }} fill="none" viewBox="0 0 24 24">
                     <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -1985,7 +2010,7 @@ export default function App() {
             <div
               className={`news-modal relative flex flex-col rounded-[16px] overflow-hidden border border-[rgba(255,255,255,0.16)] ${newsClosing ? 'modal-card-exit' : 'modal-card-enter'}`}
               style={{
-                width: 680,
+                width: 740,
                 maxHeight: '82vh',
                 background: 'rgba(255,255,255,0.08)',
                 backdropFilter: 'blur(28px) saturate(1.4)',
@@ -2002,7 +2027,7 @@ export default function App() {
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                   <path d="M9 2.5L4.5 7L9 11.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
-                <span className="font-ui font-semibold text-[13px] text-white tracking-[-0.4px]">Retour</span>
+                <span className="font-ui font-semibold text-[14px] text-white tracking-[-0.4px]">Retour</span>
               </button>
 
               {/* Bannière — image nette (ou aplat sobre), séparée du contenu par un hairline */}
@@ -2019,7 +2044,7 @@ export default function App() {
                 {/* En-tête éditorial : catégorie + méta */}
                 <div className="flex items-center justify-between gap-[12px] mb-[14px]">
                   <CategoryBadge category={modalCat.key} size="md" />
-                  <p className="font-ui text-[12px] text-white/45 tracking-[-0.3px] whitespace-nowrap select-text">
+                  <p className="font-ui text-[14px] text-white/45 tracking-[-0.3px] whitespace-nowrap select-text">
                     {selectedNews.date}{selectedNews.author ? ` · ${selectedNews.author}` : ''}
                   </p>
                 </div>
@@ -2069,7 +2094,7 @@ export default function App() {
                     <button
                       key={t}
                       onClick={() => { setSkinTab(t); if (t === 'library') refreshLibrary() }}
-                      className={`font-ui text-[12px] tracking-[-0.3px] px-[14px] h-[28px] rounded-full transition-colors ${
+                      className={`font-ui text-[14px] tracking-[-0.3px] px-[14px] h-[28px] rounded-full transition-colors ${
                         skinTab === t ? 'bg-[rgba(255,255,255,0.12)] text-white font-semibold' : 'text-white/45 hover:text-white/70'
                       }`}
                     >
@@ -2099,10 +2124,10 @@ export default function App() {
                 </div>
               ) : skinError && !editorSrc ? (
                 <div className="flex flex-col items-center justify-center gap-[12px] text-center" style={{ height: 320 }}>
-                  <p className="font-ui text-[13px] text-[rgba(255,120,120,0.95)] max-w-[420px] leading-snug">{skinError}</p>
+                  <p className="font-ui text-[14px] text-[rgba(255,120,120,0.95)] max-w-[420px] leading-snug">{skinError}</p>
                   <button
                     onClick={openSkinModal}
-                    className="font-ui text-[13px] text-white/70 border border-[rgba(255,255,255,0.15)] px-[16px] py-[8px] rounded-[10px] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors"
+                    className="font-ui text-[14px] text-white/70 border border-[rgba(255,255,255,0.15)] px-[16px] py-[8px] rounded-[10px] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors"
                   >
                     Réessayer
                   </button>
@@ -2119,10 +2144,10 @@ export default function App() {
                       onVariantChange={setSelectedVariant}
                     />
                     {skinError && (
-                      <p className="font-ui text-[12px] text-[rgba(255,120,120,0.95)] leading-snug">{skinError}</p>
+                      <p className="font-ui text-[14px] text-[rgba(255,120,120,0.95)] leading-snug">{skinError}</p>
                     )}
                     {skinSuccess && !skinError && (
-                      <p className="font-ui text-[12px] text-[rgba(120,255,180,0.95)] leading-snug">
+                      <p className="font-ui text-[14px] text-[rgba(120,255,180,0.95)] leading-snug">
                         Skin enregistré / appliqué ! En jeu, il peut mettre quelques secondes à apparaître.
                       </p>
                     )}
@@ -2137,20 +2162,20 @@ export default function App() {
                         onKeyDown={e => { if (e.key === 'Enter') handleSaveToLibrary() }}
                         placeholder="Nom du skin à enregistrer…"
                         maxLength={60}
-                        className="flex-1 bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.12)] rounded-[10px] px-[12px] py-[9px] text-white font-ui text-[13px] focus:outline-none focus:border-[rgba(0,255,225,0.4)] placeholder:text-white/30 transition-colors"
+                        className="flex-1 bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.12)] rounded-[10px] px-[12px] py-[9px] text-white font-ui text-[14px] focus:outline-none focus:border-[rgba(0,255,225,0.4)] placeholder:text-white/30 transition-colors"
                       />
                       <button
                         onClick={handleSaveToLibrary}
-                        className="px-[16px] py-[9px] rounded-[10px] font-ui font-bold text-[13px] text-[#0e0b16] bg-[rgba(0,255,225,0.9)] hover:bg-[rgba(0,255,225,1)] transition-colors whitespace-nowrap"
+                        className="px-[16px] py-[9px] rounded-[10px] font-ui font-bold text-[14px] text-[#0e0b16] bg-[rgba(0,255,225,0.9)] hover:bg-[rgba(0,255,225,1)] transition-colors whitespace-nowrap"
                       >
                         Enregistrer le skin actuel
                       </button>
                     </div>
 
                     {libraryLoading ? (
-                      <p className="font-ui text-[13px] text-white/40 py-[48px] text-center">Chargement…</p>
+                      <p className="font-ui text-[14px] text-white/40 py-[48px] text-center">Chargement…</p>
                     ) : libraryItems.length === 0 ? (
-                      <p className="font-ui text-[13px] text-white/35 py-[48px] text-center">
+                      <p className="font-ui text-[14px] text-white/35 py-[48px] text-center">
                         Aucun skin enregistré pour l'instant. Dessine un skin puis enregistre-le ici pour le retrouver plus tard.
                       </p>
                     ) : (
@@ -2160,11 +2185,11 @@ export default function App() {
                             <div className="rounded-[8px] overflow-hidden" style={{ background: 'rgba(0,255,225,0.05)' }}>
                               <SkinPreview src={item.dataUrl} variant={item.variant} width={62} />
                             </div>
-                            <p className="font-ui text-[11px] text-white/70 text-center truncate w-full" title={item.name}>{item.name}</p>
+                            <p className="font-ui text-[13px] text-white/70 text-center truncate w-full" title={item.name}>{item.name}</p>
                             <div className="flex gap-[6px] w-full">
                               <button
                                 onClick={() => handleLoadFromLibrary(item)}
-                                className="flex-1 py-[6px] rounded-[8px] font-ui text-[11px] font-semibold text-white bg-[rgba(0,255,225,0.14)] border border-[rgba(0,255,225,0.3)] hover:bg-[rgba(0,255,225,0.22)] transition-colors"
+                                className="flex-1 py-[6px] rounded-[8px] font-ui text-[13px] font-semibold text-white bg-[rgba(0,255,225,0.14)] border border-[rgba(0,255,225,0.3)] hover:bg-[rgba(0,255,225,0.22)] transition-colors"
                               >
                                 Charger
                               </button>
@@ -2191,7 +2216,7 @@ export default function App() {
                 <button
                   onClick={handlePickSkin}
                   disabled={skinBusy}
-                  className="flex items-center gap-[7px] px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[13px] text-white/75 border border-[rgba(255,255,255,0.14)] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors disabled:opacity-40"
+                  className="flex items-center gap-[7px] px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[14px] text-white/75 border border-[rgba(255,255,255,0.14)] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors disabled:opacity-40"
                 >
                   <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
                     <path d="M10 13V4M10 4L6.5 7.5M10 4l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -2204,7 +2229,7 @@ export default function App() {
                   onClick={handleExportSkin}
                   disabled={skinBusy}
                   title="Exporter le skin en fichier PNG"
-                  className="flex items-center gap-[7px] px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[13px] text-white/75 border border-[rgba(255,255,255,0.14)] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors disabled:opacity-40"
+                  className="flex items-center gap-[7px] px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[14px] text-white/75 border border-[rgba(255,255,255,0.14)] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors disabled:opacity-40"
                 >
                   <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
                     <path d="M10 4v9M10 13l-3.5-3.5M10 13l3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -2217,7 +2242,7 @@ export default function App() {
                   onClick={handleResetSkin}
                   disabled={skinBusy}
                   title="Revenir au skin par défaut Minecraft"
-                  className="px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[13px] text-white/55 border border-[rgba(255,255,255,0.12)] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors disabled:opacity-40"
+                  className="px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[14px] text-white/55 border border-[rgba(255,255,255,0.12)] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors disabled:opacity-40"
                 >
                   Défaut
                 </button>
