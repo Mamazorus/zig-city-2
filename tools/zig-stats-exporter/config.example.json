@@ -1,0 +1,27 @@
+{
+  "_README": "Copie ce fichier en config.json puis remplis-le. firebaseDatabaseUrl/firebaseSecret sont déjà ceux du launcher Zig City. Choisis source.mode = 'sftp' (panel type Pterodactyl) OU 'local' (script sur la machine du serveur).",
+
+  "firebaseDatabaseUrl": "https://zig-base-default-rtdb.europe-west1.firebasedatabase.app",
+  "firebaseSecret": "kC9FjebZUTe2rh6RPkjWWjx0YP6NIvXnbMmrOEgm",
+
+  "_interval": "Cadence du rafraîchissement. intervalSeconds est prioritaire sur intervalMinutes. ~60s est idéal : Minecraft n'écrit les fichiers de stats sur disque que périodiquement (sauvegarde auto + déconnexion), donc descendre sous ~30s ne rend pas les données plus fraîches.",
+  "intervalSeconds": 60,
+  "resolveNamesOnline": true,
+
+  "source": {
+    "mode": "sftp",
+    "worldName": "world",
+
+    "_local": "Utilisé si mode = 'local'. Chemin du DOSSIER du serveur (celui qui contient world/ et usercache.json).",
+    "serverRoot": "C:/chemin/vers/le/serveur",
+
+    "_sftp": "Utilisé si mode = 'sftp'. NitroServ : onglet 'Accès SFTP' du manager → crée un compte (lecture seule suffit). host = l'IP du serveur SANS le port, port = 22, username = ton identifiant AVEC les chiffres devant, password = celui défini à la création du compte SFTP. ASTUCE NitroServ : la racine SFTP contient un dossier 'Minecraft/' → mets remoteRoot à '/Minecraft' (worldName reste 'world').",
+    "sftp": {
+      "host": "IP-de-ton-serveur-sans-le-port",
+      "port": 22,
+      "username": "ton-identifiant-avec-les-chiffres-devant",
+      "password": "ton-mot-de-passe-SFTP",
+      "remoteRoot": "/"
+    }
+  }
+}

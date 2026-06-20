@@ -1,0 +1,49 @@
+name: Zig stats exporter
+
+# Publie le classement du serveur Minecraft vers Firebase, à intervalle régulier,
+# directement depuis le cloud GitHub (gratuit sur dépôt public) — aucune machine à
+# laisser allumée. Remplace l'exécution de l'exporteur sur un PC/VPS.
+#
+# Prérequis : ajouter un secret de dépôt « STATS_CONFIG » contenant le contenu de
+# tools/zig-stats-exporter/config.json (Settings → Secrets and variables → Actions).
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # toutes les 5 min (minimum autorisé par GitHub)
+  workflow_dispatch: {}       # + déclenchement manuel (onglet Actions → Run workflow)
+
+permissions:
+  contents: read
+
+# Une seule exécution à la fois ; une nouvelle annule un éventuel cycle resté coincé.
+concurrency:
+  group: zig-stats
+  cancel-in-progress: true
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/zig-stats-exporter
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Recrée config.json à partir du secret (jamais committé). printf écrit dans
+      # le fichier sans afficher la valeur dans les logs ; GitHub masque en plus
+      # automatiquement la valeur du secret si elle apparaissait.
+      - name: Config depuis le secret
+        env:
+          STATS_CONFIG: ${{ secrets.STATS_CONFIG }}
+        run: printf '%s' "$STATS_CONFIG" > config.json
+
+      - name: Installe les dépendances (ssh2-sftp-client)
+        run: npm install --no-audit --no-fund
+
+      - name: Exporte les stats (un passage)
+        run: node exporter.js --once

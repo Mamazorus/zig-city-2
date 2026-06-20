@@ -1,0 +1,14 @@
+{
+  "name": "zig-stats-exporter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lit les stats du serveur Minecraft Zig City 2 et les publie vers Firebase pour le classement du launcher.",
+  "main": "exporter.js",
+  "scripts": {
+    "start": "node exporter.js",
+    "once": "node exporter.js --once"
+  },
+  "dependencies": {
+    "ssh2-sftp-client": "^11.0.0"
+  }
+}
