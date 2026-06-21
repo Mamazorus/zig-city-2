@@ -334,7 +334,15 @@ ipcMain.handle('fetch-image', (_e, url) => {
 ipcMain.handle('window-minimize', () => win?.minimize())
 ipcMain.handle('window-maximize', () => win?.isMaximized() ? win.unmaximize() : win.maximize())
 ipcMain.handle('window-close', () => win?.close())
-ipcMain.handle('open-external', (_, url) => shell.openExternal(url))
+ipcMain.handle('open-external', (_, url) => {
+  // Liste blanche de schéma : shell.openExternal accepte n'importe quoi (file://,
+  // protocoles custom enregistrés). On n'ouvre que du http(s) (liens Discord, releases
+  // GitHub) pour ne pas exécuter d'URL forgée si une source distante était compromise.
+  try {
+    const { protocol } = new URL(url)
+    if (protocol === 'http:' || protocol === 'https:') return shell.openExternal(url)
+  } catch { /* URL invalide → on ignore */ }
+})
 
 // ─── AUTO-UPDATE (electron-updater + GitHub Releases) ─────────────────────────
 function sendUpdateStatus(payload) {
@@ -363,10 +371,98 @@ function setupAutoUpdater() {
   autoUpdater.on('error',                (err) => sendUpdateStatus({ status: 'error', message: String(err?.message || err) }))
 }
 
+// ── MAJ macOS : check manuel via l'API GitHub (PAS electron-updater) ──
+// Le .dmg distribué n'est pas signé (pas de compte Apple Developer), donc
+// electron-updater ne peut pas s'auto-installer sur Mac (Squirrel.Mac exige une
+// app signée + notarisée). On se contente donc de DÉTECTER qu'une version plus
+// récente existe et on propose au joueur de la télécharger à la main.
+const GITHUB_OWNER = 'Mamazorus'
+const GITHUB_REPO  = 'zig-city-2'
+
+// GET JSON simple (l'API GitHub renvoie directement, sans redirection ici).
+// User-Agent obligatoire sinon GitHub répond 403.
+function httpGetJson(url) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url)
+    const req = https.request({
+      hostname: u.hostname,
+      path: u.pathname + u.search,
+      method: 'GET',
+      headers: { 'User-Agent': 'zig-city-2-launcher', 'Accept': 'application/vnd.github+json' },
+    }, (res) => {
+      let body = ''
+      res.on('data', c => body += c)
+      res.on('end', () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return reject(new Error(`HTTP ${res.statusCode}: ${String(body).slice(0, 200)}`))
+        }
+        try { resolve(JSON.parse(body)) } catch { reject(new Error('Réponse JSON invalide')) }
+      })
+    })
+    req.on('error', reject)
+    req.setTimeout(15000, () => req.destroy(new Error('Timeout API GitHub')))
+    req.end()
+  })
+}
+
+// Compare deux versions semver simples (MAJOR.MINOR.PATCH[-pre]). >0 si a>b.
+// Règle semver : à cœur égal, une version stable (sans -pre) > une pré-version.
+function compareSemver(a, b) {
+  const parse = (v) => {
+    const [core, pre = ''] = String(v).replace(/^v/, '').split('-')
+    const [maj, min, pat] = core.split('.').map(n => parseInt(n, 10) || 0)
+    return { nums: [maj || 0, min || 0, pat || 0], pre }
+  }
+  const pa = parse(a), pb = parse(b)
+  for (let i = 0; i < 3; i++) {
+    if (pa.nums[i] !== pb.nums[i]) return pa.nums[i] - pb.nums[i]
+  }
+  if (!pa.pre && pb.pre) return 1
+  if (pa.pre && !pb.pre) return -1
+  if (pa.pre === pb.pre) return 0
+  return pa.pre > pb.pre ? 1 : -1   // ordre lexical (suffit pour 'beta' vs 'beta')
+}
+
+// Émet les mêmes events 'update-status' que le flux Windows, mais le statut
+// final est 'mac-update' (→ le renderer affiche un écran « télécharge la MAJ »).
+async function checkMacUpdate() {
+  sendUpdateStatus({ status: 'checking' })
+  try {
+    const current = app.getVersion()
+    const allowPrerelease = current.includes('-')   // même règle que Windows
+    const releases = await httpGetJson(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=30`)
+    if (!Array.isArray(releases)) throw new Error('Format de réponse GitHub inattendu')
+
+    let best = null
+    for (const r of releases) {
+      if (!r || r.draft) continue
+      if (r.prerelease && !allowPrerelease) continue
+      const version = String(r.tag_name || '').replace(/^v/, '')
+      if (!version) continue
+      if (compareSemver(version, current) <= 0) continue            // pas plus récente
+      if (best && compareSemver(version, best.version) <= 0) continue // garde la plus haute
+      const dmg = Array.isArray(r.assets) ? r.assets.find(a => /\.dmg$/i.test(a?.name || '')) : null
+      best = { version, url: (dmg && dmg.browser_download_url) || r.html_url }
+    }
+
+    if (best) sendUpdateStatus({ status: 'mac-update', version: best.version, url: best.url })
+    else sendUpdateStatus({ status: 'not-available' })
+  } catch (e) {
+    sendUpdateStatus({ status: 'error', message: String(e?.message || e) })
+  }
+}
+
 // Déclenché par le renderer une fois qu'il écoute déjà 'update-status' : évite toute
 // course entre l'émission des events et l'abonnement côté UI.
 ipcMain.handle('check-for-updates', async () => {
   if (!app.isPackaged) return { status: 'disabled' }   // pas de MAJ en dev
+  // macOS : app non signée → on ne touche PAS à electron-updater (il planterait à
+  // l'install). On vérifie la dernière version via l'API GitHub (fire-and-forget,
+  // les events 'update-status' pilotent l'UI comme sur Windows).
+  if (process.platform === 'darwin') {
+    checkMacUpdate()
+    return { status: 'checking' }
+  }
   try {
     await autoUpdater.checkForUpdates()
     return { status: 'checking' }
@@ -378,6 +474,7 @@ ipcMain.handle('check-for-updates', async () => {
 // Installe la MAJ déjà téléchargée : silencieux (/S) + relance automatique de l'app.
 let updateInstalling = false
 ipcMain.handle('quit-and-install', () => {
+  if (process.platform === 'darwin') return  // Mac non signé : aucune install auto possible
   if (updateInstalling) return          // garde contre les appels multiples
   updateInstalling = true
   autoUpdater.quitAndInstall(true, true)
@@ -391,7 +488,7 @@ app.whenReady().then(() => {
   if (restoredUser) recordPlayerSeen(restoredUser)  // garde le joueur dans l'historique partagé
   initializeAdmins()
   initializeChannels()
-  setupAutoUpdater()
+  if (process.platform !== 'darwin') setupAutoUpdater()  // Mac : check maison via API GitHub
   createWindow()
 
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })

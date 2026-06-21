@@ -23,8 +23,10 @@ interface GameClosedData {
 }
 
 interface UpdateStatusData {
-  status: 'checking' | 'available' | 'not-available' | 'progress' | 'downloaded' | 'error' | 'disabled'
+  // 'mac-update' : MAJ détectée sur macOS (app non signée) → téléchargement manuel via `url`.
+  status: 'checking' | 'available' | 'not-available' | 'progress' | 'downloaded' | 'error' | 'disabled' | 'mac-update'
   version?: string
+  url?: string
   percent?: number
   transferred?: number
   total?: number

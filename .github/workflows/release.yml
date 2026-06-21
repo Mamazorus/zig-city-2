@@ -14,7 +14,19 @@ permissions:
 
 jobs:
   release:
-    runs-on: windows-latest
+    # Un build par OS. Windows produit le .exe (NSIS), macOS produit le .dmg
+    # (universal Intel + Apple Silicon, NON signé : pas de compte Apple Developer).
+    strategy:
+      fail-fast: false        # si un OS échoue, l'autre publie quand même sa version
+      max-parallel: 1         # série, jamais en parallèle : évite que les deux jobs
+                              # créent la même Release GitHub en même temps (course → 422)
+      matrix:
+        include:
+          - os: windows-latest
+            script: publish:win
+          - os: macos-latest
+            script: publish:mac
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: raw-launcher   # le projet Electron est dans ce sous-dossier
@@ -45,9 +57,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build & publish (Windows)
-        run: npm run publish:win
+      - name: Build & publish (${{ matrix.os }})
+        run: npm run ${{ matrix.script }}
         env:
           # Le GITHUB_TOKEN intégré au workflow a déjà les droits contents:write :
           # pas besoin de Personal Access Token. electron-builder le lit via GH_TOKEN.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS : aucune identité de signature (pas de compte Apple Developer).
+          # Force un build NON signé et empêche electron-builder de chercher une
+          # identité au hasard dans le trousseau du runner (no-op sur Windows).
+          # La signature ad-hoc nécessaire à Apple Silicon est faite par build/afterPack.js.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          # Les deux jobs ciblent la MÊME release (même tag). Le 2e job y ajoute ses
+          # assets : on neutralise la garde « release publiée il y a +2h » d'electron-builder
+          # qui, sinon, ferait silencieusement sauter l'upload si le run dépassait 2h.
+          EP_GH_IGNORE_TIME: true

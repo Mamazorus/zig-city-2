@@ -10,7 +10,8 @@
     "start": "electron-vite preview",
     "build:win": "electron-vite build && electron-builder --win",
     "publish:win": "electron-vite build && electron-builder --win --publish always",
-    "build:mac": "electron-vite build && electron-builder --mac"
+    "build:mac": "electron-vite build && electron-builder --mac",
+    "publish:mac": "electron-vite build && electron-builder --mac --publish always"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
@@ -38,6 +39,7 @@
     "appId": "com.rawstudio.launcher",
     "productName": "Zig City 2",
     "copyright": "Copyright © 2026 Maël Auzenet",
+    "afterPack": "build/afterPack.js",
     "files": [
       "out/**",
       "modpack.json",
@@ -48,8 +50,15 @@
       "icon": "assets/logo_zig_city.png"
     },
     "mac": {
-      "target": "dmg",
-      "icon": "assets/logo_zig_city.png"
+      "target": [
+        {
+          "target": "dmg",
+          "arch": "universal"
+        }
+      ],
+      "icon": "assets/logo_zig_city.png",
+      "category": "public.app-category.games",
+      "identity": null
     },
     "nsis": {
       "oneClick": true

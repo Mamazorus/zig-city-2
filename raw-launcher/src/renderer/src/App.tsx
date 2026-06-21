@@ -969,6 +969,9 @@ export default function App() {
   const [username, setUsername] = useState('')
   const [status, setStatus] = useState('Chargement...')
   const [progress, setProgress] = useState<ProgressState | null>(null)
+  // macOS uniquement : MAJ détectée mais non auto-installable (app non signée).
+  // Quand défini, l'overlay « mise à jour » affiche un bouton de téléchargement manuel.
+  const [macUpdate, setMacUpdate] = useState<{ version?: string; url?: string } | null>(null)
   const [activeTab, setActiveTab] = useState<MainTab>('home')
   const [uuid, setUuid] = useState<string | null>(null)
   const [serverStatus, setServerStatus] = useState<ServerStatus>({ online: 0, max: 0, players: [], loading: true })
@@ -1097,6 +1100,10 @@ export default function App() {
               setPhase('updating')
               setStatus('Recherche de mises à jour...')
               setProgress(null)
+              // Laisse au check le temps d'aboutir avant que le filet anti-blocage ne
+              // libère : sur Mac l'appel API GitHub peut prendre jusqu'à ~15 s, et on veut
+              // que l'event terminal ('mac-update'/'not-available') gagne la course.
+              rearm(30000)
               break
             case 'available':
               setPhase('updating')
@@ -1126,6 +1133,16 @@ export default function App() {
               // Si l'installation ne ferme pas l'app (antivirus, fichier verrouillé...),
               // on libère après 15 s pour laisser le joueur entrer malgré tout.
               rearm(15000)
+              break
+            case 'mac-update':
+              // macOS : MAJ obligatoire mais non auto-installable (app non signée).
+              // On BLOQUE le démarrage (pas de proceed) : le joueur doit télécharger
+              // le nouveau .dmg et relancer. On annule le filet pour ne pas le libérer.
+              clearTimeout(timer)
+              setPhase('updating')
+              setMacUpdate({ version: u.version, url: u.url })
+              setStatus(`Nouvelle version ${u.version ?? ''} disponible`)
+              setProgress(null)
               break
             case 'not-available':
             case 'error':
@@ -1675,7 +1692,35 @@ export default function App() {
               )}
 
               {/* État : mise à jour du launcher */}
-              {phase === 'updating' && (
+              {phase === 'updating' && (macUpdate ? (
+                /* macOS : MAJ obligatoire mais non auto-installable (app non signée).
+                   Téléchargement manuel du .dmg, puis le joueur relance le launcher. */
+                <>
+                  <p
+                    className="relative z-10 font-minecraft leading-[normal] whitespace-pre uppercase"
+                    style={{ fontSize: 48, color: '#ffffff', fontFamily: 'MinecraftBold, monospace' }}
+                  >
+                    {`mise à jour requise`}
+                  </p>
+                  <div className="relative z-10 flex flex-col items-center gap-[16px]" style={{ width: 600 }}>
+                    <p className="font-ui text-white/70 text-[15px] text-center leading-[1.5]">
+                      La version {macUpdate.version ?? ''} est disponible. Sur Mac, télécharge-la
+                      manuellement pour continuer à jouer.
+                    </p>
+                    <button
+                      className="bg-white text-[#0e0b16] font-ui font-bold text-[15px] px-[32px] py-[12px] rounded-[12px] hover:bg-white/90 transition-colors disabled:opacity-40"
+                      disabled={!macUpdate.url}
+                      onClick={(e) => { e.stopPropagation(); if (macUpdate.url) window.launcher.openExternal(macUpdate.url) }}
+                    >
+                      Télécharger la mise à jour
+                    </button>
+                    <p className="font-ui text-white/40 text-[13px] text-center leading-[1.5]">
+                      Ouvre le .dmg, glisse Zig City 2 dans Applications, puis relance le launcher.
+                      <br />Si macOS bloque l'ouverture : clic droit sur l'app → Ouvrir.
+                    </p>
+                  </div>
+                </>
+              ) : (
                 <>
                   <p
                     className="relative z-10 font-minecraft leading-[normal] whitespace-pre uppercase"
@@ -1696,7 +1741,7 @@ export default function App() {
                     </div>
                   </div>
                 </>
-              )}
+              ))}
 
               {/* État : non connecté */}
               {phase === 'logged-out' && (
