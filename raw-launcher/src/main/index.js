@@ -22,7 +22,20 @@ const NEOFORGE_INSTALLER_PATH =
 const JAVA_MANIFEST_URL = 'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json'
 const JAVA_RUNTIME_NAME = 'java-runtime-delta'
 const JAVA_DIR = path.join(GAME_DIR, 'runtime', JAVA_RUNTIME_NAME)
-const JAVA_EXE = path.join(JAVA_DIR, 'bin', 'javaw.exe')
+// Java multi-plateforme. Clé(s) du manifeste Mojang à essayer selon l'OS
+// (Apple Silicon → mac-os-arm64, repli mac-os/Intel via Rosetta par sécurité).
+const JAVA_PLATFORM_KEYS =
+  process.platform === 'win32'  ? ['windows-x64']
+  : process.platform === 'darwin' ? (process.arch === 'arm64' ? ['mac-os-arm64', 'mac-os'] : ['mac-os'])
+  : ['linux']
+// Chemin de l'exécutable Java DANS le runtime, selon l'OS. macOS empaquette le JRE
+// en bundle (jre.bundle/Contents/Home/bin/java) ≠ Windows (bin/javaw.exe).
+function javaBinRels() {
+  if (process.platform === 'win32')  return [path.join('bin', 'javaw.exe'), path.join('bin', 'java.exe')]
+  if (process.platform === 'darwin') return [path.join('jre.bundle', 'Contents', 'Home', 'bin', 'java')]
+  return [path.join('bin', 'java')]
+}
+const JAVA_EXE = path.join(JAVA_DIR, javaBinRels()[0])
 
 let win = null
 let currentToken = null
@@ -1113,14 +1126,19 @@ function findJavaExecutable() {
     path.join(app.getPath('appData'), '.minecraft', 'runtime'),
     path.join(GAME_DIR, 'runtime')
   ]
+  const binRels = javaBinRels()
   for (const base of baseDirs) {
     if (!fs.existsSync(base)) continue
     const entries = fs.readdirSync(base).sort().reverse()
     for (const name of entries) {
-      for (const exe of ['javaw.exe', 'java.exe']) {
-        const c1 = path.join(base, name, 'windows-x64', name, 'bin', exe)
-        if (fs.existsSync(c1)) return c1
-        const c2 = path.join(base, name, 'bin', exe)
+      for (const binRel of binRels) {
+        // layout .minecraft : <base>/<comp>/<os>/<comp>/<binRel>
+        for (const os of JAVA_PLATFORM_KEYS) {
+          const c1 = path.join(base, name, os, name, binRel)
+          if (fs.existsSync(c1)) return c1
+        }
+        // layout plat (notre propre téléchargement) : <base>/<comp>/<binRel>
+        const c2 = path.join(base, name, binRel)
         if (fs.existsSync(c2)) return c2
       }
     }
@@ -1141,17 +1159,27 @@ async function ensureJava21() {
   })
 
   const allManifest = await httpsGet(JAVA_MANIFEST_URL)
-  const entries = allManifest?.['windows-x64']?.[JAVA_RUNTIME_NAME]
-  if (!entries || !entries[0]) throw new Error('Runtime Java 21 introuvable (manifest Mojang)')
+  // Première clé OS réellement présente dans le manifeste (Apple Silicon → repli Intel).
+  let entries = null
+  for (const key of JAVA_PLATFORM_KEYS) {
+    const e = allManifest?.[key]?.[JAVA_RUNTIME_NAME]
+    if (e && e[0]) { entries = e; break }
+  }
+  if (!entries) throw new Error('Runtime Java 21 introuvable (manifest Mojang)')
 
   const manifest = await httpsGet(entries[0].manifest.url)
-  const files = Object.entries(manifest.files).filter(([_, f]) => f.type === 'file')
+  const allEntries = Object.entries(manifest.files)
+  const files = allEntries.filter(([_, f]) => f.type === 'file')
 
   let done = 0
   for (const [relPath, info] of files) {
     const dest = path.join(JAVA_DIR, relPath)
     fs.mkdirSync(path.dirname(dest), { recursive: true })
     await downloadFile(info.downloads.raw.url, dest)
+    // macOS/Linux : rétablir le bit exécutable, sinon `spawn ... EACCES` au lancement.
+    if (info.executable && process.platform !== 'win32') {
+      try { fs.chmodSync(dest, 0o755) } catch { /* best-effort */ }
+    }
     done++
     if (done % 5 === 0 || done === files.length) {
       win?.webContents.send('install-progress', {
@@ -1160,6 +1188,18 @@ async function ensureJava21() {
         percent: 2 + Math.round((done / files.length) * 28)
       })
     }
+  }
+
+  // macOS : recréer les liens symboliques du bundle JRE (≈200 liens, indispensables
+  // au démarrage de Java). Le code ne les téléchargeait pas → bundle cassé sur Mac.
+  for (const [relPath, info] of allEntries) {
+    if (info.type !== 'link') continue
+    const dest = path.join(JAVA_DIR, relPath)
+    try {
+      fs.mkdirSync(path.dirname(dest), { recursive: true })
+      try { fs.unlinkSync(dest) } catch { /* rien à retirer */ }
+      fs.symlinkSync(info.target, dest)
+    } catch (e) { console.warn('[java] lien non recréé :', relPath, e.message) }
   }
 
   return JAVA_EXE
