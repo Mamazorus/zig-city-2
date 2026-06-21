@@ -22,6 +22,9 @@ concurrency:
 jobs:
   export:
     runs-on: ubuntu-latest
+    # La boucle tourne ~5,5 h par run (cf. --minutes ci-dessous) ; borne de sécurité
+    # juste sous le plafond GitHub (6 h). Dépôt public = minutes gratuites/illimitées.
+    timeout-minutes: 355
     defaults:
       run:
         working-directory: tools/zig-stats-exporter
@@ -45,5 +48,9 @@ jobs:
       - name: Installe les dépendances (ssh2-sftp-client)
         run: npm install --no-audit --no-fund
 
-      - name: Exporte les stats (un passage)
-        run: node exporter.js --once
+      # Boucle ~5,5 h (MAJ toutes les intervalSeconds, ~30 s), puis arrêt propre.
+      # Le cron */5 + concurrency.cancel-in-progress relancent une boucle fraîche :
+      # tant qu'un run est vivant, les stats restent à jour en continu — fini le
+      # « 1 MAJ puis plus rien pendant des heures » du mode --once.
+      - name: Exporte les stats (boucle longue)
+        run: node exporter.js --minutes 350

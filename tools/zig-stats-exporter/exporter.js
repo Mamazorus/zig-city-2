@@ -326,7 +326,17 @@ async function runOnce(cfg) {
 async function main() {
   const cfg = loadConfig()
   const once = process.argv.includes('--once')
-  log(`Démarrage — mode ${cfg.source.mode}, intervalle ${Math.round(cfg.intervalMs / 1000)} s${once ? ' (passage unique)' : ''}.`)
+
+  // --minutes N (ou env RUN_MINUTES) : durée max avant un arrêt PROPRE de la boucle
+  // (exit 0). Pensé pour GitHub Actions : chaque run boucle pendant N minutes puis
+  // rend la main, et le planificateur (cron) relance — au lieu d'un seul passage qui
+  // laisse les stats figées jusqu'au prochain réveil (aléatoire) de GitHub.
+  const minIdx = process.argv.indexOf('--minutes')
+  const runMinutes = Number((minIdx >= 0 && process.argv[minIdx + 1]) || process.env.RUN_MINUTES || 0)
+  const maxRuntimeMs = runMinutes > 0 ? runMinutes * 60000 : 0
+  const startedAt = Date.now()
+
+  log(`Démarrage — mode ${cfg.source.mode}, intervalle ${Math.round(cfg.intervalMs / 1000)} s${once ? ' (passage unique)' : maxRuntimeMs ? ` (boucle ${runMinutes} min)` : ''}.`)
 
   // Boucle auto-replanifiée : l'intervalle court à partir de la FIN du cycle
   // précédent, donc jamais deux cycles concurrents (pas de connexions SFTP ni de
@@ -334,7 +344,12 @@ async function main() {
   const loop = async () => {
     try { await runOnce(cfg) }
     catch (e) { log('Erreur de cycle :', e.message) }
-    if (!once) setTimeout(loop, cfg.intervalMs)
+    if (once) return
+    if (maxRuntimeMs && Date.now() - startedAt >= maxRuntimeMs) {
+      log(`Durée max atteinte (${runMinutes} min) — arrêt propre, le planificateur relancera.`)
+      return
+    }
+    setTimeout(loop, cfg.intervalMs)
   }
   await loop()
 }
