@@ -1,0 +1,46 @@
+# ─── Zig City 2 — service systemd de l'exporteur de stats ─────────────────────
+# Fait tourner exporter.js en continu sur le VPS du serveur Minecraft (mode local),
+# avec relance automatique au crash ET au reboot. Remplace le cron GitHub Actions,
+# dont la planification n'est pas fiable (runs sautés/retardés de plusieurs heures).
+#
+# Installation (voir README → « systemd (Linux, recommandé sur VPS) ») :
+#   1. Adapter les 3 lignes marquées « ADAPTER » ci-dessous.
+#   2. sudo cp zig-stats.service /etc/systemd/system/zig-stats.service
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable --now zig-stats
+#   5. journalctl -u zig-stats -f      (suivre les logs en direct)
+
+[Unit]
+Description=Zig City 2 - exporteur de stats Minecraft vers Firebase
+Documentation=https://github.com/Mamazorus/zig-city-2/tree/main/tools/zig-stats-exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# ADAPTER : utilisateur qui peut LIRE les fichiers du serveur (world/stats/*.json).
+# Mets l'utilisateur sous lequel tourne ton serveur Minecraft.
+User=minecraft
+
+# ADAPTER : dossier contenant exporter.js (cf. procédure : clone du dépôt).
+WorkingDirectory=/opt/zig-city-2/tools/zig-stats-exporter
+
+# ADAPTER si besoin : chemin complet de node (vérifie avec « which node »).
+# Lance la BOUCLE interne (intervalSeconds), pas « --once » : systemd garde le
+# process vivant, la cadence est gérée par exporter.js lui-même.
+ExecStart=/usr/bin/node exporter.js
+
+# Relance automatique en cas d'arrêt/crash (et redémarre au boot grâce à enable).
+Restart=always
+RestartSec=10
+
+# Logs visibles via : journalctl -u zig-stats
+StandardOutput=journal
+StandardError=journal
+
+# Durcissement léger.
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

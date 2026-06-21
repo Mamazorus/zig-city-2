@@ -80,6 +80,48 @@ Le classement n'est à jour que tant que le script tourne. Quelques options :
 - Sur certains panels Pterodactyl tu peux aussi lancer le script en mode `local`
   directement dans le conteneur si l'image dispose de Node.
 
+> ⚠️ **N'utilise pas le cron de GitHub Actions pour une cadence courte.** Les
+> workflows planifiés GitHub sont « best-effort » : un `*/5 * * * *` est en
+> pratique sauté/retardé et ne tourne souvent qu'une fois par heure ou moins
+> (surtout sur dépôt public et aux heures rondes). Pour des MAJ régulières, fais
+> tourner l'exporteur en continu (systemd ci-dessous).
+
+### systemd (Linux, recommandé sur VPS)
+
+Si le serveur Minecraft tourne sur un VPS/dédié où tu as un accès SSH et où les
+fichiers `world/` sont sur le disque local, c'est l'option la plus fiable :
+mode `local` (lecture directe, sans SFTP) + service qui survit au reboot.
+
+```bash
+# 1) Pré-vol : confirmer Node + systemd et localiser le dossier du monde
+which node && node -v          # doit être >= 18
+which systemctl                # si absent : ce n'est pas un VPS classique → systemd impossible
+find / -type d -path '*world/stats' 2>/dev/null   # révèle le vrai chemin du serveur
+
+# 2) Récupérer l'exporteur (dépôt public) — le mode local n'a AUCUNE dépendance
+sudo git clone https://github.com/Mamazorus/zig-city-2.git /opt/zig-city-2
+cd /opt/zig-city-2/tools/zig-stats-exporter
+
+# 3) Créer config.json en mode local
+#    serverRoot = dossier PARENT de world/ trouvé à l'étape 1 (ex: /Minecraft)
+cp config.example.json config.json
+nano config.json   # mode="local", serverRoot=<…>, garde firebaseDatabaseUrl/firebaseSecret
+
+# 4) Tester un passage unique
+node exporter.js --once   # doit logguer « Publié : N joueur(s). »
+
+# 5) Installer le service (adapter User=, WorkingDirectory=, ExecStart= dans le .service)
+sudo cp zig-stats.service /etc/systemd/system/zig-stats.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now zig-stats
+journalctl -u zig-stats -f   # suivre les logs en direct
+```
+
+Une fois le service stable, **désactive la planification GitHub Actions** pour
+éviter deux écrivains : commente la ligne `cron` de `.github/workflows/zig-stats.yml`
+(garde `workflow_dispatch` comme déclencheur manuel de secours), ou désactive le
+workflow depuis l'onglet **Actions**.
+
 ## Notes
 
 - `config.json` et `name-cache.json` sont ignorés par git (le SFTP contient ton
