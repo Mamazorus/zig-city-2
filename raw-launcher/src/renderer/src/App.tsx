@@ -972,6 +972,8 @@ export default function App() {
   // macOS uniquement : MAJ détectée mais non auto-installable (app non signée).
   // Quand défini, l'overlay « mise à jour » affiche un bouton de téléchargement manuel.
   const [macUpdate, setMacUpdate] = useState<{ version?: string; url?: string } | null>(null)
+  // Dernières lignes de log du jeu en cas de crash (affichées dans l'écran d'erreur).
+  const [crashLog, setCrashLog] = useState('')
   const [activeTab, setActiveTab] = useState<MainTab>('home')
   const [uuid, setUuid] = useState<string | null>(null)
   const [serverStatus, setServerStatus] = useState<ServerStatus>({ online: 0, max: 0, players: [], loading: true })
@@ -984,16 +986,32 @@ export default function App() {
   const [dynamicNews, setDynamicNews] = useState<DynamicNewsItem[]>([])
   const [heroHovered, setHeroHovered] = useState(false)
   const [playersSeen, setPlayersSeen] = useState<string[]>([])
-  // Têtes affichées dans le carrousel : on mélange pour la variété et on plafonne
-  // (chaque tête = une requête mc-heads) sans toucher à l'historique complet.
+  // Têtes affichées dans le carrousel : ordre stable et déterministe (tri
+  // alphabétique, insensible à la casse) — le carrousel garde toujours le même
+  // ordre, sans mélange aléatoire ni doublon. On plafonne (chaque tête = une
+  // requête mc-heads) sans toucher à l'historique complet.
   const carouselNames = useMemo(() => {
-    const a = [...playersSeen]
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      ;[a[i], a[j]] = [a[j], a[i]]
-    }
-    return a.slice(0, 48)
+    return Array.from(new Set(playersSeen))
+      .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }))
+      .slice(0, 48)
   }, [playersSeen])
+
+  // ── Carrousel : pseudo « façon Minecraft » au survol d'une tête ──
+  // Le pseudo flotte au-dessus de la tête survolée. Comme la carte est en
+  // overflow-hidden (coins arrondis + masque de fondu), on rend l'étiquette hors
+  // de la carte, dans un wrapper `relative` non rogné. Au survol, le défilement se
+  // met en pause (CSS) : la tête est donc figée et on lit sa position une seule fois.
+  const carouselWrapRef = useRef<HTMLDivElement>(null)
+  const [hoveredHead, setHoveredHead] = useState<{ name: string; x: number; y: number } | null>(null)
+  const handleHeadEnter = useCallback((name: string, el: HTMLElement) => {
+    const wrap = carouselWrapRef.current
+    if (!wrap) return
+    const wr = wrap.getBoundingClientRect()
+    const hr = el.getBoundingClientRect()
+    setHoveredHead({ name, x: hr.left - wr.left + hr.width / 2, y: hr.top - wr.top })
+  }, [])
+  const handleHeadLeave = useCallback(() => setHoveredHead(null), [])
+
   const initRef = useRef(false) // garde anti double-exécution de l'init (React.StrictMode)
 
   // ── Changer de skin (éditeur intégré) ──
@@ -1074,9 +1092,11 @@ export default function App() {
     window.launcher.onGameClosed((data) => {
       setProgress(null)
       if (data?.code && data.code !== 0) {
+        setCrashLog(data.log ?? '')
         setStatus(`Crash détecté (code ${data.code})`)
         setPhase('error')
       } else {
+        setCrashLog('')
         setStatus(`Prêt — ${packData.mods.length} mods installés`)
         setPhase('ready')
       }
@@ -1204,7 +1224,7 @@ export default function App() {
   }, [profileMenuOpen])
 
   // Recharge l'historique partagé (n'actualise l'état que si l'ensemble a changé,
-  // pour ne pas re-mélanger le carrousel ni re-télécharger les têtes à chaque appel).
+  // pour ne pas re-télécharger les têtes du carrousel à chaque appel).
   const refreshPlayersSeen = async () => {
     const list = await window.launcher.getPlayersSeen()
     if (!Array.isArray(list)) return
@@ -1819,6 +1839,22 @@ export default function App() {
                     erreur !
                   </p>
                   <p className="relative z-10 font-ui text-white/60 text-[14px] text-center max-w-[600px]">{status}</p>
+                  {crashLog && (
+                    <div className="relative z-10 w-full max-w-[680px] flex flex-col items-center gap-[8px]">
+                      <pre
+                        className="w-full font-mono text-[11px] text-white/55 text-left whitespace-pre-wrap break-words bg-black/40 border border-white/10 rounded-[10px] p-[12px] max-h-[200px] overflow-auto"
+                        style={{ userSelect: 'text' }}
+                      >
+                        {crashLog}
+                      </pre>
+                      <button
+                        className="font-ui text-white/50 text-[12px] underline hover:text-white/80 transition-colors"
+                        onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(crashLog) }}
+                      >
+                        Copier le log
+                      </button>
+                    </div>
+                  )}
                   {username && (
                     <button
                       className="relative z-10 border border-[rgba(255,100,100,0.3)] bg-[rgba(255,100,100,0.1)] text-[rgba(255,160,160,0.9)] font-ui font-semibold text-[15px] px-[24px] py-[10px] rounded-[12px] hover:bg-[rgba(255,100,100,0.2)] transition-colors"
@@ -1876,35 +1912,54 @@ export default function App() {
               const CAROUSEL_GAP = 80
               const ITEM_SIZE = 48
               const MIN_ITEMS = 12
-              const rawList = carouselNames.length > 0 ? carouselNames : []
-              const singleSet: (string | null)[] = rawList.length === 0
-                ? Array.from({ length: MIN_ITEMS }).map(() => null)
-                : rawList.length < MIN_ITEMS
-                  ? Array.from({ length: MIN_ITEMS }).map((_, i) => rawList[i % rawList.length])
-                  : rawList
+              // Chaque joueur apparaît une seule fois, dans l'ordre stable défini
+              // plus haut (plus de remplissage par répétition). Le set est ensuite
+              // dupliqué une seule fois — uniquement pour rendre la boucle continue
+              // (translateX 0 → -50%) sans couture ni saut.
+              const singleSet: (string | null)[] = carouselNames.length === 0
+                ? Array.from({ length: MIN_ITEMS }).map(() => null)   // aucun joueur vu : têtes Steve décoratives
+                : carouselNames
               const carouselItems = [...singleSet, ...singleSet]
               const animDuration = (singleSet.length * (ITEM_SIZE + CAROUSEL_GAP)) / 50
 
               return (
-                <div
-                  className="backdrop-blur-[5.95px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] overflow-hidden rounded-[16px] shadow-[2px_2px_8px_0px_rgba(0,0,0,0.1)] shrink-0 w-full"
-                  style={{ height: 88 }}
-                >
+                <div ref={carouselWrapRef} className="relative w-full shrink-0">
                   <div
-                    className="flex items-center h-full w-full overflow-hidden"
-                    style={{
-                      maskImage: 'linear-gradient(to right, transparent 0%, black 14%, black 86%, transparent 100%)',
-                      WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 14%, black 86%, transparent 100%)',
-                    }}
+                    className="backdrop-blur-[5.95px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] overflow-hidden rounded-[16px] shadow-[2px_2px_8px_0px_rgba(0,0,0,0.1)] w-full"
+                    style={{ height: 88 }}
                   >
-                    <div className="carousel-track flex items-center" style={{ animationDuration: `${animDuration}s` }}>
-                      {carouselItems.map((name, i) => (
-                        <div key={i} className="size-[48px] rounded-[8px] shrink-0 overflow-hidden" style={{ marginRight: CAROUSEL_GAP }}>
-                          <Avatar name={name} className="size-full object-cover" />
-                        </div>
-                      ))}
+                    <div
+                      className="flex items-center h-full w-full overflow-hidden"
+                      style={{
+                        maskImage: 'linear-gradient(to right, transparent 0%, black 14%, black 86%, transparent 100%)',
+                        WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 14%, black 86%, transparent 100%)',
+                      }}
+                    >
+                      <div className="carousel-track flex items-center" style={{ animationDuration: `${animDuration}s` }}>
+                        {carouselItems.map((name, i) => (
+                          <div
+                            key={i}
+                            className="carousel-head size-[48px] rounded-[8px] shrink-0 overflow-hidden"
+                            style={{ marginRight: CAROUSEL_GAP }}
+                            onMouseEnter={name ? (e) => handleHeadEnter(name, e.currentTarget) : undefined}
+                            onMouseLeave={name ? handleHeadLeave : undefined}
+                          >
+                            <Avatar name={name} className="size-full object-cover" />
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
+
+                  {/* Pseudo « façon Minecraft » au survol — rendu hors de la carte rognée */}
+                  {hoveredHead && (
+                    <div
+                      className="mc-nametag-anchor"
+                      style={{ left: hoveredHead.x, top: hoveredHead.y }}
+                    >
+                      <span className="mc-nametag">{hoveredHead.name}</span>
+                    </div>
+                  )}
                 </div>
               )
             })()}

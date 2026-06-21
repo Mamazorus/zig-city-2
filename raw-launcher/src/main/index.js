@@ -1206,12 +1206,17 @@ async function ensureJava21() {
 }
 
 // ─── NEOFORGE JVM ARGS ───────────────────────────────────────────────────────
+// Nom d'OS au format manifeste Mojang (windows/osx/linux), pour évaluer les règles
+// de librairies selon la plateforme RÉELLE (était codé en dur 'windows' → sur Mac,
+// les libs OS-spécifiques étaient mal filtrées).
+const MOJANG_OS = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'osx' : 'linux'
+
 function libRuleAllows(rules) {
   if (!rules || rules.length === 0) return true
   let result = false
   for (const rule of rules) {
     let applies = true
-    if (rule.os && rule.os.name && rule.os.name !== 'windows') applies = false
+    if (rule.os && rule.os.name && rule.os.name !== MOJANG_OS) applies = false
     if (applies) result = rule.action === 'allow'
   }
   return result
@@ -1263,11 +1268,14 @@ function buildNeoForgeJvmArgs() {
     }
     if (fs.existsSync(clientJar)) cpEntries.push(clientJar)
 
-    const classpath = cpEntries.join(';')
+    // Séparateur de chemin natif : ';' sur Windows, ':' sur macOS/Linux. Était codé
+    // en dur ';' → sur Mac le module-path NeoForge (-p) devenait un seul chemin invalide
+    // → BootstrapLauncher ne trouvait plus ses modules → crash au lancement (code 1).
+    const classpath = cpEntries.join(path.delimiter)
 
     const vars = {
       '${library_directory}': libraryDir,
-      '${classpath_separator}': ';',
+      '${classpath_separator}': path.delimiter,
       '${version_name}': neoVersionId,
       '${classpath}': classpath
     }
@@ -1488,17 +1496,28 @@ ipcMain.handle('launch', async () => {
   }
 
   let logBuffer = []
+  // Buffer porté à 400 lignes : une stacktrace de crash NeoForge/mod dépasse 60 lignes.
+  const pushLog = (line) => { logBuffer.push(line); if (logBuffer.length > 400) logBuffer.shift() }
   launcher.on('data', (e) => {
     const line = e.toString()
-    logBuffer.push(line)
-    if (logBuffer.length > 60) logBuffer.shift()
+    pushLog(line)
     win?.webContents.send('game-log', line)
   })
   launcher.on('progress', (e) => win?.webContents.send('launch-progress', e))
-  launcher.on('debug', (e) => console.log('[MCLC debug]', e))
+  // On capture aussi les messages 'debug' de MCLC (ligne de commande JVM, étapes) :
+  // précieux pour diagnostiquer un échec de lancement.
+  launcher.on('debug', (e) => { pushLog('[MCLC] ' + e); console.log('[MCLC debug]', e) })
   launcher.on('close', (code) => {
     win?.show()
-    win?.webContents.send('game-closed', { code, log: logBuffer.join('\n') })
+    const log = logBuffer.join('\n')
+    if (code && code !== 0) {                       // crash : on persiste le log sur disque
+      try {
+        const logDir = path.join(GAME_DIR, 'logs')
+        fs.mkdirSync(logDir, { recursive: true })
+        fs.writeFileSync(path.join(logDir, 'last-crash.log'), log)
+      } catch { /* best-effort */ }
+    }
+    win?.webContents.send('game-closed', { code, log })
   })
 
   try {
