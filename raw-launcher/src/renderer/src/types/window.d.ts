@@ -106,6 +106,11 @@ declare global {
       installModpack: () => Promise<{ success: boolean; error?: string }>
       launch: () => Promise<{ success: boolean; error?: string }>
       getServerStatus: () => Promise<{ online: number; max: number; players: { name: string; since: number }[]; error?: string }>
+
+      // Réglages utilisateur (RAM allouée à la JVM, en Go). Toutes les valeurs sont
+      // en Go ; les bornes dépendent de la RAM physique de la machine.
+      getSettings: () => Promise<{ ram: number; defaultRam: number; minRam: number; maxRam: number; recommendedRam: number; totalGb: number; custom: boolean }>
+      setSettings: (payload: { ram: number | null }) => Promise<{ success: boolean; ram?: number; error?: string }>
       onInstallProgress: (cb: (data: InstallProgressData) => void) => void
       onLaunchProgress: (cb: (data: LaunchProgressData) => void) => void
       onGameClosed: (cb: (data: GameClosedData) => void) => void

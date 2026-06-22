@@ -6,6 +6,7 @@ const fs = require('fs')
 const https = require('https')
 const http = require('http')
 const net = require('net')
+const os = require('os')
 const crypto = require('crypto')
 const { spawn } = require('child_process')
 
@@ -39,6 +40,71 @@ const JAVA_EXE = path.join(JAVA_DIR, javaBinRels()[0])
 
 let win = null
 let currentToken = null
+
+// ─── RÉGLAGES UTILISATEUR ─────────────────────────────────────────────────────
+// Préférences propres à l'utilisateur, persistées HORS de modpack.json (lui est
+// livré avec l'app et ÉCRASÉ à chaque mise à jour). On les range dans le dossier
+// de jeu pour qu'elles survivent aux mises à jour du launcher.
+const SETTINGS_FILE = path.join(GAME_DIR, 'launcher-settings.json')
+
+function loadSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))
+  } catch (e) {}
+  return {}
+}
+
+function saveSettings(settings) {
+  try {
+    fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true })
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings))
+  } catch (e) {}
+}
+
+// Mémoire (RAM) allouée à la JVM Minecraft, en Go entiers. Les bornes sont
+// calculées d'après la RAM physique : le curseur peut monter jusqu'à la RAM
+// totale, mais on dérive une valeur « recommandée » saine et un plancher.
+const RAM_MIN_GB = 2
+
+// Arrondit au demi-Go le plus proche (valeurs « rondes » pour la RAM conseillée).
+const roundHalf = (x) => Math.round(x * 2) / 2
+// Arrondit au dixième de Go (le curseur de mémoire avance par pas de 0,1 Go).
+const roundTenth = (x) => Math.round(x * 10) / 10
+
+function systemRamGb() {
+  return Math.max(1, Math.floor(os.totalmem() / (1024 ** 3)))
+}
+
+// RAM conseillée par défaut : PROPORTIONNELLE à la mémoire physique (~75 %), pour
+// suivre les grosses configs, bornée à un plancher (ce modpack est lourd, il lui
+// faut au moins 4 Go) et à un plafond de 20 Go (au-delà, donner plus de heap à
+// Minecraft n'apporte quasiment rien et peut allonger les pauses GC). Arrondie au demi-Go.
+//   8 Go → 6 · 12 Go → 9 · 16 Go → 12 · 24 Go → 18 · 32 Go → 20 · 48 Go → 20
+function recommendedRamGb(totalGb) {
+  const proportional = roundHalf(totalGb * 0.75)
+  return Math.max(4, Math.min(20, proportional))
+}
+
+// Synthèse de l'état mémoire : valeur effective + bornes + recommandation.
+function ramInfo() {
+  const totalGb = systemRamGb()
+  const min = RAM_MIN_GB
+  const max = Math.max(min, totalGb)                          // jamais > RAM physique
+  const recommended = Math.min(max, Math.max(min, recommendedRamGb(totalGb)))
+  // Défaut quand l'utilisateur n'a rien réglé = la valeur conseillée, proportionnelle
+  // à la RAM de la machine (cf. recommendedRamGb). Remplace l'ancien défaut fixe de
+  // 10 Go, qui empêchait la JVM de démarrer sur les machines plus modestes.
+  const def = recommended
+  const stored = Number(loadSettings().ramGb)
+  const custom = Number.isFinite(stored) && stored > 0
+  const ram = custom ? Math.min(max, Math.max(min, roundTenth(stored))) : def
+  return { ram, def, min, max, recommended, totalGb, custom }
+}
+
+// RAM effective (Go) à passer à la JVM au lancement — toujours clampée aux bornes.
+function resolveRamGb() {
+  return ramInfo().ram
+}
 
 // ─── WINDOW ──────────────────────────────────────────────────────────────────
 // Fenêtre à 1366×883 (ratio exact du frame Figma 1728/1117 = 1.547).
@@ -1437,6 +1503,37 @@ function deployConfigs() {
   }
 }
 
+// ─── IPC : RÉGLAGES ──────────────────────────────────────────────────────────
+ipcMain.handle('get-settings', () => {
+  const info = ramInfo()
+  return {
+    ram: info.ram,
+    defaultRam: info.def,
+    minRam: info.min,
+    maxRam: info.max,
+    recommendedRam: info.recommended,
+    totalGb: info.totalGb,
+    custom: info.custom,
+  }
+})
+
+ipcMain.handle('set-settings', (_e, payload) => {
+  try {
+    const info = ramInfo()
+    const settings = loadSettings()
+    const raw = Number(payload && payload.ram)
+    if (Number.isFinite(raw) && raw > 0) {
+      settings.ramGb = Math.min(info.max, Math.max(info.min, roundTenth(raw)))
+    } else {
+      delete settings.ramGb            // réinitialisation → retour au défaut automatique
+    }
+    saveSettings(settings)
+    return { success: true, ram: settings.ramGb ?? info.def }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
 ipcMain.handle('launch', async () => {
   if (!currentToken) return { success: false, error: 'Non connecté' }
 
@@ -1470,6 +1567,16 @@ ipcMain.handle('launch', async () => {
     '-XX:MaxTenuringThreshold=1'
   ]
 
+  // RAM allouée : réglage utilisateur (ou défaut), clampé à la RAM physique.
+  // On dérive Xms du Xmx pour garantir Xms ≤ Xmx (sinon la JVM refuse de démarrer).
+  const ramMaxGb = resolveRamGb()
+  const ramMinGb = Math.min(MODPACK.minRam ?? 2, ramMaxGb)
+  // La JVM n'accepte pas de décimale dans -Xmx/-Xms : on convertit en Mo entiers
+  // (ex. 6,5 Go → 6656 Mo ; vrai aussi pour les entiers : 8 Go = 8192 Mo).
+  const ramMaxMb = Math.round(ramMaxGb * 1024)
+  const ramMinMb = Math.round(ramMinGb * 1024)
+  console.log(`[RawLauncher] RAM allouée : ${ramMaxGb}G / ${ramMaxMb}M (min ${ramMinGb}G)`)
+
   const opts = {
     authorization: currentToken,
     root: GAME_DIR,
@@ -1479,8 +1586,8 @@ ipcMain.handle('launch', async () => {
       custom: `neoforge-${MODPACK.loaderVersion}`
     },
     memory: {
-      max: `${MODPACK.maxRam ?? 4}G`,
-      min: `${MODPACK.minRam ?? 2}G`
+      max: `${ramMaxMb}M`,
+      min: `${ramMinMb}M`
     },
     javaPath: javaExe,
     customArgs: [

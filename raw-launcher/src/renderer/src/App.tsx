@@ -1,9 +1,10 @@
-﻿import { useState, useEffect, useMemo, useCallback, useRef, forwardRef, useImperativeHandle } from 'react'
+﻿import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, forwardRef, useImperativeHandle } from 'react'
 import { SkinViewer } from 'skinview3d'
 import { Raycaster, Vector2, MOUSE, type Object3D } from 'three'
 import packData from '../../../modpack.json'
 import AdminDashboard from './AdminDashboard'
 import StatsPage from './Stats'
+import SettingsPage from './Settings'
 import ChatPanel from './ChatPanel'
 import { resolveCategory, CategoryBadge, NewsFallback, type NewsCategory } from './news'
 import { Avatar, RemoteNewsImage } from './remote-image'
@@ -26,7 +27,7 @@ import shop4Image from './assets/shop-4.png'
 import currencyImage from './assets/currency.png'
 
 type Phase = 'loading' | 'updating' | 'logged-out' | 'checking' | 'installing' | 'ready' | 'launching' | 'error'
-type MainTab = 'home' | 'stats' | 'chat' | 'admin'
+type MainTab = 'home' | 'stats' | 'chat' | 'admin' | 'settings'
 
 interface DynamicNewsItem {
   id: string
@@ -998,19 +999,69 @@ export default function App() {
 
   // ── Carrousel : pseudo « façon Minecraft » au survol d'une tête ──
   // Le pseudo flotte au-dessus de la tête survolée. Comme la carte est en
-  // overflow-hidden (coins arrondis + masque de fondu), on rend l'étiquette hors
-  // de la carte, dans un wrapper `relative` non rogné. Au survol, le défilement se
-  // met en pause (CSS) : la tête est donc figée et on lit sa position une seule fois.
+  // overflow-hidden (coins arrondis + masque de fondu), on rend l'étiquette hors de
+  // la carte, dans un wrapper `relative` non rogné — elle ne peut donc pas être enfant
+  // de la tête. Au survol, le défilement ne se fige pas : il ralentit fortement (Web
+  // Animations API, playbackRate). Pour que le pseudo colle à la tête SANS décalage
+  // d'une frame, on ne le repositionne pas en JS (un rAF qui lit la position et écrit
+  // left/top traîne d'une frame derrière l'animation compositée de la piste). À la
+  // place, le « rail » du pseudo reçoit une animation transform identique à celle de la
+  // piste (même translateX, même durée), calée sur la même timeline (startTime +
+  // playbackRate copiés) : les deux avancent sur le compositor au même rythme, donc à
+  // la même frame.
   const carouselWrapRef = useRef<HTMLDivElement>(null)
+  const carouselTrackRef = useRef<HTMLDivElement>(null)
+  const nametagRailRef = useRef<HTMLDivElement>(null)
   const [hoveredHead, setHoveredHead] = useState<{ name: string; x: number; y: number } | null>(null)
+
   const handleHeadEnter = useCallback((name: string, el: HTMLElement) => {
     const wrap = carouselWrapRef.current
-    if (!wrap) return
+    const track = carouselTrackRef.current
+    if (!wrap || !track) return
     const wr = wrap.getBoundingClientRect()
     const hr = el.getBoundingClientRect()
-    setHoveredHead({ name, x: hr.left - wr.left + hr.width / 2, y: hr.top - wr.top })
+    // translateX courant de la piste, pour ramener la tête à son origine (translateX = 0).
+    const cs = getComputedStyle(track).transform
+    const tx = cs && cs !== 'none' ? new DOMMatrixReadOnly(cs).m41 : 0
+    // Position « de base » de la tête (à translateX = 0) : constante géométrique,
+    // indépendante du temps. Le rail, calé là, suivra via le même transform animé.
+    setHoveredHead({
+      name,
+      x: hr.left - wr.left + hr.width / 2 - tx,
+      y: hr.top - wr.top,
+    })
+    // Ralentir (sans figer) le défilement ; le rail se cale dessus juste après (effet).
+    const anim = track.getAnimations()?.[0]
+    if (anim) anim.playbackRate = 0.2
   }, [])
-  const handleHeadLeave = useCallback(() => setHoveredHead(null), [])
+
+  const handleHeadLeave = useCallback(() => {
+    setHoveredHead(null)
+    const anim = carouselTrackRef.current?.getAnimations()?.[0]
+    if (anim) anim.playbackRate = 1
+  }, [])
+
+  // Cale l'animation du rail du pseudo sur celle de la piste (même translateX, même
+  // durée, même phase) dès que le pseudo est monté. useLayoutEffect : exécuté avant le
+  // paint, donc aucun flash à la position d'origine. Annulée à la sortie / au changement.
+  useLayoutEffect(() => {
+    if (!hoveredHead) return
+    const rail = nametagRailRef.current
+    const track = carouselTrackRef.current
+    const trackAnim = track?.getAnimations()?.[0]
+    if (!rail || !track || !trackAnim) return
+    const half = track.offsetWidth / 2 // 50 % de la piste = un jeu de têtes, en px
+    const timing = trackAnim.effect?.getComputedTiming()
+    const duration = typeof timing?.duration === 'number' ? timing.duration : 0
+    if (!half || !duration) return
+    const railAnim = rail.animate(
+      [{ transform: 'translateX(0)' }, { transform: `translateX(-${half}px)` }],
+      { duration, iterations: Infinity, easing: 'linear' },
+    )
+    railAnim.playbackRate = trackAnim.playbackRate // même vitesse (ralenti ≈ 0.2)…
+    railAnim.startTime = trackAnim.startTime // …et même phase → calage parfait
+    return () => railAnim.cancel()
+  }, [hoveredHead])
 
   const initRef = useRef(false) // garde anti double-exécution de l'init (React.StrictMode)
 
@@ -1654,6 +1705,16 @@ export default function App() {
             </div>
 
             <div className="flex flex-col gap-[40px] items-start">
+              {/* Réglages */}
+              <button
+                className={`${iconBtn} group ${activeTab === 'settings' ? '!bg-[rgba(255,255,255,0.15)]' : ''}`}
+                onClick={() => setActiveTab('settings')}
+                title="Réglages"
+              >
+                <svg className="icon-settings" width="21" height="21" viewBox="0 0 24 24" fill="white">
+                  <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+                </svg>
+              </button>
               <button className={`${iconBtn} group`}>
                 <svg className="icon-plus" width="20" height="20" viewBox="0 0 20 20" fill="white">
                   <rect x="8.25" y="1" width="3.5" height="18" rx="1.75"/>
@@ -1684,7 +1745,12 @@ export default function App() {
               <ChatPanel username={username} isAdmin={isAdmin} onlinePlayers={serverStatus.players} />
             </div>
           )}
-          <main className={`flex flex-col gap-[16px] flex-1 min-h-0 min-w-0 relative ${activeTab === 'admin' || activeTab === 'stats' || activeTab === 'chat' ? 'hidden' : ''} ${heroHovered ? 'hero-hovered' : ''}`}>
+          {activeTab === 'settings' && (
+            <div className="flex-1 min-h-0 min-w-0">
+              <SettingsPage />
+            </div>
+          )}
+          <main className={`flex flex-col gap-[16px] flex-1 min-h-0 min-w-0 relative ${activeTab === 'admin' || activeTab === 'stats' || activeTab === 'chat' || activeTab === 'settings' ? 'hidden' : ''} ${heroHovered ? 'hero-hovered' : ''}`}>
 
             {/* ── CARTE HERO ── */}
             <div
@@ -1935,7 +2001,7 @@ export default function App() {
                         WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 14%, black 86%, transparent 100%)',
                       }}
                     >
-                      <div className="carousel-track flex items-center" style={{ animationDuration: `${animDuration}s` }}>
+                      <div ref={carouselTrackRef} className="carousel-track flex items-center" style={{ animationDuration: `${animDuration}s` }}>
                         {carouselItems.map((name, i) => (
                           <div
                             key={i}
@@ -1954,10 +2020,13 @@ export default function App() {
                   {/* Pseudo « façon Minecraft » au survol — rendu hors de la carte rognée */}
                   {hoveredHead && (
                     <div
-                      className="mc-nametag-anchor"
+                      ref={nametagRailRef}
+                      className="mc-nametag-rail"
                       style={{ left: hoveredHead.x, top: hoveredHead.y }}
                     >
-                      <span className="mc-nametag">{hoveredHead.name}</span>
+                      <div className="mc-nametag-anchor">
+                        <span className="mc-nametag">{hoveredHead.name}</span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2008,7 +2077,7 @@ export default function App() {
           </main>
 
           {/* ── PANNEAU DROIT ── */}
-          <aside className={`flex flex-col gap-[16px] h-full shrink-0 ${activeTab === 'stats' || activeTab === 'chat' ? 'hidden' : ''}`} style={{ width: 304 }}>
+          <aside className={`flex flex-col gap-[16px] h-full shrink-0 ${activeTab === 'stats' || activeTab === 'chat' || activeTab === 'settings' ? 'hidden' : ''}`} style={{ width: 304 }}>
 
             {/* Liste des joueurs en ligne */}
             <div className="backdrop-blur-[5.95px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] flex flex-col gap-[22px] items-start overflow-x-clip overflow-y-auto p-[16px] rounded-[16px] shadow-[2px_2px_8px_0px_rgba(0,0,0,0.1)] w-full flex-1 min-h-0">

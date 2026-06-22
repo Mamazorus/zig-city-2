@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld('launcher', {
   launch:         () => ipcRenderer.invoke('launch'),
   getServerStatus: () => ipcRenderer.invoke('get-server-status'),
 
+  getSettings:    () => ipcRenderer.invoke('get-settings'),
+  setSettings:    (payload) => ipcRenderer.invoke('set-settings', payload),
+
   onInstallProgress: (cb) => ipcRenderer.on('install-progress',  (_, d) => cb(d)),
   onLaunchProgress:  (cb) => ipcRenderer.on('launch-progress',   (_, d) => cb(d)),
   onGameClosed:      (cb) => ipcRenderer.on('game-closed',       (_, d) => cb(d)),
