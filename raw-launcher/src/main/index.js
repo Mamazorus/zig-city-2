@@ -2241,6 +2241,43 @@ function chatStorageUpload(urlString, buffer, contentType, redirects = 0) {
   })
 }
 
+// Décode + valide une image envoyée par le renderer : data URL → buffer dont le
+// type réel est vérifié par les magic bytes (anti-usurpation du MIME annoncé).
+// Renvoie soit { buffer, realMime, ext }, soit { error }. Partagé chat + news.
+function decodeUploadedImage(payload) {
+  const m = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(String(payload?.dataUrl ?? ''))
+  if (!m) return { error: 'Image invalide.' }
+  const mime = (payload?.mime || m[1] || '').toLowerCase()
+  if (!CHAT_ALLOWED_MIME.includes(mime)) return { error: 'Format non supporté (PNG, JPEG, GIF, WebP).' }
+  let buffer
+  try { buffer = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3])) }
+  catch { return { error: 'Image illisible.' } }
+  if (!buffer.length) return { error: 'Image vide.' }
+  if (buffer.length > CHAT_MEDIA_MAX) return { error: 'Image trop lourde (max 4 Mo).' }
+  const realMime = detectImageMime(buffer)
+  if (!realMime || !CHAT_ALLOWED_MIME.includes(realMime)) {
+    return { error: 'Fichier image non reconnu (PNG, JPEG, GIF, WebP).' }
+  }
+  return { buffer, realMime, ext: realMime === 'image/jpeg' ? 'jpg' : realMime.split('/')[1] }
+}
+
+// Envoie un buffer image vers Firebase Storage et renvoie son URL de
+// téléchargement permanente (avec token). Partagé chat + news.
+async function uploadImageToStorage(objectPath, buffer, contentType) {
+  try {
+    const res = await chatStorageUpload(
+      `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_STORAGE_BUCKET}/o?name=${encodeURIComponent(objectPath)}`,
+      buffer, contentType
+    )
+    const token = String(res?.downloadTokens ?? '').split(',')[0]
+    if (!token) return { success: false, error: 'Upload sans jeton de téléchargement.' }
+    const url = `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_STORAGE_BUCKET}/o/${encodeURIComponent(objectPath)}?alt=media&token=${token}`
+    return { success: true, url, mime: contentType }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+}
+
 ipcMain.handle('chat-upload-media', async (_, payload) => {
   if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
   if (!FIREBASE_STORAGE_BUCKET || FIREBASE_STORAGE_BUCKET.includes('YOUR-')) {
@@ -2250,34 +2287,29 @@ ipcMain.handle('chat-upload-media', async (_, payload) => {
   if (!u) return { success: false, error: 'Reconnecte-toi pour envoyer un média.' }
   const cid = sanitizeChannelId(payload?.channelId)
   if (!cid) return { success: false, error: 'Salon invalide.' }
-  const m = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(String(payload?.dataUrl ?? ''))
-  if (!m) return { success: false, error: 'Image invalide.' }
-  const mime = (payload?.mime || m[1] || '').toLowerCase()
-  if (!CHAT_ALLOWED_MIME.includes(mime)) return { success: false, error: 'Format non supporté (PNG, JPEG, GIF, WebP).' }
-  let buffer
-  try { buffer = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3])) }
-  catch { return { success: false, error: 'Image illisible.' } }
-  if (!buffer.length) return { success: false, error: 'Image vide.' }
-  if (buffer.length > CHAT_MEDIA_MAX) return { success: false, error: 'Image trop lourde (max 4 Mo).' }
-  // Le type réel vient des magic bytes, pas de l'en-tête fourni par le renderer.
-  const realMime = detectImageMime(buffer)
-  if (!realMime || !CHAT_ALLOWED_MIME.includes(realMime)) {
-    return { success: false, error: 'Fichier image non reconnu (PNG, JPEG, GIF, WebP).' }
+  const dec = decodeUploadedImage(payload)
+  if (dec.error) return { success: false, error: dec.error }
+  const objectPath = `chat-media/${cid}/${Date.now()}-${crypto.randomBytes(8).toString('hex')}.${dec.ext}`
+  return uploadImageToStorage(objectPath, dec.buffer, dec.realMime)
+})
+
+// ── Image de news : upload Firebase Storage (réservé aux admins) ──
+// Réhéberge durablement l'image sur notre bucket au lieu de dépendre d'un lien
+// Discord (dont les pièces jointes expirent en ~24 h via le paramètre signé `ex`,
+// d'où des visuels de news qui « disparaissent »). Même infra que le chat, mais
+// scopée /news-media et gardée par la session admin.
+// ⚠️ Nécessite une règle Storage autorisant l'écriture sous /news-media.
+ipcMain.handle('news-upload-media', async (_, payload) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  if (!FIREBASE_STORAGE_BUCKET || FIREBASE_STORAGE_BUCKET.includes('YOUR-')) {
+    return { success: false, error: 'Bucket Storage non configuré.' }
   }
-  const ext = realMime === 'image/jpeg' ? 'jpg' : realMime.split('/')[1]
-  const objectPath = `chat-media/${cid}/${Date.now()}-${crypto.randomBytes(8).toString('hex')}.${ext}`
-  try {
-    const res = await chatStorageUpload(
-      `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_STORAGE_BUCKET}/o?name=${encodeURIComponent(objectPath)}`,
-      buffer, realMime
-    )
-    const token = String(res?.downloadTokens ?? '').split(',')[0]
-    if (!token) return { success: false, error: 'Upload sans jeton de téléchargement.' }
-    const url = `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_STORAGE_BUCKET}/o/${encodeURIComponent(objectPath)}?alt=media&token=${token}`
-    return { success: true, url, mime: realMime }
-  } catch (e) {
-    return { success: false, error: e.message }
-  }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  const dec = decodeUploadedImage(payload)
+  if (dec.error) return { success: false, error: dec.error }
+  const objectPath = `news-media/${Date.now()}-${crypto.randomBytes(8).toString('hex')}.${dec.ext}`
+  return uploadImageToStorage(objectPath, dec.buffer, dec.realMime)
 })
 
 // ── Temps réel : client SSE de Realtime Database REST ──

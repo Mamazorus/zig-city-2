@@ -136,6 +136,8 @@ declare global {
       createNews: (data: NewsFormData) => Promise<{ success: boolean; id?: string; error?: string }>
       updateNews: (data: { id: string } & Partial<NewsFormData>) => Promise<{ success: boolean; error?: string }>
       deleteNews: (id: string) => Promise<{ success: boolean; error?: string }>
+      // Image de news : upload Firebase Storage → URL permanente (≠ liens Discord).
+      uploadNewsImage: (data: { dataUrl: string; mime?: string; name?: string }) => Promise<{ success: boolean; url?: string; mime?: string; error?: string }>
       getAdmins: () => Promise<{ success: boolean; admins: Record<string, boolean> }>
       addAdmin: (username: string) => Promise<{ success: boolean; error?: string }>
       removeAdmin: (username: string) => Promise<{ success: boolean; error?: string }>

@@ -50,6 +50,9 @@ contextBridge.exposeInMainWorld('launcher', {
   createNews:        (data) => ipcRenderer.invoke('create-news', data),
   updateNews:        (data) => ipcRenderer.invoke('update-news', data),
   deleteNews:        (id) => ipcRenderer.invoke('delete-news', id),
+  // Image de news : upload d'un fichier vers Firebase Storage → URL permanente
+  // (≠ liens Discord qui expirent). Sélection/glisser-déposer/collage côté renderer.
+  uploadNewsImage:   (data) => ipcRenderer.invoke('news-upload-media', data),
   getAdmins:         () => ipcRenderer.invoke('get-admins'),
   addAdmin:          (username) => ipcRenderer.invoke('add-admin', username),
   removeAdmin:       (username) => ipcRenderer.invoke('remove-admin', username),

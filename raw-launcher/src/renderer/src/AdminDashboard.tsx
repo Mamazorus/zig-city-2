@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { NEWS_CATEGORIES, CATEGORY_ORDER, resolveCategory, CategoryBadge, NewsFallback, type NewsCategory } from './news'
 import { Avatar, RemoteNewsImage } from './remote-image'
 
@@ -46,6 +46,17 @@ function todayLabel() {
   return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`
 }
 
+// Convertit un fichier/blob image (sélecteur, glisser-déposer, presse-papier) en
+// data URL, pour l'envoyer au main qui le réhéberge sur Firebase Storage.
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(r.result as string)
+    r.onerror = () => reject(r.error)
+    r.readAsDataURL(blob)
+  })
+}
+
 export default function AdminDashboard({
   username,
   onNewsUpdated,
@@ -61,6 +72,10 @@ export default function AdminDashboard({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<NewsForm>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [imageError, setImageError] = useState<string | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [newAdminName, setNewAdminName] = useState('')
   const [addingAdmin, setAddingAdmin] = useState(false)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
@@ -103,6 +118,7 @@ export default function AdminDashboard({
     setEditingId(null)
     setShowForm(true)
     setConfirmDeleteId(null)
+    setImageError(null)
   }
 
   const openEdit = (item: NewsItem) => {
@@ -116,12 +132,67 @@ export default function AdminDashboard({
     setEditingId(item.id)
     setShowForm(true)
     setConfirmDeleteId(null)
+    setImageError(null)
   }
 
   const cancelForm = () => {
     setShowForm(false)
     setEditingId(null)
+    setImageError(null)
   }
+
+  // Réhéberge une image (sélecteur, glisser-déposer ou presse-papier) sur Firebase
+  // Storage et renseigne l'URL permanente dans le formulaire. Remplace les liens
+  // Discord qui expirent (~24 h). Le main revalide tout (magic bytes, 4 Mo, admin).
+  const uploadFile = useCallback(async (file: File | null | undefined) => {
+    setImageError(null)
+    if (!file) return
+    if (!file.type.startsWith('image/')) { setImageError('Choisis une image (PNG, JPEG, GIF, WebP).'); return }
+    if (file.size > 4 * 1024 * 1024) { setImageError('Image trop lourde (max 4 Mo).'); return }
+    setUploadingImage(true)
+    try {
+      const dataUrl = await blobToDataUrl(file)
+      const up = await window.launcher.uploadNewsImage({ dataUrl, mime: file.type, name: file.name || 'image' })
+      if (!up.success || !up.url) { setImageError(up.error || "Échec de l'envoi."); return }
+      setForm(f => ({ ...f, imageUrl: up.url! }))
+    } catch {
+      setImageError('Image illisible.')
+    } finally {
+      setUploadingImage(false)
+    }
+  }, [])
+
+  // Coller (Ctrl+V) une image n'importe où tant que le formulaire est ouvert. On
+  // n'intercepte que les images : coller du texte dans les champs reste normal.
+  useEffect(() => {
+    if (!showForm) return
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i]
+        if (it.kind === 'file' && it.type.startsWith('image/')) {
+          const file = it.getAsFile()
+          if (file) { e.preventDefault(); uploadFile(file); break }
+        }
+      }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [showForm, uploadFile])
+
+  // Garde-fou : un fichier lâché hors de la zone de dépôt ferait naviguer Electron
+  // vers file:// (fenêtre cassée). On neutralise le drop par défaut sur toute la
+  // fenêtre ; la zone de dépôt, elle, gère son propre onDrop avant ce garde.
+  useEffect(() => {
+    const prevent = (e: DragEvent) => e.preventDefault()
+    window.addEventListener('dragover', prevent)
+    window.addEventListener('drop', prevent)
+    return () => {
+      window.removeEventListener('dragover', prevent)
+      window.removeEventListener('drop', prevent)
+    }
+  }, [])
 
   const saveNews = async () => {
     if (!form.title.trim() || !form.body.trim()) return
@@ -408,20 +479,74 @@ export default function AdminDashboard({
                 </div>
 
                 <div className="flex flex-col">
-                  <p className={labelCls}>URL de l'image (optionnel — imgur, discord CDN…)</p>
-                  <div className="flex gap-[8px] items-center">
-                    <input
-                      className={inputCls}
-                      placeholder="https://i.imgur.com/…"
-                      value={form.imageUrl}
-                      onChange={e => setForm(f => ({ ...f, imageUrl: e.target.value }))}
-                    />
-                    {form.imageUrl && (
-                      <div className="size-[36px] rounded-[8px] overflow-hidden shrink-0 border border-[rgba(255,255,255,0.12)]">
-                        <RemoteNewsImage src={form.imageUrl} className="size-full object-cover" fallback={null} />
+                  <p className={labelCls}>Image de la news (optionnel)</p>
+
+                  {form.imageUrl ? (
+                    <div className="relative rounded-[10px] overflow-hidden border border-[rgba(255,255,255,0.12)] group" style={{ height: 132 }}>
+                      <RemoteNewsImage src={form.imageUrl} className="size-full object-cover" fallback={null} />
+                      <div className="absolute inset-0 flex items-center justify-center gap-[8px] bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={uploadingImage}
+                          className="font-ui text-[13px] tracking-[-0.3px] text-white px-[12px] h-[32px] rounded-[8px] border border-[rgba(255,255,255,0.3)] bg-[rgba(0,0,0,0.4)] hover:bg-[rgba(0,0,0,0.6)] disabled:opacity-40 transition-colors"
+                        >
+                          Remplacer
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setForm(f => ({ ...f, imageUrl: '' })); setImageError(null) }}
+                          className="font-ui text-[13px] tracking-[-0.3px] text-white px-[12px] h-[32px] rounded-[8px] border border-[rgba(255,255,255,0.3)] bg-[rgba(0,0,0,0.4)] hover:bg-[rgba(0,0,0,0.6)] transition-colors"
+                        >
+                          Retirer
+                        </button>
                       </div>
-                    )}
-                  </div>
+                      {uploadingImage && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/55">
+                          <p className="font-ui text-[14px] text-white/80">Envoi en cours…</p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => fileInputRef.current?.click()}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click() } }}
+                      onDragOver={e => { e.preventDefault(); setDragging(true) }}
+                      onDragLeave={() => setDragging(false)}
+                      onDrop={e => { e.preventDefault(); setDragging(false); uploadFile(e.dataTransfer.files?.[0]) }}
+                      className={`flex flex-col items-center justify-center gap-[7px] rounded-[10px] border border-dashed px-[16px] py-[20px] cursor-pointer text-center outline-none transition-colors ${dragging ? 'border-[rgba(0,255,225,0.55)] bg-[rgba(0,255,225,0.07)]' : 'border-[rgba(255,255,255,0.2)] bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.06)]'}`}
+                    >
+                      {uploadingImage ? (
+                        <p className="font-ui text-[14px] text-white/70">Envoi en cours…</p>
+                      ) : (
+                        <>
+                          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="text-white/45">
+                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <path d="m21 15-5-5L5 21" />
+                          </svg>
+                          <p className="font-ui text-[14px] text-white/70 tracking-[-0.3px]">
+                            Glisse une image, colle (Ctrl+V) ou clique pour parcourir
+                          </p>
+                          <p className="font-ui text-[13px] text-white/35">PNG, JPEG, GIF ou WebP — 4 Mo max</p>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/webp"
+                    className="hidden"
+                    onChange={e => { uploadFile(e.target.files?.[0]); e.currentTarget.value = '' }}
+                  />
+
+                  {imageError && (
+                    <p className="font-ui text-[13px] text-[rgba(255,120,120,0.9)] mt-[6px]">{imageError}</p>
+                  )}
                 </div>
 
                 <div className="flex flex-col">
