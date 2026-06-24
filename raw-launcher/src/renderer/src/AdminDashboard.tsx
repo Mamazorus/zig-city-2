@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { NEWS_CATEGORIES, CATEGORY_ORDER, resolveCategory, CategoryBadge, NewsFallback, type NewsCategory } from './news'
 import { Avatar, RemoteNewsImage } from './remote-image'
+import { ItemIcon } from './item-icon'
+import { type ItemIconDesc } from './block-renderer'
 
-type AdminTab = 'news' | 'admins' | 'players' | 'channels'
+type AdminTab = 'news' | 'admins' | 'players' | 'channels' | 'shop'
 
 interface ChatChannel {
   id: string
@@ -35,10 +37,198 @@ interface NewsForm {
 
 const EMPTY_FORM: NewsForm = { title: '', date: '', body: '', imageUrl: '', category: 'info' }
 
+// ── Shop du jour (calendrier : offres datées, troc entrée→sortie) ──
+interface ShopOfferRow {
+  id: string
+  input: string
+  inputQty: number
+  output: string
+  outputQty: number
+  createdAt?: number
+  inputIcon?: ItemIconDesc | null
+  outputIcon?: ItemIconDesc | null
+}
+
+interface OfferForm { input: string; inputQty: number; output: string; outputQty: number }
+const EMPTY_OFFER: OfferForm = { input: '', inputQty: 1, output: '', outputQty: 1 }
+
+interface ShopConfigState { currencyName: string; currencyItem: string; currencyIcon: string }
+
+// Clé de jour LOCALE (YYYY-MM-DD) pour un décalage en jours (doit matcher shopDayKey du main).
+function dayKeyFromOffset(offset: number): string {
+  const d = new Date(); d.setDate(d.getDate() + offset)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+// Libellé lisible d'un jour (« Aujourd'hui · mar. 24 juin »).
+function dayLabel(offset: number): string {
+  const d = new Date(); d.setDate(d.getDate() + offset)
+  const rel = offset === 0 ? "Aujourd'hui" : offset === 1 ? 'Demain' : null
+  const txt = d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'long' })
+  return rel ? `${rel} · ${txt}` : txt.charAt(0).toUpperCase() + txt.slice(1)
+}
+
+// Entrée du catalogue d'items (id + nom anglais) renvoyée par get-item-catalog.
+interface ItemCatalogEntry { id: string; name: string }
+
 const inputCls =
   'w-full bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[8px] px-[12px] py-[8px] text-white font-ui text-[14px] tracking-[-0.3px] focus:outline-none focus:border-[rgba(0,255,225,0.4)] placeholder:text-white/25 transition-colors'
 
 const labelCls = 'font-ui text-[14px] text-white/40 tracking-[-0.3px] mb-[6px]'
+
+// Sélecteur de quantité : champ réellement éditable (on peut tout effacer pour
+// retaper, sans blocage forcé à 1 — le clamp ne s'applique qu'à la validation) +
+// boutons − / + stylés, au lieu des spinners HTML natifs non stylables.
+function QtyInput({ value, onChange, min = 1, max = 9999 }: { value: number; onChange: (n: number) => void; min?: number; max?: number }) {
+  const [text, setText] = useState(String(value))
+  useEffect(() => { setText(String(value)) }, [value])
+  const clamp = (n: number) => Math.max(min, Math.min(max, n))
+  const step = (d: number) => { const n = clamp(value + d); onChange(n); setText(String(n)) }
+  const btn = 'flex items-center justify-center w-[32px] h-full shrink-0 text-white/55 hover:text-white hover:bg-[rgba(255,255,255,0.07)] disabled:opacity-25 disabled:hover:bg-transparent transition-colors'
+  return (
+    <div className="flex-1 flex items-center h-[38px] rounded-[8px] border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.05)] focus-within:border-[rgba(0,255,225,0.4)] transition-colors overflow-hidden">
+      <button type="button" onClick={() => step(-1)} disabled={value <= min} className={btn} aria-label="Diminuer">
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor"><rect x="1" y="5.1" width="10" height="1.8" rx="0.9" /></svg>
+      </button>
+      <input
+        type="text" inputMode="numeric" aria-label="Quantité"
+        className="w-full min-w-0 bg-transparent text-center text-white font-ui text-[14px] tracking-[-0.3px] outline-none"
+        value={text}
+        onChange={e => { const v = e.target.value.replace(/[^0-9]/g, '').slice(0, 4); setText(v); if (v !== '') onChange(clamp(Number(v))) }}
+        onBlur={() => { const n = text === '' ? value : clamp(Number(text) || min); setText(String(n)); onChange(n) }}
+      />
+      <button type="button" onClick={() => step(1)} disabled={value >= max} className={btn} aria-label="Augmenter">
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor"><rect x="5.1" y="1" width="1.8" height="10" rx="0.9" /><rect x="1" y="5.1" width="10" height="1.8" rx="0.9" /></svg>
+      </button>
+    </div>
+  )
+}
+
+// Champ d'identifiant d'item avec autocomplétion sur le catalogue du modpack
+// (items vanilla + moddés, extraits des jars installés). Filtre sur l'id ET le
+// nom anglais, priorise les correspondances en début de chaîne, navigation au
+// clavier (↑/↓/Entrée/Échap). La saisie libre reste toujours possible.
+function ItemAutocomplete({
+  value, onChange, catalog, loading, placeholder,
+}: {
+  value: string
+  onChange: (v: string) => void
+  catalog: ItemCatalogEntry[]
+  loading?: boolean
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [highlight, setHighlight] = useState(0)
+  const [iconMap, setIconMap] = useState<Record<string, ItemIconDesc | ''>>({})
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  const q = value.trim().toLowerCase()
+  const matches = useMemo(() => {
+    if (!q) return [] as ItemCatalogEntry[]
+    const scored: { e: ItemCatalogEntry; score: number }[] = []
+    for (const e of catalog) {
+      const name = e.name.toLowerCase()
+      const idPath = e.id.includes(':') ? e.id.slice(e.id.indexOf(':') + 1) : e.id
+      let score = -1
+      if (name.startsWith(q)) score = 0
+      else if (idPath.startsWith(q) || e.id.startsWith(q)) score = 1
+      else if (name.includes(q) || e.id.includes(q)) score = 2
+      if (score >= 0) scored.push({ e, score })
+    }
+    // À pertinence égale, on remonte les items dont l'icône est résolue (vrais
+    // items identifiables) avant ceux sans icône (bruit type carcasses de mods).
+    const noIcon = (id: string) => { const d = iconMap[id]; return d && typeof d === 'object' ? 0 : 1 }
+    scored.sort((a, b) => a.score - b.score || noIcon(a.e.id) - noIcon(b.e.id) || a.e.name.localeCompare(b.e.name))
+    return scored.slice(0, 60).map(o => o.e)
+  }, [q, catalog, iconMap])
+
+  // Ferme la liste sur un clic en dehors du champ.
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (ev: MouseEvent) => { if (wrapRef.current && !wrapRef.current.contains(ev.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  const exact = useMemo(() => catalog.find(e => e.id === value.trim()) || null, [catalog, value])
+
+  // Charge les icônes du lot visible (+ item sélectionné), debouncé. Les ids déjà
+  // demandés (résolus ou non, marqués '') ne sont pas redemandés. Le main cache.
+  useEffect(() => {
+    const want = matches.map(m => m.id)
+    if (exact) want.push(exact.id)
+    const ids = want.filter(id => iconMap[id] === undefined)
+    if (ids.length === 0) return
+    const t = setTimeout(() => {
+      window.launcher.getItemIcons(ids).then(r => {
+        if (!r.success) return
+        setIconMap(prev => {
+          const next = { ...prev }
+          for (const id of ids) next[id] = r.icons[id] || ''
+          return next
+        })
+      })
+    }, 130)
+    return () => clearTimeout(t)
+  }, [matches, exact, iconMap])
+
+  const select = (e: ItemCatalogEntry) => { onChange(e.id); setOpen(false) }
+
+  const onKeyDown = (ev: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (!open && ev.key === 'ArrowDown') { setOpen(true); return }
+    if (!open || matches.length === 0) return
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); setHighlight(h => Math.min(h + 1, matches.length - 1)) }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); setHighlight(h => Math.max(h - 1, 0)) }
+    else if (ev.key === 'Enter') { ev.preventDefault(); const m = matches[highlight]; if (m) select(m) }
+    else if (ev.key === 'Escape') { setOpen(false) }
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <input
+        className={inputCls}
+        placeholder={placeholder}
+        value={value}
+        maxLength={120}
+        autoComplete="off"
+        spellCheck={false}
+        onChange={e => { onChange(e.target.value); setOpen(true); setHighlight(0) }}
+        onFocus={() => { if (value.trim()) setOpen(true) }}
+        onKeyDown={onKeyDown}
+      />
+      {exact && !open && (
+        <div className="flex items-center gap-[7px] mt-[5px] min-w-0">
+          <ItemIcon desc={iconMap[exact.id]} id={exact.id} box={22} />
+          <p className="font-ui text-[12px] text-[rgba(0,255,225,0.75)] tracking-[-0.3px] truncate">✓ {exact.name}</p>
+        </div>
+      )}
+      {open && q.length > 0 && (
+        <div className="absolute left-0 right-0 top-full mt-[4px] z-50 max-h-[240px] overflow-y-auto rounded-[10px] border border-[rgba(255,255,255,0.12)] bg-[#181320] shadow-[0_12px_40px_rgba(0,0,0,0.55)]">
+          {loading ? (
+            <p className="font-ui text-[13px] text-white/40 px-[12px] py-[10px]">Chargement du catalogue…</p>
+          ) : matches.length === 0 ? (
+            <p className="font-ui text-[13px] text-white/35 px-[12px] py-[10px]">Aucun item — la saisie libre reste possible.</p>
+          ) : (
+            matches.map((e, i) => (
+              <button
+                key={e.id}
+                type="button"
+                onMouseEnter={() => setHighlight(i)}
+                onMouseDown={ev => { ev.preventDefault(); select(e) }}
+                className={`w-full text-left flex items-center justify-between gap-[10px] px-[12px] py-[7px] transition-colors ${i === highlight ? 'bg-[rgba(0,255,225,0.1)]' : 'hover:bg-[rgba(255,255,255,0.05)]'}`}
+              >
+                <span className="flex items-center gap-[9px] min-w-0">
+                  <ItemIcon desc={iconMap[e.id]} id={e.id} box={24} />
+                  <span className="font-ui text-[14px] text-white tracking-[-0.3px] truncate">{e.name}</span>
+                </span>
+                <span className="font-ui text-[12px] text-white/40 tracking-[-0.3px] shrink-0 truncate max-w-[42%]">{e.id}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function todayLabel() {
   const d = new Date()
@@ -93,6 +283,31 @@ export default function AdminDashboard({
   const [confirmDeleteChannel, setConfirmDeleteChannel] = useState<string | null>(null)
   const [channelMsg, setChannelMsg] = useState<string | null>(null)
 
+  // ── Shop du jour (calendrier) ──
+  const [dayOffset, setDayOffset] = useState(0)              // 0 = aujourd'hui, 1 = demain…
+  const [dayOffers, setDayOffers] = useState<ShopOfferRow[]>([])
+  const [shopLoading, setShopLoading] = useState(false)
+  const [shopConfig, setShopConfig] = useState<ShopConfigState>({ currencyName: 'Z-Coin', currencyItem: '', currencyIcon: '' })
+  const [showOfferForm, setShowOfferForm] = useState(false)
+  const [editingOfferId, setEditingOfferId] = useState<string | null>(null)
+  const [offerForm, setOfferForm] = useState<OfferForm>(EMPTY_OFFER)
+  const [savingOffer, setSavingOffer] = useState(false)
+  const [confirmDeleteOffer, setConfirmDeleteOffer] = useState<string | null>(null)
+  const [offerMsg, setOfferMsg] = useState<string | null>(null)
+  const [uploadingCurrencyIcon, setUploadingCurrencyIcon] = useState(false)
+  const [savingConfig, setSavingConfig] = useState(false)
+  const [shopMsg, setShopMsg] = useState<string | null>(null)
+  const currencyFileRef = useRef<HTMLInputElement>(null)
+  const shopDayKey = dayKeyFromOffset(dayOffset)
+  // Bibliothèque d'offres réutilisables (modèles à replacer sur un jour).
+  const [showLibrary, setShowLibrary] = useState(false)
+  const [libraryOffers, setLibraryOffers] = useState<ShopOfferRow[]>([])
+  const [libraryLoading, setLibraryLoading] = useState(false)
+  const [libMsg, setLibMsg] = useState<string | null>(null)
+  // Catalogue d'items (extrait des jars du modpack) pour l'autocomplétion.
+  const [itemCatalog, setItemCatalog] = useState<ItemCatalogEntry[]>([])
+  const [itemCatalogLoading, setItemCatalogLoading] = useState(false)
+
   const fetchAll = async () => {
     setLoading(true)
     try {
@@ -112,6 +327,49 @@ export default function AdminDashboard({
   }
 
   useEffect(() => { fetchAll() }, [])
+
+  // Offres du jour sélectionné + config monnaie : (re)chargées à l'ouverture de
+  // l'onglet Shop et à chaque changement de jour.
+  const loadShopDay = useCallback(async () => {
+    setShopLoading(true)
+    try {
+      const r = await window.launcher.getShopDay(dayKeyFromOffset(dayOffset))
+      if (r.success) {
+        setDayOffers(r.offers as ShopOfferRow[])
+        setShopConfig({ currencyName: r.config.currencyName, currencyItem: r.config.currencyItem ?? '', currencyIcon: r.config.currencyIcon ?? '' })
+      }
+    } finally { setShopLoading(false) }
+  }, [dayOffset])
+  useEffect(() => { if (tab === 'shop') loadShopDay() }, [tab, loadShopDay])
+
+  // Icônes des items en cours de saisie dans le formulaire (aperçu live, debouncé).
+  const [offerIcons, setOfferIcons] = useState<Record<string, ItemIconDesc | ''>>({})
+  useEffect(() => {
+    const ids = [offerForm.input, offerForm.output].filter(id => id && offerIcons[id] === undefined)
+    if (!ids.length) return
+    const t = setTimeout(() => {
+      window.launcher.getItemIcons(ids).then(r => {
+        if (!r.success) return
+        setOfferIcons(prev => { const next = { ...prev }; for (const id of ids) next[id] = r.icons[id] || ''; return next })
+      })
+    }, 120)
+    return () => clearTimeout(t)
+  }, [offerForm.input, offerForm.output, offerIcons])
+  // Icône d'un côté d'offre : la monnaie utilise son icône configurée (re-skin) en priorité.
+  const iconDescFor = (id: string | undefined, desc: ItemIconDesc | '' | null | undefined): ItemIconDesc | '' => {
+    if (id && id === shopConfig.currencyItem && shopConfig.currencyIcon) return { kind: 'flat', src: shopConfig.currencyIcon }
+    return (desc as ItemIconDesc | '') ?? ''
+  }
+
+  // Catalogue d'items : chargé paresseusement à la 1re ouverture de l'onglet Shop
+  // (scan ~5 s à froid côté main, puis instantané via cache disque).
+  useEffect(() => {
+    if (tab !== 'shop' || itemCatalog.length > 0 || itemCatalogLoading) return
+    setItemCatalogLoading(true)
+    window.launcher.getItemCatalog()
+      .then(r => { if (r.success) setItemCatalog(r.items) })
+      .finally(() => setItemCatalogLoading(false))
+  }, [tab, itemCatalog.length, itemCatalogLoading])
 
   const openCreate = () => {
     setForm({ ...EMPTY_FORM, date: todayLabel() })
@@ -348,6 +606,102 @@ export default function AdminDashboard({
     await refreshChannels()
   }
 
+  // ── Shop : handlers (offres du jour + réglages monnaie) ──
+  const openCreateOffer = () => {
+    // Sortie par défaut = la monnaie (cas fréquent : vendre un item contre des Z-Coins).
+    setOfferForm({ ...EMPTY_OFFER, output: shopConfig.currencyItem || '' })
+    setEditingOfferId(null); setShowOfferForm(true); setConfirmDeleteOffer(null); setOfferMsg(null)
+  }
+  const openEditOffer = (o: ShopOfferRow) => {
+    setOfferForm({ input: o.input ?? '', inputQty: o.inputQty ?? 1, output: o.output ?? '', outputQty: o.outputQty ?? 1 })
+    setEditingOfferId(o.id); setShowOfferForm(true); setConfirmDeleteOffer(null); setOfferMsg(null)
+  }
+  const cancelOfferForm = () => { setShowOfferForm(false); setEditingOfferId(null); setOfferMsg(null) }
+
+  const saveOffer = async () => {
+    if (!offerForm.input.trim() || !offerForm.output.trim()) { setOfferMsg('Indique un item d\'entrée et un item de sortie.'); return }
+    setSavingOffer(true)
+    try {
+      const payload = {
+        input: offerForm.input.trim(),
+        inputQty: Math.max(1, Math.floor(offerForm.inputQty) || 1),
+        output: offerForm.output.trim(),
+        outputQty: Math.max(1, Math.floor(offerForm.outputQty) || 1),
+      }
+      const res = editingOfferId
+        ? await window.launcher.updateShopOffer({ date: shopDayKey, id: editingOfferId, ...payload })
+        : await window.launcher.createShopOffer({ date: shopDayKey, ...payload })
+      if (!res.success) { setOfferMsg(res.error || 'Échec de l\'enregistrement.'); return }
+      setShowOfferForm(false); setEditingOfferId(null)
+      await loadShopDay()
+    } finally {
+      setSavingOffer(false)
+    }
+  }
+
+  const doDeleteOffer = async (id: string) => {
+    const res = await window.launcher.deleteShopOffer({ date: shopDayKey, id })
+    setConfirmDeleteOffer(null)
+    if (res.success) await loadShopDay()
+  }
+
+  // Copie une offre à l'identique dans le jour courant (pour créer vite une variante).
+  const duplicateOffer = async (o: ShopOfferRow) => {
+    const res = await window.launcher.createShopOffer({ date: shopDayKey, input: o.input, inputQty: o.inputQty, output: o.output, outputQty: o.outputQty })
+    if (res.success) await loadShopDay()
+  }
+
+  // ── Bibliothèque : ouvrir le panneau, replacer un modèle sur le jour, en retirer ──
+  const openLibrary = async () => {
+    setShowOfferForm(false); setConfirmDeleteOffer(null); setLibMsg(null); setShowLibrary(true)
+    setLibraryLoading(true)
+    try {
+      const r = await window.launcher.getShopLibrary()
+      if (r.success) setLibraryOffers(r.offers as ShopOfferRow[])
+    } finally { setLibraryLoading(false) }
+  }
+  const addFromLibrary = async (o: ShopOfferRow) => {
+    const res = await window.launcher.createShopOffer({ date: shopDayKey, input: o.input, inputQty: o.inputQty, output: o.output, outputQty: o.outputQty })
+    if (res.success) { setLibMsg(`Ajouté à ${dayLabel(dayOffset).toLowerCase()}`); await loadShopDay() }
+  }
+  const deleteFromLibrary = async (id: string) => {
+    const res = await window.launcher.deleteShopLibraryOffer(id)
+    if (res.success) setLibraryOffers(prev => prev.filter(o => o.id !== id))
+  }
+
+  const saveShopConfig = async () => {
+    setSavingConfig(true)
+    setShopMsg(null)
+    try {
+      const res = await window.launcher.setShopConfig({
+        currencyName: shopConfig.currencyName.trim(),
+        currencyItem: shopConfig.currencyItem.trim(),
+        currencyIcon: shopConfig.currencyIcon.trim(),
+      })
+      setShopMsg(res.success ? 'Réglages enregistrés.' : (res.error || 'Échec de l\'enregistrement.'))
+    } finally {
+      setSavingConfig(false)
+    }
+  }
+
+  // Réhéberge l'icône de la monnaie (même upload que les news / icônes d'offre).
+  const uploadCurrencyIcon = useCallback(async (file: File | null | undefined) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) { setShopMsg('Choisis une image (PNG, JPEG, GIF, WebP).'); return }
+    if (file.size > 4 * 1024 * 1024) { setShopMsg('Image trop lourde (max 4 Mo).'); return }
+    setUploadingCurrencyIcon(true)
+    try {
+      const dataUrl = await blobToDataUrl(file)
+      const up = await window.launcher.uploadNewsImage({ dataUrl, mime: file.type, name: file.name || 'currency' })
+      if (!up.success || !up.url) { setShopMsg(up.error || "Échec de l'envoi."); return }
+      setShopConfig(c => ({ ...c, currencyIcon: up.url! }))
+    } catch {
+      setShopMsg('Image illisible.')
+    } finally {
+      setUploadingCurrencyIcon(false)
+    }
+  }, [])
+
   return (
     <div className="backdrop-blur-[5.95px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[16px] shadow-[2px_2px_8px_0px_rgba(0,0,0,0.1)] flex flex-col h-full overflow-hidden">
 
@@ -357,12 +711,12 @@ export default function AdminDashboard({
         <div className="flex flex-col gap-[2px]">
           <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px] leading-none">Administration</p>
           <p className="font-ui text-[14px] text-white/40 tracking-[-0.3px]">
-            {tab === 'news' ? 'Gestion du contenu' : tab === 'admins' ? 'Gestion des accès' : tab === 'players' ? 'Carrousel d\'accueil' : 'Salons de discussion'}
+            {tab === 'news' ? 'Gestion du contenu' : tab === 'admins' ? 'Gestion des accès' : tab === 'players' ? 'Carrousel d\'accueil' : tab === 'channels' ? 'Salons de discussion' : 'Boutique du serveur'}
           </p>
         </div>
 
         <div className="flex gap-[3px] bg-[rgba(0,0,0,0.22)] border border-[rgba(255,255,255,0.06)] rounded-full p-[3px]">
-          {(['news', 'admins', 'players', 'channels'] as AdminTab[]).map(t => (
+          {(['news', 'admins', 'players', 'channels', 'shop'] as AdminTab[]).map(t => (
             <button
               key={t}
               className={`font-ui text-[14px] tracking-[-0.3px] px-[14px] h-[28px] rounded-full transition-colors ${
@@ -370,9 +724,9 @@ export default function AdminDashboard({
                   ? 'bg-[rgba(255,255,255,0.12)] text-white font-semibold'
                   : 'text-white/40 hover:text-white/70'
               }`}
-              onClick={() => { setTab(t); setShowForm(false); setConfirmDeleteId(null); setConfirmRemoveAdmin(null); setConfirmRemovePlayer(null); setPlayersMsg(null); setShowChannelForm(false); setConfirmDeleteChannel(null); setChannelMsg(null) }}
+              onClick={() => { setTab(t); setShowForm(false); setConfirmDeleteId(null); setConfirmRemoveAdmin(null); setConfirmRemovePlayer(null); setPlayersMsg(null); setShowChannelForm(false); setConfirmDeleteChannel(null); setChannelMsg(null); setShowOfferForm(false); setConfirmDeleteOffer(null); setOfferMsg(null); setShopMsg(null) }}
             >
-              {t === 'news' ? 'Actualités' : t === 'admins' ? 'Administrateurs' : t === 'players' ? 'Joueurs' : 'Salons'}
+              {t === 'news' ? 'Actualités' : t === 'admins' ? 'Administrateurs' : t === 'players' ? 'Joueurs' : t === 'channels' ? 'Salons' : 'Shop'}
             </button>
           ))}
         </div>
@@ -1044,6 +1398,346 @@ export default function AdminDashboard({
                         <button
                           className="flex items-center justify-center size-[38px] rounded-[10px] text-white/40 hover:text-[rgba(255,120,120,0.95)] hover:bg-[rgba(255,60,60,0.12)] transition-colors"
                           onClick={() => setConfirmDeleteChannel(c.id)}
+                          title="Supprimer"
+                        >
+                          <svg width="15" height="16" viewBox="0 0 11 12" fill="currentColor">
+                            <rect x="0.6" y="2.1" width="9.8" height="2.2" rx="1.1" />
+                            <rect x="3.6" y="0.4" width="3.8" height="2.1" rx="1" />
+                            <path d="M1.55 4.6h7.9l-.62 6.1a1.05 1.05 0 0 1-1.04.9H3.21a1.05 1.05 0 0 1-1.04-.9L1.55 4.6Z" />
+                          </svg>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══ ONGLET SHOP ═══ */}
+        {tab === 'shop' && (
+          <div className="flex flex-col gap-[14px]">
+
+            {/* Réglages : la monnaie */}
+            <div className="bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[12px] p-[16px] flex flex-col gap-[14px]">
+              <p className="font-ui font-semibold text-[15px] text-white tracking-[-0.4px]">Monnaie du serveur</p>
+
+              <div className="grid grid-cols-2 gap-[12px]">
+                <div className="flex flex-col">
+                  <p className={labelCls}>Nom de la monnaie</p>
+                  <input
+                    className={inputCls} maxLength={40} value={shopConfig.currencyName} placeholder="Ex : Zig coin"
+                    onChange={e => setShopConfig(c => ({ ...c, currencyName: e.target.value }))}
+                  />
+                </div>
+                <div className="flex flex-col">
+                  <p className={labelCls}>Identifiant de l'item monnaie</p>
+                  <ItemAutocomplete
+                    value={shopConfig.currencyItem}
+                    onChange={v => setShopConfig(c => ({ ...c, currencyItem: v }))}
+                    catalog={itemCatalog}
+                    loading={itemCatalogLoading}
+                    placeholder="Cherche l'item monnaie…"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col">
+                <p className={labelCls}>Icône de la monnaie (optionnel — sinon icône auto de l'item)</p>
+                <div className="flex gap-[8px] items-center">
+                  <div className="size-[38px] shrink-0 rounded-[8px] flex items-center justify-center bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] overflow-hidden">
+                    <RemoteNewsImage
+                      src={shopConfig.currencyIcon}
+                      className="size-full object-cover"
+                      fallback={<span className="font-ui text-[13px] text-white/25">—</span>}
+                    />
+                  </div>
+                  <input
+                    className={inputCls} placeholder="https://… (aperçu launcher)" value={shopConfig.currencyIcon}
+                    onChange={e => setShopConfig(c => ({ ...c, currencyIcon: e.target.value }))}
+                  />
+                  <input
+                    ref={currencyFileRef} type="file" accept="image/*" className="hidden"
+                    onChange={e => { uploadCurrencyIcon(e.target.files?.[0]); e.target.value = '' }}
+                  />
+                  <button
+                    type="button"
+                    className="shrink-0 font-ui text-[13px] text-white/70 hover:text-white px-[12px] h-[38px] rounded-[8px] border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.04)] hover:bg-[rgba(255,255,255,0.08)] transition-colors disabled:opacity-40"
+                    disabled={uploadingCurrencyIcon}
+                    onClick={() => currencyFileRef.current?.click()}
+                  >
+                    {uploadingCurrencyIcon ? 'Envoi…' : 'Importer'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                {shopMsg ? <p className="font-ui text-[13px] text-white/55 tracking-[-0.3px]">{shopMsg}</p> : <span />}
+                <button
+                  className="font-ui font-bold text-[14px] tracking-[-0.3px] bg-white text-[#0e0b16] px-[16px] h-[32px] rounded-[10px] hover:bg-white/90 disabled:opacity-30 disabled:hover:bg-white active:scale-[0.98] transition-all"
+                  disabled={savingConfig}
+                  onClick={saveShopConfig}
+                >
+                  {savingConfig ? 'Enregistrement…' : 'Enregistrer'}
+                </button>
+              </div>
+            </div>
+
+            {/* Sélecteur de jour (calendrier) + nouvelle offre */}
+            <div className="flex items-center justify-between h-[34px] shrink-0">
+              <div className="flex items-center gap-[6px]">
+                <button
+                  className="flex items-center justify-center size-[30px] rounded-[8px] text-white/55 hover:text-white hover:bg-[rgba(255,255,255,0.08)] disabled:opacity-25 disabled:hover:bg-transparent transition-colors"
+                  disabled={dayOffset <= 0}
+                  onClick={() => { setDayOffset(o => Math.max(0, o - 1)); cancelOfferForm() }}
+                  title="Jour précédent"
+                >
+                  <svg width="9" height="14" viewBox="0 0 9 14" fill="none"><path d="M7.5 1 1.5 7l6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                </button>
+                <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px] min-w-[190px] text-center">{dayLabel(dayOffset)}</p>
+                <button
+                  className="flex items-center justify-center size-[30px] rounded-[8px] text-white/55 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors"
+                  onClick={() => { setDayOffset(o => o + 1); cancelOfferForm() }}
+                  title="Jour suivant"
+                >
+                  <svg width="9" height="14" viewBox="0 0 9 14" fill="none"><path d="M1.5 1 7.5 7l-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                </button>
+              </div>
+              <div className="flex items-center gap-[8px]">
+                <button
+                  className={`flex items-center gap-[7px] font-ui font-medium text-[14px] tracking-[-0.3px] px-[14px] h-[34px] rounded-[12px] border transition-colors ${showLibrary ? 'border-[rgba(0,255,225,0.5)] bg-[rgba(0,255,225,0.12)] text-white' : 'border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.04)] text-white/75 hover:text-white hover:bg-[rgba(255,255,255,0.08)]'}`}
+                  onClick={() => (showLibrary ? setShowLibrary(false) : openLibrary())}
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <rect x="1.2" y="2" width="3.2" height="10" rx="1" stroke="currentColor" strokeWidth="1.3" />
+                    <rect x="5.6" y="2" width="3.2" height="10" rx="1" stroke="currentColor" strokeWidth="1.3" />
+                    <path d="M10.4 2.7 12.7 3.3 11.1 11.6 8.8 11" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+                  </svg>
+                  {showLibrary ? 'Fermer la bibliothèque' : 'Bibliothèque'}
+                </button>
+                {!showOfferForm && !showLibrary && (
+                  <button
+                    className="flex items-center gap-[7px] bg-white text-[#0e0b16] font-ui font-bold text-[14px] tracking-[-0.3px] px-[16px] h-[34px] rounded-[12px] hover:bg-white/90 active:scale-[0.98] transition-all"
+                    onClick={openCreateOffer}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                      <rect x="4.85" y="1" width="2.3" height="10" rx="1.15" />
+                      <rect x="1" y="4.85" width="10" height="2.3" rx="1.15" />
+                    </svg>
+                    Nouvelle offre
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Formulaire d'offre */}
+            {!showLibrary && showOfferForm && (
+              <div className="bg-[rgba(0,0,0,0.28)] border border-[rgba(0,255,225,0.18)] rounded-[12px] p-[18px] flex flex-col gap-[14px]">
+                <div className="flex items-center justify-between">
+                  <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px]">
+                    {editingOfferId ? 'Modifier l\'offre' : 'Nouvelle offre'}
+                  </p>
+                  <button className="text-white/40 hover:text-white/70 transition-colors p-[4px]" onClick={cancelOfferForm}>
+                    <svg width="13" height="13" viewBox="0 0 13 13" fill="currentColor">
+                      <rect x="5.3" y="-1" width="2.4" height="15" rx="1.2" transform="rotate(45 6.5 6.5)" />
+                      <rect x="5.3" y="-1" width="2.4" height="15" rx="1.2" transform="rotate(-45 6.5 6.5)" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Troc : on donne (entrée) → on reçoit (sortie) */}
+                <div className="flex items-stretch gap-[10px]">
+                  {/* Entrée */}
+                  <div className="flex-1 flex flex-col gap-[8px] bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.07)] rounded-[10px] p-[12px]">
+                    <div className="flex items-center justify-between min-h-[24px]">
+                      <p className="font-ui text-[13px] text-white/45 tracking-[-0.3px]">On donne</p>
+                      {shopConfig.currencyItem && (
+                        <button type="button" onClick={() => setOfferForm(f => ({ ...f, input: shopConfig.currencyItem }))}
+                          className="flex items-center gap-[5px] font-ui text-[12px] text-[rgba(0,255,225,0.85)] hover:text-[rgba(0,255,225,1)] pl-[5px] pr-[9px] h-[24px] rounded-full border border-[rgba(0,255,225,0.3)] bg-[rgba(0,255,225,0.08)] hover:bg-[rgba(0,255,225,0.14)] transition-colors">
+                          <ItemIcon desc={iconDescFor(shopConfig.currencyItem, offerIcons[shopConfig.currencyItem])} id={shopConfig.currencyItem} box={16} />
+                          {shopConfig.currencyName || 'Monnaie'}
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-[8px]">
+                      <ItemIcon desc={iconDescFor(offerForm.input, offerIcons[offerForm.input])} id={offerForm.input} box={34} />
+                      <QtyInput value={offerForm.inputQty} onChange={n => setOfferForm(f => ({ ...f, inputQty: n }))} />
+                    </div>
+                    <ItemAutocomplete value={offerForm.input} onChange={v => setOfferForm(f => ({ ...f, input: v }))} catalog={itemCatalog} loading={itemCatalogLoading} placeholder="Cherche un item…" />
+                  </div>
+
+                  {/* Flèche */}
+                  <div className="flex items-center text-white/40 self-center">
+                    <svg width="22" height="14" viewBox="0 0 18 14" fill="none"><path d="M0.5 7H17.5M17.5 7L11.5 1M17.5 7L11.5 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  </div>
+
+                  {/* Sortie */}
+                  <div className="flex-1 flex flex-col gap-[8px] bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.07)] rounded-[10px] p-[12px]">
+                    <div className="flex items-center justify-between min-h-[24px]">
+                      <p className="font-ui text-[13px] text-white/45 tracking-[-0.3px]">On reçoit</p>
+                      {shopConfig.currencyItem && (
+                        <button type="button" onClick={() => setOfferForm(f => ({ ...f, output: shopConfig.currencyItem }))}
+                          className="flex items-center gap-[5px] font-ui text-[12px] text-[rgba(0,255,225,0.85)] hover:text-[rgba(0,255,225,1)] pl-[5px] pr-[9px] h-[24px] rounded-full border border-[rgba(0,255,225,0.3)] bg-[rgba(0,255,225,0.08)] hover:bg-[rgba(0,255,225,0.14)] transition-colors">
+                          <ItemIcon desc={iconDescFor(shopConfig.currencyItem, offerIcons[shopConfig.currencyItem])} id={shopConfig.currencyItem} box={16} />
+                          {shopConfig.currencyName || 'Monnaie'}
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-[8px]">
+                      <ItemIcon desc={iconDescFor(offerForm.output, offerIcons[offerForm.output])} id={offerForm.output} box={34} />
+                      <QtyInput value={offerForm.outputQty} onChange={n => setOfferForm(f => ({ ...f, outputQty: n }))} />
+                    </div>
+                    <ItemAutocomplete value={offerForm.output} onChange={v => setOfferForm(f => ({ ...f, output: v }))} catalog={itemCatalog} loading={itemCatalogLoading} placeholder="Cherche un item…" />
+                  </div>
+                </div>
+
+                <p className="font-ui text-[13px] text-white/35 tracking-[-0.3px] leading-snug">
+                  Le joueur donne l'entrée au marchand et reçoit la sortie (phase 2). Les icônes sont automatiques.
+                </p>
+
+                {offerMsg && <p className="font-ui text-[13px] text-[rgba(255,120,120,0.9)]">{offerMsg}</p>}
+
+                <div className="flex gap-[8px] justify-end pt-[4px]">
+                  <button
+                    className="font-ui text-[14px] text-white/40 px-[14px] h-[34px] rounded-[12px] hover:bg-[rgba(255,255,255,0.05)] hover:text-white/70 transition-colors"
+                    onClick={cancelOfferForm}
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    className="font-ui font-bold text-[14px] tracking-[-0.3px] bg-white text-[#0e0b16] px-[18px] h-[34px] rounded-[12px] hover:bg-white/90 disabled:opacity-30 disabled:hover:bg-white active:scale-[0.98] transition-all"
+                    disabled={savingOffer || !offerForm.input.trim() || !offerForm.output.trim()}
+                    onClick={saveOffer}
+                  >
+                    {savingOffer ? 'Enregistrement…' : editingOfferId ? 'Enregistrer' : 'Créer'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Panneau bibliothèque, OU offres du jour sélectionné */}
+            {showLibrary ? (
+              <div className="flex flex-col gap-[8px]">
+                <div className="flex items-center justify-between min-h-[20px]">
+                  <p className="font-ui text-[14px] text-white/45 tracking-[-0.3px]">Bibliothèque · « Ajouter » la place sur {dayLabel(dayOffset).toLowerCase()}</p>
+                  {libMsg && <p className="font-ui text-[13px] text-[rgba(0,255,225,0.8)] tracking-[-0.3px]">{libMsg}</p>}
+                </div>
+                {libraryLoading ? (
+                  <p className="font-ui text-[14px] text-white/25 text-center py-[40px]">Chargement…</p>
+                ) : libraryOffers.length === 0 ? (
+                  <p className="font-ui text-[14px] text-white/30 text-center py-[50px] tracking-[-0.3px]">Bibliothèque vide — les offres que tu crées s'y ajoutent automatiquement.</p>
+                ) : (
+                  libraryOffers.map(o => (
+                    <div key={o.id} className="flex items-center gap-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[8px] p-[10px] group hover:bg-[rgba(255,255,255,0.06)] hover:border-[rgba(255,255,255,0.12)] transition-colors">
+                      <div className="flex-1 min-w-0 flex items-center gap-[10px]">
+                        <div className="flex items-center gap-[7px] min-w-0">
+                          <ItemIcon desc={iconDescFor(o.input, o.inputIcon)} id={o.input} box={30} />
+                          <span className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px] whitespace-nowrap">×{o.inputQty}</span>
+                          <span className="font-ui text-[13px] text-white/35 truncate">{o.input.replace(/^minecraft:/, '')}</span>
+                        </div>
+                        <svg className="shrink-0 text-white/35" width="18" height="12" viewBox="0 0 18 14" fill="none"><path d="M0.5 7H17.5M17.5 7L11.5 1M17.5 7L11.5 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                        <div className="flex items-center gap-[7px] min-w-0">
+                          <ItemIcon desc={iconDescFor(o.output, o.outputIcon)} id={o.output} box={30} />
+                          <span className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px] whitespace-nowrap">×{o.outputQty}</span>
+                          <span className="font-ui text-[13px] text-white/35 truncate">{o.output === shopConfig.currencyItem ? (shopConfig.currencyName || 'monnaie') : o.output.replace(/^minecraft:/, '')}</span>
+                        </div>
+                      </div>
+                      <button
+                        className="flex items-center gap-[6px] shrink-0 font-ui font-medium text-[13px] text-[#0e0b16] bg-white/90 hover:bg-white px-[12px] h-[30px] rounded-[9px] active:scale-[0.97] transition-all"
+                        onClick={() => addFromLibrary(o)}
+                      >
+                        <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor"><rect x="4.85" y="1" width="2.3" height="10" rx="1.15" /><rect x="1" y="4.85" width="10" height="2.3" rx="1.15" /></svg>
+                        Ajouter
+                      </button>
+                      <button
+                        className="opacity-0 group-hover:opacity-100 flex items-center justify-center size-[30px] rounded-[8px] text-white/40 hover:text-[rgba(255,120,120,0.95)] hover:bg-[rgba(255,60,60,0.12)] transition-all shrink-0"
+                        onClick={() => deleteFromLibrary(o.id)}
+                        title="Retirer de la bibliothèque"
+                      >
+                        <svg width="13" height="14" viewBox="0 0 11 12" fill="currentColor"><rect x="0.6" y="2.1" width="9.8" height="2.2" rx="1.1" /><rect x="3.6" y="0.4" width="3.8" height="2.1" rx="1" /><path d="M1.55 4.6h7.9l-.62 6.1a1.05 1.05 0 0 1-1.04.9H3.21a1.05 1.05 0 0 1-1.04-.9L1.55 4.6Z" /></svg>
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : shopLoading ? (
+              <p className="font-ui text-[14px] text-white/25 text-center py-[40px]">Chargement…</p>
+            ) : dayOffers.length === 0 ? (
+              <div className="flex flex-col items-center gap-[14px] py-[60px]">
+                <p className="font-ui text-[14px] text-white/30 tracking-[-0.3px]">Aucune offre pour {dayOffset === 0 ? "aujourd'hui" : 'ce jour'}</p>
+                {!showOfferForm && (
+                  <button
+                    className="flex items-center gap-[7px] bg-white text-[#0e0b16] font-ui font-bold text-[14px] tracking-[-0.3px] px-[16px] h-[34px] rounded-[12px] hover:bg-white/90 active:scale-[0.98] transition-all"
+                    onClick={openCreateOffer}
+                  >
+                    Créer la première offre
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-[8px]">
+                {dayOffers.map(o => (
+                  <div
+                    key={o.id}
+                    className="flex items-center gap-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[8px] p-[10px] group hover:bg-[rgba(255,255,255,0.06)] hover:border-[rgba(255,255,255,0.12)] transition-colors"
+                  >
+                    {/* Échange : entrée → sortie */}
+                    <div className="flex-1 min-w-0 flex items-center gap-[10px]">
+                      <div className="flex items-center gap-[7px] min-w-0">
+                        <ItemIcon desc={iconDescFor(o.input, o.inputIcon)} id={o.input} box={30} />
+                        <span className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px] whitespace-nowrap">×{o.inputQty}</span>
+                        <span className="font-ui text-[13px] text-white/35 truncate">{o.input.replace(/^minecraft:/, '')}</span>
+                      </div>
+                      <svg className="shrink-0 text-white/35" width="18" height="12" viewBox="0 0 18 14" fill="none"><path d="M0.5 7H17.5M17.5 7L11.5 1M17.5 7L11.5 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      <div className="flex items-center gap-[7px] min-w-0">
+                        <ItemIcon desc={iconDescFor(o.output, o.outputIcon)} id={o.output} box={30} />
+                        <span className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px] whitespace-nowrap">×{o.outputQty}</span>
+                        <span className="font-ui text-[13px] text-white/35 truncate">{o.output === shopConfig.currencyItem ? (shopConfig.currencyName || 'monnaie') : o.output.replace(/^minecraft:/, '')}</span>
+                      </div>
+                    </div>
+
+                    {confirmDeleteOffer === o.id ? (
+                      <div className="flex gap-[6px] items-center shrink-0">
+                        <span className="font-ui text-[14px] text-white/40">Supprimer ?</span>
+                        <button
+                          className="font-ui text-[14px] text-[rgba(255,100,100,0.8)] hover:text-[rgba(255,120,120,1)] px-[10px] py-[5px] rounded-[8px] bg-[rgba(255,60,60,0.1)] border border-[rgba(255,60,60,0.2)] transition-colors"
+                          onClick={() => doDeleteOffer(o.id)}
+                        >
+                          Confirmer
+                        </button>
+                        <button
+                          className="font-ui text-[14px] text-white/30 hover:text-white/60 px-[10px] py-[5px] rounded-[8px] hover:bg-[rgba(255,255,255,0.05)] transition-colors"
+                          onClick={() => setConfirmDeleteOffer(null)}
+                        >
+                          Annuler
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-[6px] opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <button
+                          className="flex items-center justify-center size-[38px] rounded-[10px] text-white/40 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors"
+                          onClick={() => openEditOffer(o)}
+                          title="Modifier"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 12 12" fill="currentColor">
+                            <path d="M7.9 1.35 10.65 4.1 9.25 5.5 6.5 2.75 7.9 1.35Z" />
+                            <path d="M5.85 3.4 8.6 6.15 3.35 11.4l-2.85.6.6-2.85L5.85 3.4Z" />
+                          </svg>
+                        </button>
+                        <button
+                          className="flex items-center justify-center size-[38px] rounded-[10px] text-white/40 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors"
+                          onClick={() => duplicateOffer(o)}
+                          title="Dupliquer"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 12 12" fill="none">
+                            <rect x="3.7" y="0.7" width="7.6" height="7.6" rx="1.6" stroke="currentColor" strokeWidth="1.2" />
+                            <rect x="0.7" y="3.7" width="7.6" height="7.6" rx="1.6" fill="currentColor" />
+                          </svg>
+                        </button>
+                        <button
+                          className="flex items-center justify-center size-[38px] rounded-[10px] text-white/40 hover:text-[rgba(255,120,120,0.95)] hover:bg-[rgba(255,60,60,0.12)] transition-colors"
+                          onClick={() => setConfirmDeleteOffer(o.id)}
                           title="Supprimer"
                         >
                           <svg width="15" height="16" viewBox="0 0 11 12" fill="currentColor">

@@ -9,6 +9,7 @@ const net = require('net')
 const os = require('os')
 const crypto = require('crypto')
 const { spawn } = require('child_process')
+const AdmZip = require('adm-zip')
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 const MODPACK = require('../../modpack.json')
@@ -567,6 +568,7 @@ app.whenReady().then(() => {
   if (restoredUser) recordPlayerSeen(restoredUser)  // garde le joueur dans l'historique partagé
   initializeAdmins()
   initializeChannels()
+  initializeShop()
   if (process.platform !== 'darwin') setupAutoUpdater()  // Mac : check maison via API GitHub
   createWindow()
 
@@ -1957,6 +1959,549 @@ ipcMain.handle('remove-player-seen', async (_, name) => {
     return { success: true }
   } catch (e) {
     return { success: false, error: e.message }
+  }
+})
+
+// ─── SHOP DU JOUR ─────────────────────────────────────────────────────────────
+// Page d'accueil du launcher : un « shop du jour » dont l'admin compose les offres
+// JOUR PAR JOUR (calendrier), préparables à l'avance. Bascule à minuit LOCAL : le
+// shop actif = les offres de la date locale courante ; aucun tirage, aucun cron.
+// (Phase 2 : un PNJ en jeu proposera les mêmes échanges.)
+// Source de vérité Firebase :
+//   /shop/config                 = { currencyName, currencyItem, currencyIcon }
+//   /shop/days/{YYYY-MM-DD}/{id}  = { input, inputQty, output, outputQty, createdAt }
+// Un échange : donner `inputQty × input` au marchand -> recevoir `outputQty × output`
+// (souvent output = currencyItem, la monnaie). input/output = identifiants d'item.
+const SHOP_DEFAULT_CONFIG = { currencyName: 'Z-Coin', currencyItem: '', currencyIcon: '' }
+
+async function initializeShop() {
+  if (!isFirebaseConfigured()) return
+  try {
+    const existing = await firebaseRequest('GET', '/shop/config', null, false)
+    if (!existing || existing === 'null') {
+      await firebaseRequest('PUT', '/shop/config', SHOP_DEFAULT_CONFIG, true)
+      console.log('[Shop] Config par défaut initialisée')
+    }
+  } catch (e) {
+    console.log('[Shop] Impossible d\'initialiser la config :', e.message)
+  }
+}
+
+// Clé du jour (YYYY-MM-DD) en heure LOCALE, décalable de `offsetDays` (0 = aujourd'hui,
+// 1 = demain…). La bascule se fait donc à minuit local.
+function shopDayKey(offsetDays = 0) {
+  const d = new Date()
+  d.setDate(d.getDate() + (Number(offsetDays) || 0))
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+function isDayKey(s) { return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) }
+
+function readShopConfig(raw) {
+  return (raw && typeof raw === 'object' && !Array.isArray(raw))
+    ? { ...SHOP_DEFAULT_CONFIG, ...raw }
+    : { ...SHOP_DEFAULT_CONFIG }
+}
+
+// Offres d'un jour donné (triées par date de création).
+async function fetchShopDay(dayKey) {
+  const map = normalizeFbMap(await firebaseRequest('GET', `/shop/days/${dayKey}`, null, false))
+  return Object.entries(map)
+    .filter(([, o]) => o && typeof o === 'object')
+    .map(([id, o]) => ({
+      id,
+      input: String(o.input ?? ''),
+      inputQty: Number(o.inputQty) > 0 ? Math.floor(Number(o.inputQty)) : 1,
+      output: String(o.output ?? ''),
+      outputQty: Number(o.outputQty) > 0 ? Math.floor(Number(o.outputQty)) : 1,
+      createdAt: o.createdAt || 0,
+    }))
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+}
+
+// Migration best-effort (one-shot) : si aucun jour n'existe encore mais qu'un
+// ancien /shop/pool est présent, convertit ses offres (achat « product pour
+// price ») en échanges d'aujourd'hui (donner price×monnaie -> recevoir productQty×product).
+let shopMigrationDone = false
+async function migrateLegacyPoolIfNeeded(config) {
+  if (shopMigrationDone) return
+  shopMigrationDone = true
+  try {
+    const days = await firebaseRequest('GET', '/shop/days', null, false)
+    if (days && days !== 'null') return
+    if (!config.currencyItem) return
+    const poolRaw = normalizeFbMap(await firebaseRequest('GET', '/shop/pool', null, false))
+    const pool = Object.values(poolRaw).filter(o => o && typeof o === 'object' && o.product)
+    if (!pool.length) return
+    const today = shopDayKey(0)
+    for (const o of pool) {
+      const offer = {
+        input: config.currencyItem, inputQty: Math.max(1, Math.floor(Number(o.price)) || 1),
+        output: String(o.product), outputQty: Math.max(1, Math.floor(Number(o.productQty)) || 1),
+        createdAt: Date.now(),
+      }
+      try { await firebaseRequest('POST', `/shop/days/${today}`, offer, true) } catch { /* */ }
+    }
+    console.log(`[Shop] Migration de ${pool.length} ancienne(s) offre(s) vers ${today}`)
+  } catch (e) { console.log('[Shop] Migration ignorée :', e.message) }
+}
+
+// Attache les descripteurs d'icône (input/output) à des offres, via le même
+// résolveur que get-item-icons (cache partagé). Échec -> pas d'icône (null).
+async function attachShopIcons(offers) {
+  const ids = [...new Set(offers.flatMap(o => [o.input, o.output]).filter(Boolean))]
+  let icons = {}
+  try { icons = await getItemIcons(ids) } catch { icons = {} }
+  return offers.map(o => ({ ...o, inputIcon: icons[o.input] || null, outputIcon: icons[o.output] || null }))
+}
+
+// Bibliothèque d'offres réutilisables (/shop/library) : toute offre créée y est
+// ajoutée (dédupliquée), pour pouvoir la replacer ensuite sur n'importe quel jour.
+function shopOfferKey(o) { return `${o.input}|${o.inputQty}|${o.output}|${o.outputQty}` }
+async function fetchShopLibrary() {
+  const map = normalizeFbMap(await firebaseRequest('GET', '/shop/library', null, false))
+  return Object.entries(map)
+    .filter(([, o]) => o && typeof o === 'object')
+    .map(([id, o]) => ({
+      id,
+      input: String(o.input ?? ''),
+      inputQty: Number(o.inputQty) > 0 ? Math.floor(Number(o.inputQty)) : 1,
+      output: String(o.output ?? ''),
+      outputQty: Number(o.outputQty) > 0 ? Math.floor(Number(o.outputQty)) : 1,
+      createdAt: o.createdAt || 0,
+    }))
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+}
+async function addToLibraryDedup(offer) {
+  try {
+    const lib = await fetchShopLibrary()
+    if (lib.some(o => shopOfferKey(o) === shopOfferKey(offer))) return
+    await firebaseRequest('POST', '/shop/library', { ...offer, createdAt: Date.now() }, true)
+  } catch { /* best-effort */ }
+}
+
+// Normalise/borne une offre (troc) venue du renderer.
+function sanitizeShopOffer(input) {
+  const o = (input && typeof input === 'object') ? input : {}
+  const qty = v => Number.isFinite(+v) && +v > 0 ? Math.min(Math.floor(+v), 9999) : 1
+  return {
+    input: String(o.input ?? '').trim().slice(0, 120),
+    inputQty: qty(o.inputQty),
+    output: String(o.output ?? '').trim().slice(0, 120),
+    outputQty: qty(o.outputQty),
+  }
+}
+
+// ── IPC : lecture publique (accueil) — offres du jour courant, icônes incluses ──
+ipcMain.handle('get-shop', async () => {
+  if (!isFirebaseConfigured()) return { success: false, offers: [], config: { ...SHOP_DEFAULT_CONFIG } }
+  try {
+    const config = readShopConfig(await firebaseRequest('GET', '/shop/config', null, false))
+    await migrateLegacyPoolIfNeeded(config)
+    const date = shopDayKey(0)
+    const offers = await attachShopIcons(await fetchShopDay(date))
+    return { success: true, offers, config, date }
+  } catch (e) {
+    return { success: false, offers: [], config: { ...SHOP_DEFAULT_CONFIG }, error: e.message }
+  }
+})
+
+// ── IPC : offres d'un jour précis (éditeur admin) ──
+ipcMain.handle('get-shop-day', async (_, dayKey) => {
+  if (!isFirebaseConfigured()) return { success: false, offers: [], config: { ...SHOP_DEFAULT_CONFIG } }
+  const date = isDayKey(dayKey) ? dayKey : shopDayKey(0)
+  try {
+    const config = readShopConfig(await firebaseRequest('GET', '/shop/config', null, false))
+    await migrateLegacyPoolIfNeeded(config)
+    const offers = await attachShopIcons(await fetchShopDay(date))
+    return { success: true, offers, config, date }
+  } catch (e) {
+    return { success: false, offers: [], config: { ...SHOP_DEFAULT_CONFIG }, error: e.message }
+  }
+})
+
+// ── IPC : édition des offres d'un jour (admin, vérifié côté main) ──
+ipcMain.handle('create-shop-offer', async (_, { date, ...data } = {}) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  if (!isDayKey(date)) return { success: false, error: 'Jour invalide.' }
+  const offer = sanitizeShopOffer(data)
+  if (!offer.input || !offer.output) return { success: false, error: 'Indique un item d\'entrée et un item de sortie.' }
+  try {
+    const result = await firebaseRequest('POST', `/shop/days/${date}`, { ...offer, createdAt: Date.now() }, true)
+    await addToLibraryDedup(offer) // réutilisable plus tard via la bibliothèque
+    return { success: true, id: result?.name }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle('update-shop-offer', async (_, { date, id, ...data } = {}) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  if (!isDayKey(date) || !isValidPushId(id)) return { success: false, error: 'Offre introuvable.' }
+  try {
+    await firebaseRequest('PATCH', `/shop/days/${date}/${id}`, sanitizeShopOffer(data), true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle('delete-shop-offer', async (_, { date, id } = {}) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  if (!isDayKey(date) || !isValidPushId(id)) return { success: false, error: 'Offre introuvable.' }
+  try {
+    await firebaseRequest('DELETE', `/shop/days/${date}/${id}`, null, true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle('set-shop-config', async (_, data) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  const patch = {}
+  if (data && typeof data === 'object') {
+    if (data.currencyName != null) patch.currencyName = String(data.currencyName).trim().slice(0, 40)
+    if (data.currencyItem != null) patch.currencyItem = String(data.currencyItem).trim().slice(0, 120)
+    if (data.currencyIcon != null) patch.currencyIcon = String(data.currencyIcon).trim().slice(0, 1024)
+  }
+  try {
+    await firebaseRequest('PATCH', '/shop/config', patch, true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+// ── IPC : bibliothèque d'offres réutilisables (modèles à replacer sur un jour) ──
+ipcMain.handle('get-shop-library', async () => {
+  if (!isFirebaseConfigured()) return { success: false, offers: [], config: { ...SHOP_DEFAULT_CONFIG } }
+  try {
+    const config = readShopConfig(await firebaseRequest('GET', '/shop/config', null, false))
+    const offers = await attachShopIcons(await fetchShopLibrary())
+    return { success: true, offers, config }
+  } catch (e) {
+    return { success: false, offers: [], config: { ...SHOP_DEFAULT_CONFIG }, error: e.message }
+  }
+})
+
+ipcMain.handle('delete-shop-library-offer', async (_, id) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  if (!isValidPushId(id)) return { success: false, error: 'Modèle introuvable.' }
+  try {
+    await firebaseRequest('DELETE', `/shop/library/${id}`, null, true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+// ─── CATALOGUE D'ITEMS (autocomplétion admin) ─────────────────────────────────
+// Pour aider l'admin à saisir l'identifiant d'un item (souvent un id moddé
+// imprononçable), on extrait la liste réelle des items du modpack INSTALLÉ en
+// local : on lit les fichiers de langue `assets/<ns>/lang/en_us.json` du client
+// vanilla (versions/<mc>/<mc>.jar) et de chaque mod (mods/*.jar), et on en tire
+// les paires { id, name } via les clés `item.<ns>.<nom>` / `block.<ns>.<nom>`.
+// C'est une heuristique (≠ registre runtime) mais elle couvre la quasi-totalité
+// des items et donne le nom anglais lisible. Le scan (~5 s, des milliers d'items)
+// est mis en cache disque, signé par le contenu du dossier mods → instantané
+// tant que le pack ne change pas.
+const ITEM_CATALOG_CACHE = path.join(GAME_DIR, '.item-catalog.json')
+const ITEM_LANG_RE = /^assets\/([a-z0-9_.-]+)\/lang\/en_us\.json$/
+// Capture le type (item|block). Un id n'est gardé que s'il est un vrai item
+// donnable : clé `item.*` OU présence d'un modèle d'item (cas des block-items).
+const ITEM_KEY_RE = /^(item|block)\.([a-z0-9_]+)\.([a-z0-9_]+)$/
+const ITEM_MODEL_RE = /^assets\/([a-z0-9_.-]+)\/models\/item\/([a-z0-9_]+)\.json$/
+const ITEM_CATALOG_V = 3 // bump → invalide le cache disque quand la logique de scan change
+let itemCatalogMem = null // { sig, items, nsJars }
+
+// Chemins des jars du modpack + résolution d'un marqueur de jar (« @client » =
+// client vanilla, sinon nom de fichier dans mods/). nsJars associe un namespace
+// au marqueur du jar où vit son lang (≈ où vivent ses textures) → sert aux icônes.
+function itemClientJar() { return path.join(GAME_DIR, 'versions', MODPACK.minecraft, `${MODPACK.minecraft}.jar`) }
+function itemModsDir() { return path.join(GAME_DIR, 'mods') }
+function markerToPath(marker) { return marker === '@client' ? itemClientJar() : path.join(itemModsDir(), marker) }
+
+// Signature du pack installé : nom+taille du client jar et de chaque mod. Change
+// dès qu'un mod est ajouté/retiré/mis à jour → invalide le cache.
+function itemCatalogSignature() {
+  const parts = []
+  try {
+    const clientJar = path.join(GAME_DIR, 'versions', MODPACK.minecraft, `${MODPACK.minecraft}.jar`)
+    parts.push(`mc:${fs.statSync(clientJar).size}`)
+  } catch { /* pas encore installé */ }
+  try {
+    const modsDir = path.join(GAME_DIR, 'mods')
+    for (const f of fs.readdirSync(modsDir).sort()) {
+      if (!f.endsWith('.jar')) continue
+      parts.push(`${f}:${fs.statSync(path.join(modsDir, f)).size}`)
+    }
+  } catch { /* dossier mods absent */ }
+  return crypto.createHash('sha1').update(parts.join('|')).digest('hex')
+}
+
+// Extrait d'un seul jar : les paires { id, name } (lang), le jar du namespace,
+// les ids déclarés `item.*` (itemKeys) et les ids ayant un modèle d'item
+// (itemModels). Silencieux si illisible.
+function scanJarForItems(jarPath, marker, into, nsJars, itemKeys, itemModels) {
+  let zip
+  try { zip = new AdmZip(jarPath) } catch { return }
+  for (const entry of zip.getEntries()) {
+    // Modèle d'item -> id réellement rendu dans l'inventaire (donnable).
+    const mm = ITEM_MODEL_RE.exec(entry.entryName)
+    if (mm) { if (itemModels) itemModels.add(`${mm[1]}:${mm[2]}`); continue }
+    const lm = ITEM_LANG_RE.exec(entry.entryName)
+    if (!lm) continue
+    if (nsJars && !nsJars[lm[1]]) nsJars[lm[1]] = marker
+    let json
+    try { json = JSON.parse(entry.getData().toString('utf8')) } catch { continue }
+    for (const key of Object.keys(json)) {
+      const m = ITEM_KEY_RE.exec(key)
+      if (!m) continue
+      const id = `${m[2]}:${m[3]}`
+      if (m[1] === 'item' && itemKeys) itemKeys.add(id)
+      if (!into.has(id)) into.set(id, String(json[key]).slice(0, 80))
+    }
+  }
+}
+
+// Reconstruit le catalogue depuis les jars (asynchrone : cède la main entre les
+// jars pour ne pas figer le process principal pendant les ~5 s de scan).
+async function buildItemCatalog() {
+  const items = new Map()
+  const nsJars = {}
+  const itemKeys = new Set()   // ids déclarés via une clé lang `item.*`
+  const itemModels = new Set() // ids ayant un modèle d'item (rendus dans l'inventaire)
+  try { scanJarForItems(itemClientJar(), '@client', items, nsJars, itemKeys, itemModels) } catch { /* */ }
+  try {
+    const jars = fs.readdirSync(itemModsDir()).filter(f => f.endsWith('.jar'))
+    for (let i = 0; i < jars.length; i++) {
+      scanJarForItems(path.join(itemModsDir(), jars[i]), jars[i], items, nsJars, itemKeys, itemModels)
+      if (i % 8 === 7) await new Promise(r => setImmediate(r))
+    }
+  } catch { /* dossier mods absent */ }
+  // On ne garde que les vrais items donnables/inventoriables : déclarés `item.*`
+  // OU possédant un modèle d'item (block-items). On écarte ainsi les blocs sans
+  // item (panneaux muraux, tiges de plantes, états de blocs…), non donnables.
+  const list = [...items.entries()]
+    .filter(([id]) => itemKeys.has(id) || itemModels.has(id))
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'en') || a.id.localeCompare(b.id))
+  return { items: list, nsJars }
+}
+
+async function getItemCatalog() {
+  const sig = itemCatalogSignature()
+  if (itemCatalogMem && itemCatalogMem.sig === sig) return itemCatalogMem
+  try {
+    const cached = JSON.parse(fs.readFileSync(ITEM_CATALOG_CACHE, 'utf8'))
+    if (cached && cached.v === ITEM_CATALOG_V && cached.sig === sig && Array.isArray(cached.items) && cached.nsJars) {
+      itemCatalogMem = { sig, items: cached.items, nsJars: cached.nsJars }
+      return itemCatalogMem
+    }
+  } catch { /* pas de cache valide */ }
+  const { items, nsJars } = await buildItemCatalog()
+  itemCatalogMem = { sig, items, nsJars }
+  itemIconCache.clear() // pack changé → icônes potentiellement obsolètes
+  try { fs.writeFileSync(ITEM_CATALOG_CACHE, JSON.stringify({ v: ITEM_CATALOG_V, sig, items, nsJars })) } catch { /* best-effort */ }
+  return itemCatalogMem
+}
+
+// Lecture locale uniquement (noms d'items publics) → pas de garde admin.
+ipcMain.handle('get-item-catalog', async () => {
+  try {
+    return { success: true, items: (await getItemCatalog()).items }
+  } catch (e) {
+    return { success: false, items: [], error: e.message }
+  }
+})
+
+// ── Icônes d'items : descripteur de rendu, comme l'inventaire du jeu.
+// Pour un id, on aplatit la chaîne du modèle d'item (assets/<ns>/models/item/<n>.json) :
+//   • elements présents -> { kind:'block', elements, textures:{ref:{dataUrl,w,h}}, gui, flatFallback }
+//     le renderer le dessine en isométrie 3D (rotation 30/225, ombrage par face), comme l'inventaire ;
+//   • sinon            -> { kind:'flat', src } (layer0 ; sprite plat, comme en jeu pour les objets) ;
+//   • builtin/entity sans modèle (coffre, lit, bannière, tête…) -> null (carré vide ; import manuel possible).
+// Règle de classification : la présence d'`elements` (héritée ou non) fait le bloc ; on NE se fie PAS au
+// parent racine (item/generated ET item/handheld descendent tous deux de builtin/generated).
+// Résolu à la demande (lot visible), mis en cache mémoire ; jars ouverts gardés dans un petit LRU.
+const ITEM_JAR_LRU_MAX = 6
+const itemJarLru = new Map()       // jarPath -> AdmZip | null
+const itemIconCache = new Map()    // id -> descriptor | null
+
+function openJarCached(jarPath) {
+  if (!jarPath) return null
+  if (itemJarLru.has(jarPath)) {
+    const z = itemJarLru.get(jarPath)
+    itemJarLru.delete(jarPath); itemJarLru.set(jarPath, z) // rafraîchit l'ordre LRU
+    return z
+  }
+  let zip = null
+  try { zip = new AdmZip(jarPath) } catch { zip = null }
+  itemJarLru.set(jarPath, zip)
+  while (itemJarLru.size > ITEM_JAR_LRU_MAX) itemJarLru.delete(itemJarLru.keys().next().value)
+  return zip
+}
+function jarForNs(ns, nsJars) { return nsJars && nsJars[ns] ? markerToPath(nsJars[ns]) : null }
+function zipJson(zip, name) {
+  if (!zip) return null
+  const e = zip.getEntry(name); if (!e) return null
+  try { return JSON.parse(e.getData().toString('utf8')) } catch { return null }
+}
+function zipPng(zip, name) {
+  if (!zip) return null
+  const e = zip.getEntry(name); if (!e) return null
+  try { return e.getData() } catch { return null }
+}
+function splitNsPath(ref) {
+  const ci = ref.indexOf(':')
+  return ci >= 0 ? { ns: ref.slice(0, ci), p: ref.slice(ci + 1) } : { ns: 'minecraft', p: ref }
+}
+// Dimensions d'un PNG depuis l'en-tête IHDR (16e/20e octets).
+function pngSize(buf) { return (buf && buf.length >= 24) ? { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) } : { w: 16, h: 16 } }
+// Référence de texture 'ns:block/x' -> { dataUrl, w, h } | null
+function texRefToTex(ref, nsJars) {
+  if (typeof ref !== 'string' || !ref || ref.startsWith('#')) return null
+  const { ns, p } = splitNsPath(ref)
+  const buf = zipPng(openJarCached(jarForNs(ns, nsJars)), `assets/${ns}/textures/${p}.png`)
+  if (!buf) return null
+  const { w, h } = pngSize(buf)
+  return { dataUrl: `data:image/png;base64,${buf.toString('base64')}`, w, h }
+}
+// Résout une variable de texture (#all → valeur réelle).
+function resolveTexVar(v, textures, guard = 0) {
+  if (typeof v !== 'string') return null
+  if (v.startsWith('#') && guard < 6) return resolveTexVar(textures[v.slice(1)], textures, guard + 1)
+  return v
+}
+// Aplatit la chaîne de parents d'un modèle d'item : textures (l'enfant prime),
+// 1er `elements` rencontré (l'enfant prime), display fusionné. S'arrête aux
+// modèles builtin/* (pas de géométrie JSON) et aux parents introuvables.
+function flattenItemModel(rootRef, nsJars) {
+  const textures = {}; let elements = null; const display = {}
+  let ref = rootRef, depth = 0; const seen = new Set()
+  while (ref && depth < 16 && !seen.has(ref)) {
+    seen.add(ref)
+    const { ns, p } = splitNsPath(ref)
+    if (p.startsWith('builtin/')) break
+    const model = zipJson(openJarCached(jarForNs(ns, nsJars)), `assets/${ns}/models/${p}.json`)
+    if (!model) break
+    if (model.textures) for (const [k, v] of Object.entries(model.textures)) if (!(k in textures)) textures[k] = v
+    if (!elements && Array.isArray(model.elements)) elements = model.elements
+    if (model.display) for (const [k, v] of Object.entries(model.display)) if (!(k in display)) display[k] = v
+    ref = model.parent
+    depth++
+  }
+  return { textures, elements, display }
+}
+
+// Têtes/skulls vanilla : parent builtin/entity (rendu par code Java), donc aucun
+// modèle JSON exploitable -> on synthétise un cube de tête 8×8×8 texturé depuis
+// l'atlas d'entité, aux UV du skin standard, rendu en 3D comme dans l'inventaire.
+// (Les têtes de mods utilisent des textures hardcodées côté Java, inconnues ici ;
+// le dragon a un modèle spécial non cubique -> laissé sans icône.)
+const SKULL_ENTITY_TEX = {
+  'minecraft:skeleton_skull': 'minecraft:entity/skeleton/skeleton',
+  'minecraft:wither_skeleton_skull': 'minecraft:entity/skeleton/wither_skeleton',
+  'minecraft:zombie_head': 'minecraft:entity/zombie/zombie',
+  'minecraft:creeper_head': 'minecraft:entity/creeper/creeper',
+  'minecraft:piglin_head': 'minecraft:entity/piglin/piglin',
+  'minecraft:player_head': 'minecraft:entity/player/wide/steve',
+}
+// UV (convention 0-16, k = texW/16) de la tête dans l'atlas skin (coin haut-gauche).
+const SKULL_FACE_UV = { up: [2, 0, 4, 2], down: [4, 0, 6, 2], north: [2, 2, 4, 4], south: [6, 2, 8, 4], west: [0, 2, 2, 4], east: [4, 2, 6, 4] }
+const SKULL_GUI = { rotation: [30, 45, 0], translation: [0, 0, 0], scale: [1, 1, 1] }
+function buildSkullDescriptor(id, nsJars) {
+  const texRef = SKULL_ENTITY_TEX[id]
+  if (!texRef) return null
+  const tex = texRefToTex(texRef, nsJars)
+  if (!tex) return null
+  const faces = {}
+  for (const [dir, uv] of Object.entries(SKULL_FACE_UV)) faces[dir] = { texture: texRef, uv }
+  return { kind: 'block', elements: [{ from: [4, 4, 4], to: [12, 12, 12], faces }], textures: { [texRef]: tex }, gui: SKULL_GUI }
+}
+
+// id 'ns:name' -> descripteur de rendu | null (cf. en-tête de section).
+function buildItemDescriptor(id, nsJars) {
+  const skull = buildSkullDescriptor(id, nsJars)
+  if (skull) return skull
+  const { ns, p: name } = splitNsPath(id)
+  const flat = flattenItemModel(`${ns}:item/${name}`, nsJars)
+
+  // 1) Bloc géométrique : elements + textures de faces résolues + display.gui
+  if (flat.elements && flat.elements.length) {
+    const usedRefs = new Set()
+    const elements = flat.elements.map(el => {
+      const faces = {}
+      for (const [dir, face] of Object.entries(el.faces || {})) {
+        const resolved = resolveTexVar(face.texture, flat.textures)
+        if (!resolved || resolved.startsWith('#')) continue
+        usedRefs.add(resolved)
+        faces[dir] = {
+          texture: resolved,
+          uv: face.uv,
+          rotation: face.rotation || 0,
+          tintindex: typeof face.tintindex === 'number' ? face.tintindex : undefined,
+        }
+      }
+      return { from: el.from, to: el.to, rotation: el.rotation, faces }
+    }).filter(el => Object.keys(el.faces).length > 0)
+
+    const textures = {}
+    for (const ref of usedRefs) { const t = texRefToTex(ref, nsJars); if (t) textures[ref] = t }
+
+    if (elements.length && Object.keys(textures).length) {
+      const gui = flat.display.gui || { rotation: [30, 225, 0], translation: [0, 0, 0], scale: [0.625, 0.625, 0.625] }
+      const fbRef = resolveTexVar(flat.textures.all, flat.textures) || resolveTexVar(flat.textures.side, flat.textures) || [...usedRefs][0]
+      const flatFallback = (fbRef && textures[fbRef]) ? textures[fbRef].dataUrl : undefined
+      return { kind: 'block', elements, textures, gui, flatFallback }
+    }
+    // bloc non résoluble -> on retombe sur le sprite plat ci-dessous
+  }
+
+  // 2) Sprite plat : layer0 (ou '0'), puis repli texture directe item/ puis block/
+  const l0 = resolveTexVar(flat.textures.layer0, flat.textures) || resolveTexVar(flat.textures['0'], flat.textures)
+  if (l0 && !l0.startsWith('#')) { const t = texRefToTex(l0, nsJars); if (t) return { kind: 'flat', src: t.dataUrl } }
+  for (const cand of [`${ns}:item/${name}`, `${ns}:block/${name}`]) { const t = texRefToTex(cand, nsJars); if (t) return { kind: 'flat', src: t.dataUrl } }
+
+  // 3) builtin/entity & co : pas de modèle exploitable
+  return null
+}
+
+async function getItemIcons(ids) {
+  const nsJars = (await getItemCatalog()).nsJars || {}
+  const out = {}
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i]
+    if (typeof id !== 'string') continue
+    if (!itemIconCache.has(id)) {
+      let desc = null
+      try { desc = buildItemDescriptor(id, nsJars) } catch { desc = null }
+      itemIconCache.set(id, desc)
+    }
+    const desc = itemIconCache.get(id)
+    if (desc) out[id] = desc
+    if (i % 24 === 23) await new Promise(r => setImmediate(r)) // cède la main
+  }
+  return out
+}
+
+ipcMain.handle('get-item-icons', async (_, ids) => {
+  try {
+    if (!Array.isArray(ids)) return { success: false, icons: {} }
+    return { success: true, icons: await getItemIcons(ids.slice(0, 120)) }
+  } catch (e) {
+    return { success: false, icons: {}, error: e.message }
   }
 })
 

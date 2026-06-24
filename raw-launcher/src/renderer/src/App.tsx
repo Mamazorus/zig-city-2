@@ -7,7 +7,9 @@ import StatsPage from './Stats'
 import SettingsPage from './Settings'
 import ChatPanel from './ChatPanel'
 import { resolveCategory, CategoryBadge, NewsFallback, type NewsCategory } from './news'
-import { Avatar, RemoteNewsImage } from './remote-image'
+import { Avatar, RemoteNewsImage, useRemoteImage } from './remote-image'
+import { useItemIconSrc } from './item-icon'
+import type { ItemIconDesc } from './block-renderer'
 
 import bgImage from './assets/bg.png'
 import news1Image from './assets/news-1.png'
@@ -41,6 +43,9 @@ interface DynamicNewsItem {
 }
 
 type AnyNewsItem = { img?: string; title: string; date: string; body: string; imageUrl?: string; id?: string; author?: string; category?: NewsCategory }
+
+// Offre (troc) du shop du jour, renvoyée par le main (lecture de /shop/days/{aujourd'hui}).
+type ShopOfferView = { id: string; input: string; inputQty: number; output: string; outputQty: number; inputIcon?: ItemIconDesc | null; outputIcon?: ItemIconDesc | null }
 
 interface ProgressState {
   percent: number
@@ -926,6 +931,52 @@ const SHOP_ITEMS = [
   { from: shop4Image, fromQty: 'x8',  toQty: 'x4',  alt: false },
 ]
 
+type ShopRowData = {
+  key: string
+  inDesc?: ItemIconDesc | null; inId?: string; inCurrencyUrl?: string; inFallback: string; inQty: string
+  outDesc?: ItemIconDesc | null; outId?: string; outCurrencyUrl?: string; outFallback: string; outQty: string
+  alt: boolean
+}
+
+// Icône d'un côté d'échange : la monnaie (currencyUrl, distante) passe par le proxy
+// main (useRemoteImage) ; un item normal est rendu localement (descripteur → dataURL).
+function ShopIcon({ desc, id, currencyUrl, fallback }: { desc?: ItemIconDesc | null; id?: string; currencyUrl?: string; fallback: string }) {
+  const auto = useItemIconSrc(id, desc)
+  const curr = useRemoteImage(currencyUrl || undefined, fallback)
+  const src = currencyUrl ? curr : (auto || fallback)
+  return (
+    <div className="relative shrink-0 size-[48px]" style={{ marginRight: -18 }}>
+      <img alt="" className="absolute inset-0 max-w-none object-contain pointer-events-none size-full [image-rendering:pixelated]" src={src} />
+    </div>
+  )
+}
+
+// Une ligne du shop du jour : [entrée ×qté]  →  [sortie ×qté], icônes automatiques.
+function ShopRow({ row }: { row: ShopRowData }) {
+  return (
+    <div className={`flex items-center justify-between p-[8px] rounded-[8px] w-full relative ${row.alt ? 'bg-[rgba(255,255,255,0.1)]' : ''}`}>
+      {/* Entrée */}
+      <div className="flex items-end">
+        <ShopIcon desc={row.inDesc} id={row.inId} currencyUrl={row.inCurrencyUrl} fallback={row.inFallback} />
+        <p className="relative z-10 font-minecraft text-[16px] text-white tracking-[-0.64px] whitespace-nowrap">{row.inQty}</p>
+      </div>
+
+      {/* Flèche */}
+      <div className="absolute left-1/2 -translate-x-1/2">
+        <svg width="18" height="14" viewBox="0 0 18 14" fill="none">
+          <path d="M0.5 7H17.5M17.5 7L11.5 1M17.5 7L11.5 13" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </div>
+
+      {/* Sortie */}
+      <div className="flex items-end">
+        <ShopIcon desc={row.outDesc} id={row.outId} currencyUrl={row.outCurrencyUrl} fallback={row.outFallback} />
+        <p className="relative z-10 font-minecraft text-[16px] text-white tracking-[-0.64px] whitespace-nowrap">{row.outQty}</p>
+      </div>
+    </div>
+  )
+}
+
 const NEWS_ITEMS: AnyNewsItem[] = [
   {
     img: news1Image,
@@ -985,6 +1036,9 @@ export default function App() {
   const [newsClosing, setNewsClosing] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
   const [dynamicNews, setDynamicNews] = useState<DynamicNewsItem[]>([])
+  const [shopOffers, setShopOffers] = useState<ShopOfferView[]>([])
+  const [shopCurrencyIcon, setShopCurrencyIcon] = useState('')
+  const [shopCurrencyItem, setShopCurrencyItem] = useState('')
   const [heroHovered, setHeroHovered] = useState(false)
   const [playersSeen, setPlayersSeen] = useState<string[]>([])
   // Têtes affichées dans le carrousel : ordre stable et déterministe (tri
@@ -1087,6 +1141,40 @@ export default function App() {
     const result = await window.launcher.getNews()
     if (result.success && result.news.length > 0) setDynamicNews(result.news)
   }, [])
+
+  // Shop du jour : lecture publique des offres de la date courante (bascule à
+  // minuit côté main). Rechargé à chaque arrivée sur l'accueil (effet plus bas).
+  const fetchShop = useCallback(async () => {
+    const result = await window.launcher.getShop()
+    if (result.success) {
+      setShopOffers((result.offers || []) as ShopOfferView[])
+      setShopCurrencyIcon(result.config?.currencyIcon || '')
+      setShopCurrencyItem(result.config?.currencyItem || '')
+    }
+  }, [])
+
+  // Lignes affichées : offres réelles du jour si présentes, sinon repli statique.
+  // Chaque côté = un item (icône auto via descripteur) ou la monnaie (currencyIcon).
+  const shopRows = useMemo<ShopRowData[]>(() => {
+    const curr = shopCurrencyItem
+    if (shopOffers.length > 0) {
+      return shopOffers.map((o, i) => ({
+        key: o.id || `o-${i}`,
+        inDesc: o.inputIcon, inId: o.input, inCurrencyUrl: o.input === curr ? (shopCurrencyIcon || undefined) : undefined, inFallback: shop1Image, inQty: `x${o.inputQty}`,
+        outDesc: o.outputIcon, outId: o.output, outCurrencyUrl: o.output === curr ? (shopCurrencyIcon || undefined) : undefined, outFallback: currencyImage, outQty: `x${o.outputQty}`,
+        alt: i % 2 === 0,
+      }))
+    }
+    return SHOP_ITEMS.map((s, i) => ({
+      key: `static-${i}`,
+      inDesc: { kind: 'flat', src: s.from } as ItemIconDesc, inId: '', inFallback: s.from, inQty: s.fromQty,
+      outCurrencyUrl: shopCurrencyIcon || undefined, outFallback: currencyImage, outQty: s.toQty,
+      alt: s.alt,
+    }))
+  }, [shopOffers, shopCurrencyIcon, shopCurrencyItem])
+
+  // Charge / rafraîchit le shop du jour à chaque arrivée sur l'accueil.
+  useEffect(() => { if (activeTab === 'home') fetchShop() }, [activeTab, fetchShop])
 
   const checkAndInstall = useCallback(async () => {
     setPhase('checking')
@@ -2131,34 +2219,8 @@ export default function App() {
                 <div className={greenDot} />
               </div>
               <div className="flex flex-col gap-[8px] items-start w-full shrink-0" style={{ width: 272 }}>
-                {SHOP_ITEMS.map((trade, i) => (
-                  <div
-                    key={i}
-                    className={`flex items-center justify-between p-[8px] rounded-[8px] w-full relative ${trade.alt ? 'bg-[rgba(255,255,255,0.1)]' : ''}`}
-                  >
-                    {/* Item gauche */}
-                    <div className="flex items-end">
-                      <div className="relative shrink-0 size-[48px]" style={{ marginRight: -18 }}>
-                        <img alt="" className="absolute inset-0 max-w-none object-cover pointer-events-none size-full" src={trade.from} />
-                      </div>
-                      <p className="relative z-10 font-minecraft text-[16px] text-white tracking-[-0.64px] whitespace-nowrap">{trade.fromQty}</p>
-                    </div>
-
-                    {/* Flèche */}
-                    <div className="absolute left-1/2 -translate-x-1/2">
-                      <svg width="18" height="14" viewBox="0 0 18 14" fill="none">
-                        <path d="M0.5 7H17.5M17.5 7L11.5 1M17.5 7L11.5 13" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </div>
-
-                    {/* Monnaie droite */}
-                    <div className="flex items-end">
-                      <div className="relative shrink-0 size-[48px]" style={{ marginRight: -18 }}>
-                        <img alt="" className="absolute inset-0 max-w-none object-cover pointer-events-none size-full" src={currencyImage} />
-                      </div>
-                      <p className="relative z-10 font-minecraft text-[16px] text-white tracking-[-0.64px] whitespace-nowrap">{trade.toQty}</p>
-                    </div>
-                  </div>
+                {shopRows.map((row) => (
+                  <ShopRow key={row.key} row={row} />
                 ))}
               </div>
             </div>

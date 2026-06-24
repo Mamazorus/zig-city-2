@@ -87,6 +87,42 @@ interface ChatMessage {
   ts: number
 }
 
+// ── Shop du jour (calendrier : offres par date, troc entrée→sortie) ──
+interface ShopConfig {
+  currencyName: string
+  currencyItem?: string
+  // URL de l'icône de la monnaie (re-skinnée) ; sinon rendu auto de currencyItem.
+  currencyIcon?: string
+}
+
+// Offre (troc) d'un jour, renvoyée par getShop/getShopDay : donner inputQty×input
+// au marchand -> recevoir outputQty×output. inputIcon/outputIcon = descripteurs
+// d'icône résolus côté main (rendus par block-renderer).
+interface ShopOffer {
+  id: string
+  input: string
+  inputQty: number
+  output: string
+  outputQty: number
+  createdAt?: number
+  inputIcon?: import('../block-renderer').ItemIconDesc | null
+  outputIcon?: import('../block-renderer').ItemIconDesc | null
+}
+
+type ShopOfferForm = {
+  input: string
+  inputQty: number
+  output: string
+  outputQty: number
+}
+
+// Entrée du catalogue d'items (extrait des jars du modpack installé) pour
+// l'autocomplétion de l'identifiant d'item côté admin.
+interface ItemCatalogEntry {
+  id: string
+  name: string
+}
+
 declare global {
   interface Window {
     launcher: {
@@ -141,6 +177,20 @@ declare global {
       getAdmins: () => Promise<{ success: boolean; admins: Record<string, boolean> }>
       addAdmin: (username: string) => Promise<{ success: boolean; error?: string }>
       removeAdmin: (username: string) => Promise<{ success: boolean; error?: string }>
+
+      // ── Shop du jour (calendrier) ──
+      getShop: () => Promise<{ success: boolean; offers: ShopOffer[]; config: ShopConfig; date?: string; error?: string }>
+      getShopDay: (date: string) => Promise<{ success: boolean; offers: ShopOffer[]; config: ShopConfig; date?: string; error?: string }>
+      createShopOffer: (data: { date: string } & ShopOfferForm) => Promise<{ success: boolean; id?: string; error?: string }>
+      updateShopOffer: (data: { date: string; id: string } & Partial<ShopOfferForm>) => Promise<{ success: boolean; error?: string }>
+      deleteShopOffer: (data: { date: string; id: string }) => Promise<{ success: boolean; error?: string }>
+      setShopConfig: (data: Partial<ShopConfig>) => Promise<{ success: boolean; error?: string }>
+      getShopLibrary: () => Promise<{ success: boolean; offers: ShopOffer[]; config: ShopConfig; error?: string }>
+      deleteShopLibraryOffer: (id: string) => Promise<{ success: boolean; error?: string }>
+      getItemCatalog: () => Promise<{ success: boolean; items: ItemCatalogEntry[]; error?: string }>
+      // Descripteurs d'icône pour un lot d'ids : sprite plat (item-objet) ou modèle
+      // de bloc rendu en 3D isométrique côté renderer. Clés absentes = pas d'icône.
+      getItemIcons: (ids: string[]) => Promise<{ success: boolean; icons: Record<string, import('../block-renderer').ItemIconDesc>; error?: string }>
 
       // ── Chat ──
       chatGetChannels: () => Promise<{ success: boolean; channels: ChatChannel[]; error?: string }>

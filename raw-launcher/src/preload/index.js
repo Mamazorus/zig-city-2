@@ -57,6 +57,18 @@ contextBridge.exposeInMainWorld('launcher', {
   addAdmin:          (username) => ipcRenderer.invoke('add-admin', username),
   removeAdmin:       (username) => ipcRenderer.invoke('remove-admin', username),
 
+  // ── Shop du jour (calendrier) ──
+  getShop:           () => ipcRenderer.invoke('get-shop'),
+  getShopDay:        (date) => ipcRenderer.invoke('get-shop-day', date),
+  createShopOffer:   (data) => ipcRenderer.invoke('create-shop-offer', data),
+  updateShopOffer:   (data) => ipcRenderer.invoke('update-shop-offer', data),
+  deleteShopOffer:   (data) => ipcRenderer.invoke('delete-shop-offer', data),
+  setShopConfig:     (data) => ipcRenderer.invoke('set-shop-config', data),
+  getShopLibrary:    () => ipcRenderer.invoke('get-shop-library'),
+  deleteShopLibraryOffer: (id) => ipcRenderer.invoke('delete-shop-library-offer', id),
+  getItemCatalog:    () => ipcRenderer.invoke('get-item-catalog'),
+  getItemIcons:      (ids) => ipcRenderer.invoke('get-item-icons', ids),
+
   // ── Chat (salons type Discord) ──
   chatGetChannels:    () => ipcRenderer.invoke('chat-get-channels'),
   chatCreateChannel:  (data) => ipcRenderer.invoke('chat-create-channel', data),
