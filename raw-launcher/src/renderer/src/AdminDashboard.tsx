@@ -283,7 +283,8 @@ export default function AdminDashboard({
   const [confirmDeleteChannel, setConfirmDeleteChannel] = useState<string | null>(null)
   const [channelMsg, setChannelMsg] = useState<string | null>(null)
 
-  // ── Shop du jour (calendrier) ──
+  // ── Shop : 2 catégories — « daily » = shop du jour (calendrier), « store » = boutique (offres fixes) ──
+  const [shopCat, setShopCat] = useState<'daily' | 'store'>('daily')
   const [dayOffset, setDayOffset] = useState(0)              // 0 = aujourd'hui, 1 = demain…
   const [dayOffers, setDayOffers] = useState<ShopOfferRow[]>([])
   const [shopLoading, setShopLoading] = useState(false)
@@ -333,13 +334,15 @@ export default function AdminDashboard({
   const loadShopDay = useCallback(async () => {
     setShopLoading(true)
     try {
-      const r = await window.launcher.getShopDay(dayKeyFromOffset(dayOffset))
+      const r = shopCat === 'store'
+        ? await window.launcher.getShopStore()
+        : await window.launcher.getShopDay(dayKeyFromOffset(dayOffset))
       if (r.success) {
         setDayOffers(r.offers as ShopOfferRow[])
         setShopConfig({ currencyName: r.config.currencyName, currencyItem: r.config.currencyItem ?? '', currencyIcon: r.config.currencyIcon ?? '' })
       }
     } finally { setShopLoading(false) }
-  }, [dayOffset])
+  }, [dayOffset, shopCat])
   useEffect(() => { if (tab === 'shop') loadShopDay() }, [tab, loadShopDay])
 
   // Icônes des items en cours de saisie dans le formulaire (aperçu live, debouncé).
@@ -608,8 +611,11 @@ export default function AdminDashboard({
 
   // ── Shop : handlers (offres du jour + réglages monnaie) ──
   const openCreateOffer = () => {
-    // Sortie par défaut = la monnaie (cas fréquent : vendre un item contre des Z-Coins).
-    setOfferForm({ ...EMPTY_OFFER, output: shopConfig.currencyItem || '' })
+    // Pré-remplit la monnaie du bon côté : shop du jour = vendre CONTRE des coins (sortie) ;
+    // boutique = dépenser des coins pour acheter (entrée).
+    setOfferForm(shopCat === 'store'
+      ? { ...EMPTY_OFFER, input: shopConfig.currencyItem || '' }
+      : { ...EMPTY_OFFER, output: shopConfig.currencyItem || '' })
     setEditingOfferId(null); setShowOfferForm(true); setConfirmDeleteOffer(null); setOfferMsg(null)
   }
   const openEditOffer = (o: ShopOfferRow) => {
@@ -628,9 +634,13 @@ export default function AdminDashboard({
         output: offerForm.output.trim(),
         outputQty: Math.max(1, Math.floor(offerForm.outputQty) || 1),
       }
-      const res = editingOfferId
-        ? await window.launcher.updateShopOffer({ date: shopDayKey, id: editingOfferId, ...payload })
-        : await window.launcher.createShopOffer({ date: shopDayKey, ...payload })
+      const res = shopCat === 'store'
+        ? (editingOfferId
+            ? await window.launcher.updateShopStoreOffer({ id: editingOfferId, ...payload })
+            : await window.launcher.createShopStoreOffer(payload))
+        : (editingOfferId
+            ? await window.launcher.updateShopOffer({ date: shopDayKey, id: editingOfferId, ...payload })
+            : await window.launcher.createShopOffer({ date: shopDayKey, ...payload }))
       if (!res.success) { setOfferMsg(res.error || 'Échec de l\'enregistrement.'); return }
       setShowOfferForm(false); setEditingOfferId(null)
       await loadShopDay()
@@ -640,14 +650,19 @@ export default function AdminDashboard({
   }
 
   const doDeleteOffer = async (id: string) => {
-    const res = await window.launcher.deleteShopOffer({ date: shopDayKey, id })
+    const res = shopCat === 'store'
+      ? await window.launcher.deleteShopStoreOffer({ id })
+      : await window.launcher.deleteShopOffer({ date: shopDayKey, id })
     setConfirmDeleteOffer(null)
     if (res.success) await loadShopDay()
   }
 
-  // Copie une offre à l'identique dans le jour courant (pour créer vite une variante).
+  // Copie une offre à l'identique (pour créer vite une variante).
   const duplicateOffer = async (o: ShopOfferRow) => {
-    const res = await window.launcher.createShopOffer({ date: shopDayKey, input: o.input, inputQty: o.inputQty, output: o.output, outputQty: o.outputQty })
+    const data = { input: o.input, inputQty: o.inputQty, output: o.output, outputQty: o.outputQty }
+    const res = shopCat === 'store'
+      ? await window.launcher.createShopStoreOffer(data)
+      : await window.launcher.createShopOffer({ date: shopDayKey, ...data })
     if (res.success) await loadShopDay()
   }
 
@@ -661,8 +676,11 @@ export default function AdminDashboard({
     } finally { setLibraryLoading(false) }
   }
   const addFromLibrary = async (o: ShopOfferRow) => {
-    const res = await window.launcher.createShopOffer({ date: shopDayKey, input: o.input, inputQty: o.inputQty, output: o.output, outputQty: o.outputQty })
-    if (res.success) { setLibMsg(`Ajouté à ${dayLabel(dayOffset).toLowerCase()}`); await loadShopDay() }
+    const data = { input: o.input, inputQty: o.inputQty, output: o.output, outputQty: o.outputQty }
+    const res = shopCat === 'store'
+      ? await window.launcher.createShopStoreOffer(data)
+      : await window.launcher.createShopOffer({ date: shopDayKey, ...data })
+    if (res.success) { setLibMsg(shopCat === 'store' ? 'Ajouté à la boutique' : `Ajouté à ${dayLabel(dayOffset).toLowerCase()}`); await loadShopDay() }
   }
   const deleteFromLibrary = async (id: string) => {
     const res = await window.launcher.deleteShopLibraryOffer(id)
@@ -1484,8 +1502,22 @@ export default function AdminDashboard({
               </div>
             </div>
 
-            {/* Sélecteur de jour (calendrier) + nouvelle offre */}
+            {/* Sélecteur de catégorie : shop du jour (calendrier) vs boutique (offres fixes) */}
+            <div className="flex items-center gap-[4px] p-[3px] rounded-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] w-fit shrink-0">
+              {([['daily', 'Shop du jour'], ['store', 'Boutique']] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  className={`font-ui font-semibold text-[13px] tracking-[-0.3px] px-[16px] h-[30px] rounded-[9px] transition-colors ${shopCat === key ? 'bg-white text-[#0e0b16]' : 'text-white/55 hover:text-white'}`}
+                  onClick={() => { setShopCat(key); cancelOfferForm(); setShowLibrary(false) }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Sélecteur de jour (shop du jour seulement) + nouvelle offre */}
             <div className="flex items-center justify-between h-[34px] shrink-0">
+              {shopCat === 'daily' ? (
               <div className="flex items-center gap-[6px]">
                 <button
                   className="flex items-center justify-center size-[30px] rounded-[8px] text-white/55 hover:text-white hover:bg-[rgba(255,255,255,0.08)] disabled:opacity-25 disabled:hover:bg-transparent transition-colors"
@@ -1504,6 +1536,9 @@ export default function AdminDashboard({
                   <svg width="9" height="14" viewBox="0 0 9 14" fill="none"><path d="M1.5 1 7.5 7l-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 </button>
               </div>
+              ) : (
+                <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px]">Boutique <span className="text-white/40 font-medium">· offres permanentes (on y dépense les coins)</span></p>
+              )}
               <div className="flex items-center gap-[8px]">
                 <button
                   className={`flex items-center gap-[7px] font-ui font-medium text-[14px] tracking-[-0.3px] px-[14px] h-[34px] rounded-[12px] border transition-colors ${showLibrary ? 'border-[rgba(0,255,225,0.5)] bg-[rgba(0,255,225,0.12)] text-white' : 'border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.04)] text-white/75 hover:text-white hover:bg-[rgba(255,255,255,0.08)]'}`}
@@ -1620,7 +1655,7 @@ export default function AdminDashboard({
             {showLibrary ? (
               <div className="flex flex-col gap-[8px]">
                 <div className="flex items-center justify-between min-h-[20px]">
-                  <p className="font-ui text-[14px] text-white/45 tracking-[-0.3px]">Bibliothèque · « Ajouter » la place sur {dayLabel(dayOffset).toLowerCase()}</p>
+                  <p className="font-ui text-[14px] text-white/45 tracking-[-0.3px]">Bibliothèque · « Ajouter » la place {shopCat === 'store' ? 'dans la boutique' : `sur ${dayLabel(dayOffset).toLowerCase()}`}</p>
                   {libMsg && <p className="font-ui text-[13px] text-[rgba(0,255,225,0.8)] tracking-[-0.3px]">{libMsg}</p>}
                 </div>
                 {libraryLoading ? (
@@ -1665,7 +1700,7 @@ export default function AdminDashboard({
               <p className="font-ui text-[14px] text-white/25 text-center py-[40px]">Chargement…</p>
             ) : dayOffers.length === 0 ? (
               <div className="flex flex-col items-center gap-[14px] py-[60px]">
-                <p className="font-ui text-[14px] text-white/30 tracking-[-0.3px]">Aucune offre pour {dayOffset === 0 ? "aujourd'hui" : 'ce jour'}</p>
+                <p className="font-ui text-[14px] text-white/30 tracking-[-0.3px]">{shopCat === 'store' ? 'Aucune offre dans la boutique' : `Aucune offre pour ${dayOffset === 0 ? "aujourd'hui" : 'ce jour'}`}</p>
                 {!showOfferForm && (
                   <button
                     className="flex items-center gap-[7px] bg-white text-[#0e0b16] font-ui font-bold text-[14px] tracking-[-0.3px] px-[16px] h-[34px] rounded-[12px] hover:bg-white/90 active:scale-[0.98] transition-all"

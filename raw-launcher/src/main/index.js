@@ -2019,6 +2019,23 @@ async function fetchShopDay(dayKey) {
     .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
 }
 
+// Offres de la BOUTIQUE (2e marchand) : fixes, hors calendrier — modifiées
+// seulement par l'admin (on y dépense les coins). Même structure qu'une offre.
+async function fetchShopStore() {
+  const map = normalizeFbMap(await firebaseRequest('GET', '/shop/store', null, false))
+  return Object.entries(map)
+    .filter(([, o]) => o && typeof o === 'object')
+    .map(([id, o]) => ({
+      id,
+      input: String(o.input ?? ''),
+      inputQty: Number(o.inputQty) > 0 ? Math.floor(Number(o.inputQty)) : 1,
+      output: String(o.output ?? ''),
+      outputQty: Number(o.outputQty) > 0 ? Math.floor(Number(o.outputQty)) : 1,
+      createdAt: o.createdAt || 0,
+    }))
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+}
+
 // Migration best-effort (one-shot) : si aucun jour n'existe encore mais qu'un
 // ancien /shop/pool est présent, convertit ses offres (achat « product pour
 // price ») en échanges d'aujourd'hui (donner price×monnaie -> recevoir productQty×product).
@@ -2157,6 +2174,59 @@ ipcMain.handle('delete-shop-offer', async (_, { date, id } = {}) => {
   if (!isDayKey(date) || !isValidPushId(id)) return { success: false, error: 'Offre introuvable.' }
   try {
     await firebaseRequest('DELETE', `/shop/days/${date}/${id}`, null, true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+// ── IPC : BOUTIQUE (2e marchand, offres fixes — on y dépense les coins) ──
+ipcMain.handle('get-shop-store', async () => {
+  if (!isFirebaseConfigured()) return { success: false, offers: [], config: { ...SHOP_DEFAULT_CONFIG } }
+  try {
+    const config = readShopConfig(await firebaseRequest('GET', '/shop/config', null, false))
+    const offers = await attachShopIcons(await fetchShopStore())
+    return { success: true, offers, config }
+  } catch (e) {
+    return { success: false, offers: [], config: { ...SHOP_DEFAULT_CONFIG }, error: e.message }
+  }
+})
+
+ipcMain.handle('create-shop-store-offer', async (_, data = {}) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  const offer = sanitizeShopOffer(data)
+  if (!offer.input || !offer.output) return { success: false, error: 'Indique un item d\'entrée et un item de sortie.' }
+  try {
+    const result = await firebaseRequest('POST', '/shop/store', { ...offer, createdAt: Date.now() }, true)
+    await addToLibraryDedup(offer) // partage la bibliothèque avec le shop du jour
+    return { success: true, id: result?.name }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle('update-shop-store-offer', async (_, { id, ...data } = {}) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  if (!isValidPushId(id)) return { success: false, error: 'Offre introuvable.' }
+  try {
+    await firebaseRequest('PATCH', `/shop/store/${id}`, sanitizeShopOffer(data), true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle('delete-shop-store-offer', async (_, { id } = {}) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  if (!isValidPushId(id)) return { success: false, error: 'Offre introuvable.' }
+  try {
+    await firebaseRequest('DELETE', `/shop/store/${id}`, null, true)
     return { success: true }
   } catch (e) {
     return { success: false, error: e.message }

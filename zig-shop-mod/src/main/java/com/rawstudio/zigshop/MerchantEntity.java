@@ -1,6 +1,7 @@
 package com.rawstudio.zigshop;
 
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -40,6 +41,8 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
     @Nullable
     private Player tradingPlayer;
     private MerchantOffers offers = new MerchantOffers();
+    /** Source du marchand : "daily" = shop du jour (calendrier), "store" = boutique (offres fixes). */
+    private String shopKind = "daily";
 
     public MerchantEntity(EntityType<? extends PathfinderMob> type, Level level) {
         super(type, level);
@@ -70,6 +73,25 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
         return false;
     }
 
+    /** Définit la source ("daily" ou "store"). Appelé à la création via la commande. */
+    public void setShopKind(String kind) {
+        this.shopKind = "store".equals(kind) ? "store" : "daily";
+    }
+
+    @Override
+    public void addAdditionalSaveData(CompoundTag tag) {
+        super.addAdditionalSaveData(tag);
+        tag.putString("ShopKind", this.shopKind);
+    }
+
+    @Override
+    public void readAdditionalSaveData(CompoundTag tag) {
+        super.readAdditionalSaveData(tag);
+        if (tag.contains("ShopKind")) {
+            this.shopKind = "store".equals(tag.getString("ShopKind")) ? "store" : "daily";
+        }
+    }
+
     @Override
     protected InteractionResult mobInteract(Player player, InteractionHand hand) {
         if (this.level().isClientSide) {
@@ -79,8 +101,11 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
         if (server == null) {
             return InteractionResult.CONSUME;
         }
-        // Lecture asynchrone des offres du jour, puis ouverture du menu sur le thread serveur.
-        FirebaseClient.fetchDayOffers(ZigShopDate.today()).whenComplete((list, err) -> server.execute(() -> {
+        boolean isStore = "store".equals(this.shopKind);
+        // Lecture asynchrone des offres (boutique fixe OU shop du jour), puis ouverture
+        // du menu sur le thread serveur.
+        var future = isStore ? FirebaseClient.fetchStoreOffers() : FirebaseClient.fetchDayOffers(ZigShopDate.today());
+        future.whenComplete((list, err) -> server.execute(() -> {
             if (this.isRemoved() || !player.isAlive()) {
                 return;
             }
@@ -90,11 +115,14 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
             }
             this.offers = buildOffers(list);
             if (this.offers.isEmpty()) {
-                player.sendSystemMessage(Component.literal("§7[Zig Shop] Aucune offre aujourd'hui."));
+                player.sendSystemMessage(Component.literal(isStore
+                        ? "§7[Zig Shop] La boutique est vide pour le moment."
+                        : "§7[Zig Shop] Aucune offre aujourd'hui."));
                 return;
             }
             this.setTradingPlayer(player);
-            this.openTradingScreen(player, this.getDisplayName(), 1);
+            Component title = Component.literal(isStore ? "Boutique" : "Shop du jour");
+            this.openTradingScreen(player, title, 1);
         }));
         return InteractionResult.CONSUME;
     }

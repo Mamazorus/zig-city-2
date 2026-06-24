@@ -29,11 +29,14 @@ public final class ZigShopCommand {
         dispatcher.register(Commands.literal("zigshop")
                 .requires(src -> src.hasPermission(2)) // opérateur
                 .then(Commands.literal("today").executes(ZigShopCommand::today))
-                .then(Commands.literal("spawn").executes(ZigShopCommand::spawn)));
+                .then(Commands.literal("spawn")
+                        .executes(ctx -> spawn(ctx, "daily"))
+                        .then(Commands.literal("daily").executes(ctx -> spawn(ctx, "daily")))
+                        .then(Commands.literal("store").executes(ctx -> spawn(ctx, "store")))));
     }
 
-    /** Fait apparaître un marchand à la position de l'exécutant. */
-    private static int spawn(CommandContext<CommandSourceStack> ctx) {
+    /** Fait apparaître un marchand ("daily" = shop du jour, "store" = boutique) à la position de l'exécutant. */
+    private static int spawn(CommandContext<CommandSourceStack> ctx, String kind) {
         CommandSourceStack src = ctx.getSource();
         ServerLevel level = src.getLevel();
         Vec3 pos = src.getPosition();
@@ -42,8 +45,10 @@ public final class ZigShopCommand {
             src.sendFailure(Component.literal("[Zig Shop] Échec de la création du marchand."));
             return 0;
         }
+        merchant.setShopKind(kind);
         merchant.moveTo(pos.x, pos.y, pos.z, src.getRotation().y, 0.0f);
-        src.sendSuccess(() -> Component.literal("§a[Zig Shop] Marchand créé. Clique dessus pour voir le shop."), true);
+        String label = "store".equals(kind) ? "Boutique" : "Marchand du jour";
+        src.sendSuccess(() -> Component.literal("§a[Zig Shop] " + label + " créé. Clique dessus."), true);
         return 1;
     }
 

@@ -66,6 +66,11 @@ contextBridge.exposeInMainWorld('launcher', {
   setShopConfig:     (data) => ipcRenderer.invoke('set-shop-config', data),
   getShopLibrary:    () => ipcRenderer.invoke('get-shop-library'),
   deleteShopLibraryOffer: (id) => ipcRenderer.invoke('delete-shop-library-offer', id),
+  // ── Boutique (2e marchand, offres fixes — on y dépense les coins) ──
+  getShopStore:         () => ipcRenderer.invoke('get-shop-store'),
+  createShopStoreOffer: (data) => ipcRenderer.invoke('create-shop-store-offer', data),
+  updateShopStoreOffer: (data) => ipcRenderer.invoke('update-shop-store-offer', data),
+  deleteShopStoreOffer: (data) => ipcRenderer.invoke('delete-shop-store-offer', data),
   getItemCatalog:    () => ipcRenderer.invoke('get-item-catalog'),
   getItemIcons:      (ids) => ipcRenderer.invoke('get-item-icons', ids),
 

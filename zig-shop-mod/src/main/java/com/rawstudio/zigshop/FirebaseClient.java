@@ -40,6 +40,11 @@ public final class FirebaseClient {
         return getJson("/shop/days/" + date).thenApply(FirebaseClient::parseOffers);
     }
 
+    /** Offres de la BOUTIQUE (fixes, /shop/store — on y dépense les coins). Liste vide si aucune donnée. */
+    public static CompletableFuture<List<ShopOffer>> fetchStoreOffers() {
+        return getJson("/shop/store").thenApply(FirebaseClient::parseOffers);
+    }
+
     /** GET public sur un chemin de la base (sans auth). Le corps brut est renvoyé. */
     private static CompletableFuture<String> getJson(String path) {
         HttpRequest req = HttpRequest.newBuilder(URI.create(BASE + path + ".json"))

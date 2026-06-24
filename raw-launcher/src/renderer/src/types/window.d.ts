@@ -187,6 +187,11 @@ declare global {
       setShopConfig: (data: Partial<ShopConfig>) => Promise<{ success: boolean; error?: string }>
       getShopLibrary: () => Promise<{ success: boolean; offers: ShopOffer[]; config: ShopConfig; error?: string }>
       deleteShopLibraryOffer: (id: string) => Promise<{ success: boolean; error?: string }>
+      // ── Boutique (2e marchand, offres fixes — on y dépense les coins) ──
+      getShopStore: () => Promise<{ success: boolean; offers: ShopOffer[]; config: ShopConfig; error?: string }>
+      createShopStoreOffer: (data: ShopOfferForm) => Promise<{ success: boolean; id?: string; error?: string }>
+      updateShopStoreOffer: (data: { id: string } & Partial<ShopOfferForm>) => Promise<{ success: boolean; error?: string }>
+      deleteShopStoreOffer: (data: { id: string }) => Promise<{ success: boolean; error?: string }>
       getItemCatalog: () => Promise<{ success: boolean; items: ItemCatalogEntry[]; error?: string }>
       // Descripteurs d'icône pour un lot d'ids : sprite plat (item-objet) ou modèle
       // de bloc rendu en 3D isométrique côté renderer. Clés absentes = pas d'icône.
