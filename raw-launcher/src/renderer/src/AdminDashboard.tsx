@@ -4,7 +4,7 @@ import { Avatar, RemoteNewsImage } from './remote-image'
 import { ItemIcon } from './item-icon'
 import { type ItemIconDesc } from './block-renderer'
 
-type AdminTab = 'news' | 'admins' | 'players' | 'channels' | 'shop'
+type AdminTab = 'news' | 'admins' | 'players' | 'channels' | 'shop' | 'quests'
 
 interface ChatChannel {
   id: string
@@ -52,6 +52,22 @@ interface ShopOfferRow {
 
 interface OfferForm { input: string; inputQty: number; output: string; outputQty: number; maxUses: number }
 const EMPTY_OFFER: OfferForm = { input: '', inputQty: 1, output: '', outputQty: 1, maxUses: 0 }
+
+// ── Quêtes (PNJ de quêtes : tuer N mobs → récompense) ──
+// Types locaux (miroirs de window.d.ts, qui les déclare hors `declare global`).
+interface QuestDef {
+  id: string
+  title: string
+  description: string
+  target: string
+  amount: number
+  rewardItem: string
+  rewardQty: number
+  createdAt?: number
+  rewardIcon?: ItemIconDesc | null
+}
+type QuestForm = { title: string; description: string; target: string; amount: number; rewardItem: string; rewardQty: number }
+const EMPTY_QUEST: QuestForm = { title: '', description: '', target: '', amount: 1, rewardItem: '', rewardQty: 1 }
 
 interface ShopConfigState { currencyName: string; currencyItem: string; currencyIcon: string }
 
@@ -310,6 +326,16 @@ export default function AdminDashboard({
   const [itemCatalog, setItemCatalog] = useState<ItemCatalogEntry[]>([])
   const [itemCatalogLoading, setItemCatalogLoading] = useState(false)
 
+  // ── Quêtes : CRUD des définitions (la progression joueur est gérée côté serveur/mod) ──
+  const [quests, setQuests] = useState<QuestDef[]>([])
+  const [questLoading, setQuestLoading] = useState(false)
+  const [showQuestForm, setShowQuestForm] = useState(false)
+  const [editingQuestId, setEditingQuestId] = useState<string | null>(null)
+  const [questForm, setQuestForm] = useState<QuestForm>(EMPTY_QUEST)
+  const [savingQuest, setSavingQuest] = useState(false)
+  const [confirmDeleteQuest, setConfirmDeleteQuest] = useState<string | null>(null)
+  const [questMsg, setQuestMsg] = useState<string | null>(null)
+
   const fetchAll = async () => {
     setLoading(true)
     try {
@@ -370,7 +396,7 @@ export default function AdminDashboard({
   // Catalogue d'items : chargé paresseusement à la 1re ouverture de l'onglet Shop
   // (scan ~5 s à froid côté main, puis instantané via cache disque).
   useEffect(() => {
-    if (tab !== 'shop' || itemCatalog.length > 0 || itemCatalogLoading) return
+    if ((tab !== 'shop' && tab !== 'quests') || itemCatalog.length > 0 || itemCatalogLoading) return
     setItemCatalogLoading(true)
     window.launcher.getItemCatalog()
       .then(r => { if (r.success) setItemCatalog(r.items) })
@@ -728,6 +754,71 @@ export default function AdminDashboard({
     }
   }, [])
 
+  // ── Quêtes : chargement + CRUD des définitions ──
+  const loadQuests = useCallback(async () => {
+    setQuestLoading(true)
+    try {
+      const r = await window.launcher.getQuests()
+      if (r.success) setQuests(r.quests)
+    } finally { setQuestLoading(false) }
+  }, [])
+  useEffect(() => { if (tab === 'quests') loadQuests() }, [tab, loadQuests])
+
+  // Icône de la récompense en cours de saisie (aperçu live dans le formulaire, debouncé).
+  const [questRewardIcon, setQuestRewardIcon] = useState<Record<string, ItemIconDesc | ''>>({})
+  useEffect(() => {
+    const id = questForm.rewardItem
+    if (!id || questRewardIcon[id] !== undefined) return
+    const t = setTimeout(() => {
+      window.launcher.getItemIcons([id]).then(r => {
+        if (!r.success) return
+        setQuestRewardIcon(prev => ({ ...prev, [id]: r.icons[id] || '' }))
+      })
+    }, 120)
+    return () => clearTimeout(t)
+  }, [questForm.rewardItem, questRewardIcon])
+
+  const openCreateQuest = () => {
+    setQuestForm(EMPTY_QUEST)
+    setEditingQuestId(null); setShowQuestForm(true); setConfirmDeleteQuest(null); setQuestMsg(null)
+  }
+  const openEditQuest = (q: QuestDef) => {
+    setQuestForm({ title: q.title, description: q.description, target: q.target, amount: q.amount ?? 1, rewardItem: q.rewardItem, rewardQty: q.rewardQty ?? 1 })
+    setEditingQuestId(q.id); setShowQuestForm(true); setConfirmDeleteQuest(null); setQuestMsg(null)
+  }
+  const cancelQuestForm = () => { setShowQuestForm(false); setEditingQuestId(null); setQuestMsg(null) }
+
+  const saveQuest = async () => {
+    if (!questForm.title.trim()) { setQuestMsg('Donne un titre à la quête.'); return }
+    if (!questForm.target.trim()) { setQuestMsg('Indique la cible (id du mob, ex : minecraft:pig).'); return }
+    if (!questForm.rewardItem.trim()) { setQuestMsg('Indique un item de récompense.'); return }
+    setSavingQuest(true)
+    try {
+      const payload: QuestForm = {
+        title: questForm.title.trim(),
+        description: questForm.description.trim(),
+        target: questForm.target.trim(),
+        amount: Math.max(1, Math.floor(questForm.amount) || 1),
+        rewardItem: questForm.rewardItem.trim(),
+        rewardQty: Math.max(1, Math.floor(questForm.rewardQty) || 1),
+      }
+      const res = editingQuestId
+        ? await window.launcher.updateQuest({ id: editingQuestId, ...payload })
+        : await window.launcher.createQuest(payload)
+      if (!res.success) { setQuestMsg(res.error || 'Échec de l\'enregistrement.'); return }
+      setShowQuestForm(false); setEditingQuestId(null)
+      await loadQuests()
+    } finally {
+      setSavingQuest(false)
+    }
+  }
+
+  const doDeleteQuest = async (id: string) => {
+    const res = await window.launcher.deleteQuest(id)
+    setConfirmDeleteQuest(null)
+    if (res.success) await loadQuests()
+  }
+
   return (
     <div className="backdrop-blur-[5.95px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[16px] shadow-[2px_2px_8px_0px_rgba(0,0,0,0.1)] flex flex-col h-full overflow-hidden">
 
@@ -737,12 +828,12 @@ export default function AdminDashboard({
         <div className="flex flex-col gap-[2px]">
           <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px] leading-none">Administration</p>
           <p className="font-ui text-[14px] text-white/40 tracking-[-0.3px]">
-            {tab === 'news' ? 'Gestion du contenu' : tab === 'admins' ? 'Gestion des accès' : tab === 'players' ? 'Carrousel d\'accueil' : tab === 'channels' ? 'Salons de discussion' : 'Boutique du serveur'}
+            {tab === 'news' ? 'Gestion du contenu' : tab === 'admins' ? 'Gestion des accès' : tab === 'players' ? 'Carrousel d\'accueil' : tab === 'channels' ? 'Salons de discussion' : tab === 'shop' ? 'Boutique du serveur' : 'Quêtes du serveur'}
           </p>
         </div>
 
         <div className="flex gap-[3px] bg-[rgba(0,0,0,0.22)] border border-[rgba(255,255,255,0.06)] rounded-full p-[3px]">
-          {(['news', 'admins', 'players', 'channels', 'shop'] as AdminTab[]).map(t => (
+          {(['news', 'admins', 'players', 'channels', 'shop', 'quests'] as AdminTab[]).map(t => (
             <button
               key={t}
               className={`font-ui text-[14px] tracking-[-0.3px] px-[14px] h-[28px] rounded-full transition-colors ${
@@ -750,9 +841,9 @@ export default function AdminDashboard({
                   ? 'bg-[rgba(255,255,255,0.12)] text-white font-semibold'
                   : 'text-white/40 hover:text-white/70'
               }`}
-              onClick={() => { setTab(t); setShowForm(false); setConfirmDeleteId(null); setConfirmRemoveAdmin(null); setConfirmRemovePlayer(null); setPlayersMsg(null); setShowChannelForm(false); setConfirmDeleteChannel(null); setChannelMsg(null); setShowOfferForm(false); setConfirmDeleteOffer(null); setOfferMsg(null); setShopMsg(null) }}
+              onClick={() => { setTab(t); setShowForm(false); setConfirmDeleteId(null); setConfirmRemoveAdmin(null); setConfirmRemovePlayer(null); setPlayersMsg(null); setShowChannelForm(false); setConfirmDeleteChannel(null); setChannelMsg(null); setShowOfferForm(false); setConfirmDeleteOffer(null); setOfferMsg(null); setShopMsg(null); setShowQuestForm(false); setConfirmDeleteQuest(null); setQuestMsg(null) }}
             >
-              {t === 'news' ? 'Actualités' : t === 'admins' ? 'Administrateurs' : t === 'players' ? 'Joueurs' : t === 'channels' ? 'Salons' : 'Shop'}
+              {t === 'news' ? 'Actualités' : t === 'admins' ? 'Administrateurs' : t === 'players' ? 'Joueurs' : t === 'channels' ? 'Salons' : t === 'shop' ? 'Shop' : 'Quêtes'}
             </button>
           ))}
         </div>
@@ -1802,6 +1893,207 @@ export default function AdminDashboard({
                         <button
                           className="flex items-center justify-center size-[38px] rounded-[10px] text-white/40 hover:text-[rgba(255,120,120,0.95)] hover:bg-[rgba(255,60,60,0.12)] transition-colors"
                           onClick={() => setConfirmDeleteOffer(o.id)}
+                          title="Supprimer"
+                        >
+                          <svg width="15" height="16" viewBox="0 0 11 12" fill="currentColor">
+                            <rect x="0.6" y="2.1" width="9.8" height="2.2" rx="1.1" />
+                            <rect x="3.6" y="0.4" width="3.8" height="2.1" rx="1" />
+                            <path d="M1.55 4.6h7.9l-.62 6.1a1.05 1.05 0 0 1-1.04.9H3.21a1.05 1.05 0 0 1-1.04-.9L1.55 4.6Z" />
+                          </svg>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══ ONGLET QUÊTES ═══ */}
+        {tab === 'quests' && (
+          <div className="flex flex-col gap-[14px]">
+
+            {/* Barre supérieure */}
+            <div className="flex items-center justify-between h-[34px] shrink-0">
+              <p className="font-ui text-[14px] text-white/40 tracking-[-0.3px]">
+                {quests.length} quête{quests.length !== 1 ? 's' : ''} · tuer des mobs pour une récompense
+              </p>
+              {!showQuestForm && (
+                <button
+                  className="flex items-center gap-[7px] bg-white text-[#0e0b16] font-ui font-bold text-[14px] tracking-[-0.3px] px-[16px] h-[34px] rounded-[12px] hover:bg-white/90 active:scale-[0.98] transition-all"
+                  onClick={openCreateQuest}
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                    <rect x="4.85" y="1" width="2.3" height="10" rx="1.15" />
+                    <rect x="1" y="4.85" width="10" height="2.3" rx="1.15" />
+                  </svg>
+                  Nouvelle quête
+                </button>
+              )}
+            </div>
+
+            {/* Formulaire de quête */}
+            {showQuestForm && (
+              <div className="bg-[rgba(0,0,0,0.28)] border border-[rgba(0,255,225,0.18)] rounded-[12px] p-[18px] flex flex-col gap-[14px]">
+                <div className="flex items-center justify-between">
+                  <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px]">
+                    {editingQuestId ? 'Modifier la quête' : 'Nouvelle quête'}
+                  </p>
+                  <button className="text-white/40 hover:text-white/70 transition-colors p-[4px]" onClick={cancelQuestForm}>
+                    <svg width="13" height="13" viewBox="0 0 13 13" fill="currentColor">
+                      <rect x="5.3" y="-1" width="2.4" height="15" rx="1.2" transform="rotate(45 6.5 6.5)" />
+                      <rect x="5.3" y="-1" width="2.4" height="15" rx="1.2" transform="rotate(-45 6.5 6.5)" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div className="flex flex-col">
+                  <p className={labelCls}>Titre <span className="text-white/30">*</span></p>
+                  <input
+                    className={inputCls} maxLength={80} placeholder="Ex : Chasseur de cochons"
+                    value={questForm.title}
+                    onChange={e => setQuestForm(f => ({ ...f, title: e.target.value }))}
+                  />
+                </div>
+
+                <div className="flex flex-col">
+                  <p className={labelCls}>Description</p>
+                  <textarea
+                    className={`${inputCls} resize-none`}
+                    rows={3}
+                    placeholder="Explique la quête au joueur…"
+                    value={questForm.description}
+                    onChange={e => setQuestForm(f => ({ ...f, description: e.target.value }))}
+                  />
+                </div>
+
+                {/* Objectif : tuer N × cible (id d'entité, saisie libre) */}
+                <div className="flex flex-col gap-[8px] bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.07)] rounded-[10px] p-[12px]">
+                  <p className="font-ui text-[13px] text-white/45 tracking-[-0.3px]">Objectif</p>
+                  <div className="grid grid-cols-2 gap-[12px]">
+                    <div className="flex flex-col">
+                      <p className={labelCls}>Cible (mob) <span className="text-white/30">*</span></p>
+                      <input
+                        className={inputCls} maxLength={120} autoComplete="off" spellCheck={false}
+                        placeholder="minecraft:pig"
+                        value={questForm.target}
+                        onChange={e => setQuestForm(f => ({ ...f, target: e.target.value }))}
+                      />
+                    </div>
+                    <div className="flex flex-col">
+                      <p className={labelCls}>Quantité à tuer</p>
+                      <QtyInput value={questForm.amount} onChange={n => setQuestForm(f => ({ ...f, amount: n }))} min={1} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Récompense : item (autocomplete catalogue) + quantité + aperçu */}
+                <div className="flex flex-col gap-[8px] bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.07)] rounded-[10px] p-[12px]">
+                  <p className="font-ui text-[13px] text-white/45 tracking-[-0.3px]">Récompense</p>
+                  <div className="flex items-center gap-[8px]">
+                    <ItemIcon desc={questRewardIcon[questForm.rewardItem]} id={questForm.rewardItem} box={34} />
+                    <QtyInput value={questForm.rewardQty} onChange={n => setQuestForm(f => ({ ...f, rewardQty: n }))} min={1} />
+                  </div>
+                  <ItemAutocomplete
+                    value={questForm.rewardItem}
+                    onChange={v => setQuestForm(f => ({ ...f, rewardItem: v }))}
+                    catalog={itemCatalog}
+                    loading={itemCatalogLoading}
+                    placeholder="Cherche un item de récompense…"
+                  />
+                </div>
+
+                <p className="font-ui text-[13px] text-white/35 tracking-[-0.3px] leading-snug">
+                  Le joueur doit tuer la quantité demandée du mob pour recevoir la récompense. La progression est suivie côté serveur.
+                </p>
+
+                {questMsg && <p className="font-ui text-[13px] text-[rgba(255,120,120,0.9)]">{questMsg}</p>}
+
+                <div className="flex gap-[8px] justify-end pt-[4px]">
+                  <button
+                    className="font-ui text-[14px] text-white/40 px-[14px] h-[34px] rounded-[12px] hover:bg-[rgba(255,255,255,0.05)] hover:text-white/70 transition-colors"
+                    onClick={cancelQuestForm}
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    className="font-ui font-bold text-[14px] tracking-[-0.3px] bg-white text-[#0e0b16] px-[18px] h-[34px] rounded-[12px] hover:bg-white/90 disabled:opacity-30 disabled:hover:bg-white active:scale-[0.98] transition-all"
+                    disabled={savingQuest || !questForm.title.trim() || !questForm.target.trim() || !questForm.rewardItem.trim()}
+                    onClick={saveQuest}
+                  >
+                    {savingQuest ? 'Enregistrement…' : editingQuestId ? 'Enregistrer' : 'Créer'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Liste des quêtes */}
+            {questLoading ? (
+              <p className="font-ui text-[14px] text-white/25 text-center py-[40px]">Chargement…</p>
+            ) : quests.length === 0 ? (
+              <div className="flex flex-col items-center gap-[14px] py-[60px]">
+                <p className="font-ui text-[14px] text-white/30 tracking-[-0.3px]">Aucune quête</p>
+                {!showQuestForm && (
+                  <button
+                    className="flex items-center gap-[7px] bg-white text-[#0e0b16] font-ui font-bold text-[14px] tracking-[-0.3px] px-[16px] h-[34px] rounded-[12px] hover:bg-white/90 active:scale-[0.98] transition-all"
+                    onClick={openCreateQuest}
+                  >
+                    Créer la première quête
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-[8px]">
+                {quests.map(q => (
+                  <div
+                    key={q.id}
+                    className="flex items-center gap-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[8px] p-[10px] group hover:bg-[rgba(255,255,255,0.06)] hover:border-[rgba(255,255,255,0.12)] transition-colors"
+                  >
+                    <div className="flex-1 min-w-0 flex flex-col gap-[3px]">
+                      <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px] truncate">{q.title}</p>
+                      <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px] truncate">
+                        Tuer {q.amount} × {q.target.replace(/^minecraft:/, '')}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-[7px] shrink-0">
+                      <ItemIcon desc={q.rewardIcon} id={q.rewardItem} box={28} />
+                      <span className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px] whitespace-nowrap">×{q.rewardQty}</span>
+                      <span className="font-ui text-[13px] text-white/35 truncate max-w-[140px]">{q.rewardItem.replace(/^minecraft:/, '')}</span>
+                    </div>
+
+                    {confirmDeleteQuest === q.id ? (
+                      <div className="flex gap-[6px] items-center shrink-0">
+                        <span className="font-ui text-[14px] text-white/40">Supprimer ?</span>
+                        <button
+                          className="font-ui text-[14px] text-[rgba(255,100,100,0.8)] hover:text-[rgba(255,120,120,1)] px-[10px] py-[5px] rounded-[8px] bg-[rgba(255,60,60,0.1)] border border-[rgba(255,60,60,0.2)] transition-colors"
+                          onClick={() => doDeleteQuest(q.id)}
+                        >
+                          Confirmer
+                        </button>
+                        <button
+                          className="font-ui text-[14px] text-white/30 hover:text-white/60 px-[10px] py-[5px] rounded-[8px] hover:bg-[rgba(255,255,255,0.05)] transition-colors"
+                          onClick={() => setConfirmDeleteQuest(null)}
+                        >
+                          Annuler
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-[6px] opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <button
+                          className="flex items-center justify-center size-[38px] rounded-[10px] text-white/40 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors"
+                          onClick={() => openEditQuest(q)}
+                          title="Modifier"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 12 12" fill="currentColor">
+                            <path d="M7.9 1.35 10.65 4.1 9.25 5.5 6.5 2.75 7.9 1.35Z" />
+                            <path d="M5.85 3.4 8.6 6.15 3.35 11.4l-2.85.6.6-2.85L5.85 3.4Z" />
+                          </svg>
+                        </button>
+                        <button
+                          className="flex items-center justify-center size-[38px] rounded-[10px] text-white/40 hover:text-[rgba(255,120,120,0.95)] hover:bg-[rgba(255,60,60,0.12)] transition-colors"
+                          onClick={() => setConfirmDeleteQuest(q.id)}
                           title="Supprimer"
                         >
                           <svg width="15" height="16" viewBox="0 0 11 12" fill="currentColor">

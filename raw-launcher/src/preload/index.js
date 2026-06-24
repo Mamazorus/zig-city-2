@@ -76,6 +76,11 @@ contextBridge.exposeInMainWorld('launcher', {
   createShopRaceOffer:  (data) => ipcRenderer.invoke('create-shop-race-offer', data),
   updateShopRaceOffer:  (data) => ipcRenderer.invoke('update-shop-race-offer', data),
   deleteShopRaceOffer:  (data) => ipcRenderer.invoke('delete-shop-race-offer', data),
+  // ── Quêtes (PNJ de quêtes : tuer N d'une cible → récompense) ──
+  getQuests:    () => ipcRenderer.invoke('get-quests'),
+  createQuest:  (data) => ipcRenderer.invoke('create-quest', data),
+  updateQuest:  (data) => ipcRenderer.invoke('update-quest', data),
+  deleteQuest:  (id) => ipcRenderer.invoke('delete-quest', id),
   getItemCatalog:    () => ipcRenderer.invoke('get-item-catalog'),
   getItemIcons:      (ids) => ipcRenderer.invoke('get-item-icons', ids),
 

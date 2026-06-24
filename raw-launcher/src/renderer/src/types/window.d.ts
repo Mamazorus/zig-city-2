@@ -118,6 +118,20 @@ type ShopOfferForm = {
   maxUses: number // limite d'échanges par joueur (0 = illimité)
 }
 
+// Quête (PNJ de quêtes) : tuer `amount` de `target` (id d'entité) → recevoir rewardQty×rewardItem.
+interface QuestDef {
+  id: string
+  title: string
+  description: string
+  target: string
+  amount: number
+  rewardItem: string
+  rewardQty: number
+  createdAt?: number
+  rewardIcon?: import('../block-renderer').ItemIconDesc | null
+}
+type QuestForm = { title: string; description: string; target: string; amount: number; rewardItem: string; rewardQty: number }
+
 // Entrée du catalogue d'items (extrait des jars du modpack installé) pour
 // l'autocomplétion de l'identifiant d'item côté admin.
 interface ItemCatalogEntry {
@@ -199,6 +213,11 @@ declare global {
       createShopRaceOffer: (data: ShopOfferForm) => Promise<{ success: boolean; id?: string; error?: string }>
       updateShopRaceOffer: (data: { id: string } & Partial<ShopOfferForm>) => Promise<{ success: boolean; error?: string }>
       deleteShopRaceOffer: (data: { id: string }) => Promise<{ success: boolean; error?: string }>
+      // ── Quêtes ──
+      getQuests: () => Promise<{ success: boolean; quests: QuestDef[]; error?: string }>
+      createQuest: (data: QuestForm) => Promise<{ success: boolean; id?: string; error?: string }>
+      updateQuest: (data: { id: string } & Partial<QuestForm>) => Promise<{ success: boolean; error?: string }>
+      deleteQuest: (id: string) => Promise<{ success: boolean; error?: string }>
       getItemCatalog: () => Promise<{ success: boolean; items: ItemCatalogEntry[]; error?: string }>
       // Descripteurs d'icône pour un lot d'ids : sprite plat (item-objet) ou modèle
       // de bloc rendu en 3D isométrique côté renderer. Clés absentes = pas d'icône.

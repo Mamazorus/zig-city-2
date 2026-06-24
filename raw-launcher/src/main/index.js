@@ -2349,6 +2349,98 @@ ipcMain.handle('delete-shop-library-offer', async (_, id) => {
   }
 })
 
+// ─── QUÊTES (PNJ de quêtes : tuer N d'une cible → récompense, 1×/joueur) ───────
+// Définition d'une quête (/quests/{id}) : titre, description, cible (id d'entité,
+// ex. minecraft:pig), quantité à tuer, récompense (item + qté). La progression et
+// l'état par joueur sont tenus côté serveur de jeu (mod), pas dans le launcher.
+function sanitizeQuest(input) {
+  const o = (input && typeof input === 'object') ? input : {}
+  const num = (v, max) => Number.isFinite(+v) && +v > 0 ? Math.min(Math.floor(+v), max) : 1
+  return {
+    title: String(o.title ?? '').trim().slice(0, 80),
+    description: String(o.description ?? '').trim().slice(0, 300),
+    target: String(o.target ?? '').trim().slice(0, 120),
+    amount: num(o.amount, 9999),
+    rewardItem: String(o.rewardItem ?? '').trim().slice(0, 120),
+    rewardQty: num(o.rewardQty, 9999),
+  }
+}
+function normalizeQuestRow([id, o]) {
+  return {
+    id,
+    title: String(o.title ?? ''),
+    description: String(o.description ?? ''),
+    target: String(o.target ?? ''),
+    amount: Number(o.amount) > 0 ? Math.floor(Number(o.amount)) : 1,
+    rewardItem: String(o.rewardItem ?? ''),
+    rewardQty: Number(o.rewardQty) > 0 ? Math.floor(Number(o.rewardQty)) : 1,
+    createdAt: o.createdAt || 0,
+  }
+}
+async function fetchQuests() {
+  const map = normalizeFbMap(await firebaseRequest('GET', '/quests', null, false))
+  return Object.entries(map)
+    .filter(([, o]) => o && typeof o === 'object')
+    .map(normalizeQuestRow)
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+}
+// Icône de la récompense (item) pour l'aperçu admin ; la cible est une entité (id seul).
+async function attachQuestIcons(quests) {
+  const ids = [...new Set(quests.map(q => q.rewardItem).filter(Boolean))]
+  let icons = {}
+  try { icons = await getItemIcons(ids) } catch { icons = {} }
+  return quests.map(q => ({ ...q, rewardIcon: icons[q.rewardItem] || null }))
+}
+
+ipcMain.handle('get-quests', async () => {
+  if (!isFirebaseConfigured()) return { success: false, quests: [] }
+  try {
+    return { success: true, quests: await attachQuestIcons(await fetchQuests()) }
+  } catch (e) {
+    return { success: false, quests: [], error: e.message }
+  }
+})
+
+ipcMain.handle('create-quest', async (_, data = {}) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  const quest = sanitizeQuest(data)
+  if (!quest.title || !quest.target || !quest.rewardItem) return { success: false, error: 'Titre, cible et récompense requis.' }
+  try {
+    const result = await firebaseRequest('POST', '/quests', { ...quest, createdAt: Date.now() }, true)
+    return { success: true, id: result?.name }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle('update-quest', async (_, { id, ...data } = {}) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  if (!isValidPushId(id)) return { success: false, error: 'Quête introuvable.' }
+  try {
+    await firebaseRequest('PATCH', `/quests/${id}`, sanitizeQuest(data), true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle('delete-quest', async (_, id) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  if (!isValidPushId(id)) return { success: false, error: 'Quête introuvable.' }
+  try {
+    await firebaseRequest('DELETE', `/quests/${id}`, null, true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
 // ─── CATALOGUE D'ITEMS (autocomplétion admin) ─────────────────────────────────
 // Pour aider l'admin à saisir l'identifiant d'un item (souvent un id moddé
 // imprononçable), on extrait la liste réelle des items du modpack INSTALLÉ en

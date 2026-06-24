@@ -91,7 +91,7 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
 
     /** Définit la source ("daily" ou "store"). Appelé à la création via la commande. */
     public void setShopKind(String kind) {
-        this.shopKind = ("store".equals(kind) || "race".equals(kind)) ? kind : "daily";
+        this.shopKind = ("store".equals(kind) || "race".equals(kind) || "quest".equals(kind)) ? kind : "daily";
     }
 
     @Override
@@ -160,6 +160,22 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
         }
         MinecraftServer server = this.level().getServer();
         if (server == null) {
+            return InteractionResult.CONSUME;
+        }
+        // PNJ de quêtes : ouvre l'écran de quêtes (pas le menu marchand).
+        if ("quest".equals(this.shopKind)) {
+            if (player instanceof net.minecraft.server.level.ServerPlayer sp) {
+                FirebaseClient.fetchQuests().whenComplete((list, err) -> server.execute(() -> {
+                    if (this.isRemoved() || !sp.isAlive()) {
+                        return;
+                    }
+                    if (err != null) {
+                        sp.sendSystemMessage(Component.literal("§c[Zig Shop] Lecture des quetes impossible."));
+                        return;
+                    }
+                    QuestServerHandler.openFor(sp, list);
+                }));
+            }
             return InteractionResult.CONSUME;
         }
         boolean isStore = "store".equals(this.shopKind);

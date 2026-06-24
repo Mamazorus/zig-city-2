@@ -50,6 +50,32 @@ public final class FirebaseClient {
         return getJson("/shop/race").thenApply(FirebaseClient::parseOffers);
     }
 
+    /** Définitions des quêtes (/quests). Liste vide si aucune donnée. */
+    public static CompletableFuture<List<QuestDef>> fetchQuests() {
+        return getJson("/quests").thenApply(FirebaseClient::parseQuests);
+    }
+
+    private static List<QuestDef> parseQuests(String body) {
+        List<QuestDef> out = new ArrayList<>();
+        if (body == null || body.isBlank()) return out;
+        JsonElement root = JsonParser.parseString(body);
+        if (root == null || !root.isJsonObject()) return out;
+        for (Map.Entry<String, JsonElement> e : root.getAsJsonObject().entrySet()) {
+            if (!e.getValue().isJsonObject()) continue;
+            JsonObject o = e.getValue().getAsJsonObject();
+            out.add(new QuestDef(
+                    e.getKey(),
+                    str(o, "title"),
+                    str(o, "description"),
+                    str(o, "target"),
+                    intVal(o, "amount"),
+                    str(o, "rewardItem"),
+                    intVal(o, "rewardQty")
+            ));
+        }
+        return out;
+    }
+
     /**
      * Publie (PUT) le compteur d'échanges {@code count} d'un joueur pour une offre, sous
      * {@code /shop/trades/{player}/{offerId}}. Écriture AUTHENTIFIÉE (secret SERVEUR, cf.
