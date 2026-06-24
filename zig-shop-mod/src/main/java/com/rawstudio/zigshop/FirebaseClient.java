@@ -45,6 +45,31 @@ public final class FirebaseClient {
         return getJson("/shop/store").thenApply(FirebaseClient::parseOffers);
     }
 
+    /**
+     * Publie (PUT) le compteur d'échanges {@code count} d'un joueur pour une offre, sous
+     * {@code /shop/trades/{player}/{offerId}}. Écriture AUTHENTIFIÉE (secret SERVEUR, cf.
+     * {@link ServerConfig}). Asynchrone, best-effort : les erreurs sont seulement loguées.
+     * Le launcher lit ce chemin pour afficher le quota restant du joueur.
+     */
+    public static void putTradeCount(String secret, String player, String offerId, int count) {
+        if (secret == null || secret.isBlank() || player == null || player.isBlank() || offerId == null || offerId.isBlank()) {
+            return;
+        }
+        URI uri = URI.create(BASE + "/shop/trades/" + player + "/" + offerId + ".json?auth=" + secret);
+        HttpRequest req = HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofSeconds(15))
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(Integer.toString(Math.max(0, count))))
+                .build();
+        HTTP.sendAsync(req, HttpResponse.BodyHandlers.ofString()).whenComplete((resp, err) -> {
+            if (err != null) {
+                ZigShop.LOGGER.warn("[ZigShop] Publication du compteur echouee : {}", err.toString());
+            } else if (resp.statusCode() / 100 != 2) {
+                ZigShop.LOGGER.warn("[ZigShop] Publication du compteur : HTTP {}", resp.statusCode());
+            }
+        });
+    }
+
     /** GET public sur un chemin de la base (sans auth). Le corps brut est renvoyé. */
     private static CompletableFuture<String> getJson(String path) {
         HttpRequest req = HttpRequest.newBuilder(URI.create(BASE + path + ".json"))

@@ -255,9 +255,16 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
             return;
         }
         String offerId = this.offerIds.get(idx);
-        this.tradeCounts
+        int count = this.tradeCounts
                 .computeIfAbsent(player.getUUID(), k -> new HashMap<>())
                 .merge(offerId, 1, Integer::sum);
+        // Publie le compteur dans Firebase (SERVEUR uniquement) pour l'affichage launcher.
+        if (!this.level().isClientSide) {
+            String secret = ServerConfig.firebaseSecret();
+            if (secret != null) {
+                FirebaseClient.putTradeCount(secret, player.getGameProfile().getName(), offerId, count);
+            }
+        }
     }
 
     @Override
