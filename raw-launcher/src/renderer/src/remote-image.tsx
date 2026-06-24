@@ -24,12 +24,44 @@ export function useRemoteImage(url: string | null | undefined, fallback: string)
   return resolved ?? fallback          // distante : data URL une fois prête, sinon fallback
 }
 
-// Tête de joueur (mc-heads) avec repli sur l'avatar Steve bundlé.
+// Comme useRemoteImage, mais essaie plusieurs URL distantes dans l'ordre et garde
+// la première qui aboutit. Sert au repli entre fournisseurs de têtes (voir Avatar).
+function useFirstRemoteImage(urls: (string | null | undefined)[], fallback: string): string {
+  const key = urls.filter(Boolean).join('|')
+  const [resolved, setResolved] = useState<string | null>(null)
+  useEffect(() => {
+    setResolved(null)
+    let alive = true
+    ;(async () => {
+      for (const u of urls) {
+        if (!u || !/^https?:\/\//i.test(u)) continue
+        const dataUrl = await window.launcher.fetchImage(u).catch(() => null)
+        if (!alive) return
+        if (dataUrl) { setResolved(dataUrl); return }
+      }
+    })()
+    return () => { alive = false }
+    // key résume l'ensemble des URL : ne relancer que si la liste change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  return resolved ?? fallback
+}
+
+// Tête de joueur avec repli sur l'avatar Steve bundlé.
+// On interroge minotar.net en priorité : contrairement à mc-heads.net (qui sert un
+// Steve par défaut en HTTP 200 pour certains comptes premium pourtant valides — cache
+// périmé côté service), minotar résout ces têtes correctement et renvoie un vrai 404
+// pour les pseudos inconnus (→ repli propre sur le Steve bundlé via rejet HTTP). mc-heads
+// reste en filet de secours si minotar ne répond pas. /helm = tête + couche chapeau.
 export function Avatar({ name, version, className }: { name?: string | null; version?: number; className?: string }) {
-  const url = name
-    ? `https://mc-heads.net/avatar/${encodeURIComponent(name)}/64${version ? `?v=${version}` : ''}`
-    : null
-  const src = useRemoteImage(url, playerImage)
+  const v = version ? `?v=${version}` : ''
+  const urls = name
+    ? [
+        `https://minotar.net/helm/${encodeURIComponent(name)}/64${v}`,
+        `https://mc-heads.net/avatar/${encodeURIComponent(name)}/64${v}`,
+      ]
+    : []
+  const src = useFirstRemoteImage(urls, playerImage)
   return (
     <img
       alt=""
