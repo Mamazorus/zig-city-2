@@ -112,7 +112,7 @@ public class QuestScreen extends Screen {
             int ix = x + 8 + this.font.width(label) + 4;
             if (!reward.isEmpty()) {
                 g.renderItem(reward, ix, ry);
-                g.renderItemDecorations(this.font, reward, ix);
+                g.renderItemDecorations(this.font, reward, ix, ry);
                 g.drawString(this.font, reward.getHoverName(), ix + 22, ry + 4, 0xFFFFFF);
             } else {
                 g.drawString(this.font, "§8(item inconnu)", ix, ry + 4, 0xFFFFFF);
