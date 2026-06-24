@@ -45,7 +45,7 @@ interface DynamicNewsItem {
 type AnyNewsItem = { img?: string; title: string; date: string; body: string; imageUrl?: string; id?: string; author?: string; category?: NewsCategory }
 
 // Offre (troc) du shop du jour, renvoyée par le main (lecture de /shop/days/{aujourd'hui}).
-type ShopOfferView = { id: string; input: string; inputQty: number; output: string; outputQty: number; inputIcon?: ItemIconDesc | null; outputIcon?: ItemIconDesc | null }
+type ShopOfferView = { id: string; input: string; inputQty: number; output: string; outputQty: number; maxUses?: number; used?: number; inputIcon?: ItemIconDesc | null; outputIcon?: ItemIconDesc | null }
 
 interface ProgressState {
   percent: number
@@ -935,6 +935,7 @@ type ShopRowData = {
   key: string
   inDesc?: ItemIconDesc | null; inId?: string; inCurrencyUrl?: string; inFallback: string; inQty: string
   outDesc?: ItemIconDesc | null; outId?: string; outCurrencyUrl?: string; outFallback: string; outQty: string
+  quota?: { remaining: number; max: number }
   alt: boolean
 }
 
@@ -961,11 +962,19 @@ function ShopRow({ row }: { row: ShopRowData }) {
         <p className="relative z-10 font-minecraft text-[16px] text-white tracking-[-0.64px] whitespace-nowrap">{row.inQty}</p>
       </div>
 
-      {/* Flèche */}
-      <div className="absolute left-1/2 -translate-x-1/2">
+      {/* Flèche + quota restant du joueur (sous la flèche) */}
+      <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center gap-[2px]">
         <svg width="18" height="14" viewBox="0 0 18 14" fill="none">
           <path d="M0.5 7H17.5M17.5 7L11.5 1M17.5 7L11.5 13" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
+        {row.quota && (
+          <span
+            className={`font-ui font-semibold text-[10px] leading-none tracking-[-0.2px] whitespace-nowrap ${row.quota.remaining > 0 ? 'text-[rgba(0,255,225,0.9)]' : 'text-[rgba(255,120,120,0.95)]'}`}
+            title={`Il te reste ${row.quota.remaining} échange(s) sur ${row.quota.max}`}
+          >
+            {row.quota.remaining}/{row.quota.max}
+          </span>
+        )}
       </div>
 
       {/* Sortie */}
@@ -1162,6 +1171,7 @@ export default function App() {
         key: o.id || `o-${i}`,
         inDesc: o.inputIcon, inId: o.input, inCurrencyUrl: o.input === curr ? (shopCurrencyIcon || undefined) : undefined, inFallback: shop1Image, inQty: `x${o.inputQty}`,
         outDesc: o.outputIcon, outId: o.output, outCurrencyUrl: o.output === curr ? (shopCurrencyIcon || undefined) : undefined, outFallback: currencyImage, outQty: `x${o.outputQty}`,
+        quota: o.maxUses && o.maxUses > 0 ? { remaining: Math.max(0, o.maxUses - (o.used || 0)), max: o.maxUses } : undefined,
         alt: i % 2 === 0,
       }))
     }

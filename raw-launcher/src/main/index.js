@@ -2072,6 +2072,20 @@ async function attachShopIcons(offers) {
   return offers.map(o => ({ ...o, inputIcon: icons[o.input] || null, outputIcon: icons[o.output] || null }))
 }
 
+// Attache à chaque offre le nombre d'échanges déjà faits (`used`) par le joueur
+// connecté — compteurs publiés par le serveur de jeu sous /shop/trades/{pseudo}/{offerId}.
+// Best-effort : si pas connecté ou lecture impossible, `used` = 0.
+async function attachPlayerUsage(offers) {
+  const player = currentToken?.name
+  if (!player || !offers.length) return offers.map(o => ({ ...o, used: 0 }))
+  let map = {}
+  try { map = normalizeFbMap(await firebaseRequest('GET', `/shop/trades/${player}`, null, false)) } catch { map = {} }
+  return offers.map(o => {
+    const n = Number(map?.[o.id])
+    return { ...o, used: Number.isFinite(n) && n > 0 ? Math.floor(n) : 0 }
+  })
+}
+
 // Bibliothèque d'offres réutilisables (/shop/library) : toute offre créée y est
 // ajoutée (dédupliquée), pour pouvoir la replacer ensuite sur n'importe quel jour.
 function shopOfferKey(o) { return `${o.input}|${o.inputQty}|${o.output}|${o.outputQty}` }
@@ -2112,7 +2126,7 @@ ipcMain.handle('get-shop', async () => {
     const config = readShopConfig(await firebaseRequest('GET', '/shop/config', null, false))
     await migrateLegacyPoolIfNeeded(config)
     const date = shopDayKey(0)
-    const offers = await attachShopIcons(await fetchShopDay(date))
+    const offers = await attachPlayerUsage(await attachShopIcons(await fetchShopDay(date)))
     return { success: true, offers, config, date }
   } catch (e) {
     return { success: false, offers: [], config: { ...SHOP_DEFAULT_CONFIG }, error: e.message }
