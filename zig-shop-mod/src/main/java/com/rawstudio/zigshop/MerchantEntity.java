@@ -55,6 +55,8 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
     private String shopKind = "daily";
     /** Échanges déjà effectués : joueur (UUID) → (identifiant d'offre → nombre d'utilisations). */
     private final Map<UUID, Map<String, Integer>> tradeCounts = new HashMap<>();
+    /** Limite par offre du dernier menu construit (identifiant d'offre → maxUses, 0 = illimité). */
+    private final Map<String, Integer> offerMaxUses = new HashMap<>();
 
     public MerchantEntity(EntityType<? extends PathfinderMob> type, Level level) {
         super(type, level);
@@ -163,6 +165,7 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
                 return;
             }
             this.setTradingPlayer(player);
+            this.sendLimitsSummary(player, list);
             Component title = Component.literal(isStore ? "Boutique" : "Shop du jour");
             this.openTradingScreen(player, title, 1);
         }));
@@ -177,6 +180,7 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
     private void rebuildOffers(List<ShopOffer> list, Player player) {
         MerchantOffers result = new MerchantOffers();
         this.offerIds.clear();
+        this.offerMaxUses.clear();
         if (list != null) {
             Map<String, Integer> used = this.tradeCounts.getOrDefault(player.getUUID(), Map.of());
             for (ShopOffer o : list) {
@@ -197,9 +201,48 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
                 }
                 result.add(mo);
                 this.offerIds.add(o.id());
+                this.offerMaxUses.put(o.id(), o.maxUses());
             }
         }
         this.offers = result;
+    }
+
+    /**
+     * Informe le joueur (dans le chat) des échanges LIMITÉS qu'il lui reste, pour qu'il
+     * sache combien il peut encore en faire. N'affiche que les offres avec une limite.
+     */
+    private void sendLimitsSummary(Player player, List<ShopOffer> list) {
+        if (list == null) {
+            return;
+        }
+        Map<String, Integer> used = this.tradeCounts.getOrDefault(player.getUUID(), Map.of());
+        List<Component> lines = new ArrayList<>();
+        for (ShopOffer o : list) {
+            if (o.maxUses() <= 0) {
+                continue;
+            }
+            Item input = resolveItem(o.input());
+            Item output = resolveItem(o.output());
+            if (input == null || output == null) {
+                continue;
+            }
+            int u = Math.min(Math.max(0, used.getOrDefault(o.id(), 0)), o.maxUses());
+            int remaining = o.maxUses() - u;
+            String color = remaining > 0 ? "§a" : "§c";
+            lines.add(Component.literal("§7• §f" + o.inputQty() + "x ")
+                    .append(new ItemStack(input, 1).getHoverName())
+                    .append(Component.literal(" §7→ §f" + o.outputQty() + "x "))
+                    .append(new ItemStack(output, 1).getHoverName())
+                    .append(Component.literal(" §8[" + color + remaining + "§8/" + o.maxUses() + "]")));
+        }
+        if (lines.isEmpty()) {
+            return;
+        }
+        boolean isStore = "store".equals(this.shopKind);
+        player.sendSystemMessage(Component.literal("§e[Zig Shop] Tes echanges limites restants" + (isStore ? "" : " aujourd'hui") + " :"));
+        for (Component line : lines) {
+            player.sendSystemMessage(line);
+        }
     }
 
     /** Résout un identifiant d'item ; null si introuvable (le registre ITEM est defaulté sur AIR). */
@@ -251,9 +294,17 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
             return;
         }
         String offerId = this.offerIds.get(idx);
-        this.tradeCounts
+        int count = this.tradeCounts
                 .computeIfAbsent(player.getUUID(), k -> new HashMap<>())
                 .merge(offerId, 1, Integer::sum);
+        // Rappel du quota restant pour ce joueur (offres limitées seulement).
+        int max = this.offerMaxUses.getOrDefault(offerId, 0);
+        if (max > 0) {
+            int remaining = Math.max(0, max - count);
+            player.sendSystemMessage(remaining > 0
+                    ? Component.literal("§7[Zig Shop] Il te reste §a" + remaining + "§7 echange" + (remaining > 1 ? "s" : "") + " sur cette offre.")
+                    : Component.literal("§7[Zig Shop] Tu as atteint ta limite sur cette offre."));
+        }
     }
 
     @Override
