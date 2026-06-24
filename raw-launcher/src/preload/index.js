@@ -36,7 +36,7 @@ contextBridge.exposeInMainWorld('launcher', {
 
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   quitAndInstall:  () => ipcRenderer.invoke('quit-and-install'),
-  onUpdateStatus:  (cb) => ipcRenderer.on('update-status', (_, d) => cb(d)),
+  onUpdateStatus:  (cb) => { const h = (_, d) => cb(d); ipcRenderer.on('update-status', h); return () => ipcRenderer.removeListener('update-status', h) },
 
   getPlayersSeen:    () => ipcRenderer.invoke('get-players-seen'),
   addPlayersSeen:    (names) => ipcRenderer.invoke('add-players-seen', names),

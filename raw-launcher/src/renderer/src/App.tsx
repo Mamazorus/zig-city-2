@@ -1266,6 +1266,7 @@ export default function App() {
         const rearm = (ms: number) => { clearTimeout(timer); timer = setTimeout(proceed, ms) }
 
         window.launcher.onUpdateStatus((u) => {
+          if (settled) return // après le démarrage, c'est la page Réglages qui pilote les vérifications manuelles
           switch (u.status) {
             case 'checking':
               setPhase('updating')

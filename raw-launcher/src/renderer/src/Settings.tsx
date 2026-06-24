@@ -20,6 +20,9 @@ interface RamSettings {
 
 type SaveStatus = 'idle' | 'saving' | 'saved'
 
+// Miroir local du statut de MAJ (UpdateStatusData de window.d.ts est à portée de module).
+type UpdateInfo = { status: string; version?: string; message?: string; percent?: number }
+
 // Affiche un nombre de Go à la française (« 6,5 », « 8 ») sans décimale superflue.
 const fmtGb = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })
 // Variante toujours à 1 décimale (« 8,0 ») : largeur stable pour le grand chiffre
@@ -116,6 +119,8 @@ export default function SettingsPage() {
           )}
 
           {info && <RamSection info={info} value={value} status={status} onSlide={onSlide} onReset={handleReset} />}
+
+          <UpdateSection version={info?.version} />
 
         </div>
       </div>
@@ -258,6 +263,85 @@ function RamSection({
   )
 }
 
+// ── Section « Mises à jour » : relancer la recherche + voir le résultat ───────
+// Affiche la version installée, un bouton qui RELANCE la recherche (checkForUpdates),
+// et le résultat en clair — y compris le message d'erreur, pour ne plus échouer en
+// silence. Si une MAJ est prête, propose de redémarrer pour l'installer.
+function UpdateSection({ version }: { version?: string }) {
+  const [st, setSt] = useState<UpdateInfo | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    // L'abonnement renvoie une fonction de nettoyage (retire le listener au démontage).
+    return window.launcher.onUpdateStatus((u) => {
+      setSt(u)
+      if (['not-available', 'error', 'downloaded', 'mac-update', 'disabled'].includes(u.status)) setBusy(false)
+    })
+  }, [])
+
+  const check = () => {
+    setBusy(true)
+    setSt({ status: 'checking' })
+    window.launcher.checkForUpdates()
+      .then(r => {
+        if (r?.status === 'disabled') { setSt({ status: 'disabled' }); setBusy(false) }
+        else if (r?.status === 'error') { setSt({ status: 'error', message: r.message }); setBusy(false) }
+      })
+      .catch(e => { setSt({ status: 'error', message: String((e as Error)?.message || e) }); setBusy(false) })
+  }
+
+  const s = st?.status
+  let text = 'Clique pour vérifier si une nouvelle version est disponible.'
+  let tone: 'idle' | 'good' | 'warn' = 'idle'
+  if (s === 'checking') text = 'Recherche de mises à jour…'
+  else if (s === 'available') text = `Mise à jour ${st?.version ?? ''} trouvée — téléchargement…`
+  else if (s === 'progress') text = `Téléchargement… ${Math.round(st?.percent ?? 0)} %`
+  else if (s === 'downloaded') { text = 'Mise à jour téléchargée, prête à installer.'; tone = 'good' }
+  else if (s === 'not-available') { text = 'Tu es déjà à la dernière version.'; tone = 'good' }
+  else if (s === 'mac-update') { text = `Nouvelle version ${st?.version ?? ''} disponible.`; tone = 'good' }
+  else if (s === 'disabled') text = 'Mises à jour indisponibles (mode développement).'
+  else if (s === 'error') { text = `Échec de la recherche : ${st?.message ?? 'erreur inconnue'}`; tone = 'warn' }
+
+  return (
+    <section className="rounded-[14px] border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.025)] p-[22px] flex flex-col gap-[16px]">
+      <div className="flex items-start gap-[12px]">
+        <div className="flex items-center justify-center size-[38px] rounded-[10px] border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.05)] shrink-0 text-[rgba(0,255,225,0.9)]">
+          <ResetIcon size={18} />
+        </div>
+        <div className="flex flex-col gap-[3px] min-w-0 flex-1">
+          <p className="font-ui font-semibold text-[15px] text-white tracking-[-0.4px] leading-none">Mises à jour</p>
+          <p className="font-ui text-[14px] text-white/45 tracking-[-0.2px]">
+            Version installée : <span className="text-white/70 tabular-nums">{version ?? '—'}</span>
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-[16px] flex-wrap">
+        <p className={`font-ui text-[14px] tracking-[-0.2px] leading-snug min-w-0 ${tone === 'warn' ? 'text-[rgba(255,150,100,0.95)]' : tone === 'good' ? 'text-[rgba(0,255,225,0.9)]' : 'text-white/50'}`}>
+          {text}
+        </p>
+        {s === 'downloaded' ? (
+          <button
+            onClick={() => window.launcher.quitAndInstall()}
+            className="shrink-0 flex items-center gap-[7px] px-[16px] h-[34px] rounded-[10px] bg-white text-[#0e0b16] font-ui font-bold text-[14px] tracking-[-0.3px] hover:bg-white/90 active:scale-[0.98] transition-all"
+          >
+            Redémarrer et installer
+          </button>
+        ) : (
+          <button
+            onClick={check}
+            disabled={busy}
+            className="shrink-0 flex items-center gap-[7px] px-[14px] h-[34px] rounded-[10px] border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.05)] text-white/75 hover:text-white hover:bg-[rgba(255,255,255,0.1)] disabled:opacity-40 disabled:hover:bg-[rgba(255,255,255,0.05)] disabled:hover:text-white/75 transition-colors font-ui text-[14px] tracking-[-0.2px]"
+          >
+            <ResetIcon size={14} className={busy ? 'animate-spin' : ''} />
+            {busy ? 'Recherche…' : 'Vérifier les mises à jour'}
+          </button>
+        )}
+      </div>
+    </section>
+  )
+}
+
 // ── Bandeau d'information / avertissement ─────────────────────────────────────
 function Banner({ tone, text }: { tone: 'good' | 'note' | 'warn'; text: string }) {
   const styles = {
@@ -290,9 +374,9 @@ function RamIcon({ className = '' }: { className?: string }) {
   )
 }
 
-function ResetIcon({ size = 16 }: { size?: number }) {
+function ResetIcon({ size = 16, className = '' }: { size?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
       <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2v2.6h-2.6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )

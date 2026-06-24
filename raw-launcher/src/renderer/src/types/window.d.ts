@@ -182,7 +182,7 @@ declare global {
 
       checkForUpdates: () => Promise<{ status: 'disabled' | 'checking' | 'error'; message?: string }>
       quitAndInstall: () => void
-      onUpdateStatus: (cb: (data: UpdateStatusData) => void) => void
+      onUpdateStatus: (cb: (data: UpdateStatusData) => void) => () => void
 
       getPlayersSeen: () => Promise<string[]>
       addPlayersSeen: (names: string | string[]) => Promise<{ success: boolean; added: string[]; skipped: string[]; invalid: number; error?: string }>
