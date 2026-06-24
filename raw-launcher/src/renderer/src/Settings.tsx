@@ -15,6 +15,7 @@ interface RamSettings {
   recommendedRam: number // valeur conseillée pour cette machine (Go)
   totalGb: number        // RAM physique détectée (Go)
   custom: boolean        // l'utilisateur a-t-il déjà réglé une valeur ?
+  version?: string       // version du launcher (app.getVersion())
 }
 
 type SaveStatus = 'idle' | 'saving' | 'saved'
@@ -86,6 +87,11 @@ export default function SettingsPage() {
           <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px] leading-none">Réglages</p>
           <p className="font-ui text-[14px] text-white/40 tracking-[-0.3px] truncate">Personnalise le launcher</p>
         </div>
+        {info?.version && (
+          <span className="font-ui text-[13px] text-white/55 tracking-[-0.2px] px-[12px] h-[30px] inline-flex items-center gap-[6px] rounded-[10px] border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.04)] whitespace-nowrap shrink-0" title="Version installée du launcher">
+            <span className="text-white/35">Version</span> {info.version}
+          </span>
+        )}
       </div>
 
       {/* ── CONTENU ── */}

@@ -169,7 +169,7 @@ declare global {
 
       // Réglages utilisateur (RAM allouée à la JVM, en Go). Toutes les valeurs sont
       // en Go ; les bornes dépendent de la RAM physique de la machine.
-      getSettings: () => Promise<{ ram: number; defaultRam: number; minRam: number; maxRam: number; recommendedRam: number; totalGb: number; custom: boolean }>
+      getSettings: () => Promise<{ ram: number; defaultRam: number; minRam: number; maxRam: number; recommendedRam: number; totalGb: number; custom: boolean; version: string }>
       setSettings: (payload: { ram: number | null }) => Promise<{ success: boolean; ram?: number; error?: string }>
       onInstallProgress: (cb: (data: InstallProgressData) => void) => void
       onLaunchProgress: (cb: (data: LaunchProgressData) => void) => void

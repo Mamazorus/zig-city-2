@@ -1,6 +1,6 @@
 {
   "name": "raw-launcher",
-  "version": "0.1.25-beta",
+  "version": "0.1.26-beta",
   "description": "Launcher Minecraft custom Zig City 2",
   "author": "Maël Auzenet",
   "main": "out/main/index.js",

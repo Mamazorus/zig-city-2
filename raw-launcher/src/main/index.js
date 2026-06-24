@@ -1516,6 +1516,7 @@ ipcMain.handle('get-settings', () => {
     recommendedRam: info.recommended,
     totalGb: info.totalGb,
     custom: info.custom,
+    version: app.getVersion(),
   }
 })
 
