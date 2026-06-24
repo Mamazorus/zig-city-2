@@ -57,6 +57,12 @@ contextBridge.exposeInMainWorld('launcher', {
   addAdmin:          (username) => ipcRenderer.invoke('add-admin', username),
   removeAdmin:       (username) => ipcRenderer.invoke('remove-admin', username),
 
+  // ── Fonds d'écran (un est tiré au hasard à chaque lancement) ──
+  getBackgrounds:        () => ipcRenderer.invoke('get-backgrounds'),
+  createBackground:      (data) => ipcRenderer.invoke('create-background', data),
+  deleteBackground:      (id) => ipcRenderer.invoke('delete-background', id),
+  uploadBackgroundImage: (data) => ipcRenderer.invoke('background-upload-media', data),
+
   // ── Shop du jour (calendrier) ──
   getShop:           () => ipcRenderer.invoke('get-shop'),
   getShopDay:        (date) => ipcRenderer.invoke('get-shop-day', date),

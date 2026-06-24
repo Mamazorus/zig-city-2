@@ -1886,6 +1886,55 @@ ipcMain.handle('delete-news', async (_, id) => {
   }
 })
 
+// ─── IPC : FONDS D'ÉCRAN ──────────────────────────────────────────────────────
+// Bibliothèque d'images de fond gérée par les admins. Le launcher en tire une au
+// hasard à chaque lancement (côté renderer). /backgrounds = { id: { url,
+// fileName?, uploadedAt } }. Lecture publique (tout joueur), écriture admin.
+ipcMain.handle('get-backgrounds', async () => {
+  if (!isFirebaseConfigured()) return { success: false, backgrounds: [] }
+  try {
+    const data = await firebaseRequest('GET', '/backgrounds', null, false)
+    if (!data || data === 'null') return { success: true, backgrounds: [] }
+    const backgrounds = Object.entries(normalizeFbMap(data))
+      .filter(([, b]) => b && typeof b === 'object' && b.url)
+      .map(([id, b]) => ({ id, ...b }))
+    backgrounds.sort((a, b) => (b.uploadedAt || 0) - (a.uploadedAt || 0))
+    return { success: true, backgrounds }
+  } catch (e) {
+    return { success: false, backgrounds: [], error: e.message }
+  }
+})
+
+ipcMain.handle('create-background', async (_, data) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  const url = String(data?.url ?? '').trim()
+  if (!/^https?:\/\//i.test(url)) return { success: false, error: 'URL invalide.' }
+  try {
+    const result = await firebaseRequest('POST', '/backgrounds', {
+      url: url.slice(0, 1024),
+      fileName: String(data?.fileName ?? '').slice(0, 120),
+      uploadedAt: Date.now(),
+    }, true)
+    return { success: true, id: result?.name }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle('delete-background', async (_, id) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  try {
+    await firebaseRequest('DELETE', `/backgrounds/${id}`, null, true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
 ipcMain.handle('get-admins', async () => {
   if (!isFirebaseConfigured()) return { success: false, admins: {} }
   try {
@@ -3089,6 +3138,24 @@ ipcMain.handle('news-upload-media', async (_, payload) => {
   const dec = decodeUploadedImage(payload)
   if (dec.error) return { success: false, error: dec.error }
   const objectPath = `news-media/${Date.now()}-${crypto.randomBytes(8).toString('hex')}.${dec.ext}`
+  return uploadImageToStorage(objectPath, dec.buffer, dec.realMime)
+})
+
+// ── Image de fond d'écran : upload Firebase Storage (réservé aux admins) ──
+// Même infra que les news (validation magic bytes, 4 Mo max, garde admin),
+// scopée /background-media. L'URL renvoyée est ensuite enregistrée dans
+// /backgrounds via create-background.
+// ⚠️ Nécessite une règle Storage autorisant l'écriture sous /background-media.
+ipcMain.handle('background-upload-media', async (_, payload) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  if (!FIREBASE_STORAGE_BUCKET || FIREBASE_STORAGE_BUCKET.includes('YOUR-')) {
+    return { success: false, error: 'Bucket Storage non configuré.' }
+  }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  const dec = decodeUploadedImage(payload)
+  if (dec.error) return { success: false, error: dec.error }
+  const objectPath = `background-media/${Date.now()}-${crypto.randomBytes(8).toString('hex')}.${dec.ext}`
   return uploadImageToStorage(objectPath, dec.buffer, dec.realMime)
 })
 

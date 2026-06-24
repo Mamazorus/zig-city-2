@@ -4,7 +4,15 @@ import { Avatar, RemoteNewsImage } from './remote-image'
 import { ItemIcon } from './item-icon'
 import { type ItemIconDesc } from './block-renderer'
 
-type AdminTab = 'news' | 'admins' | 'players' | 'channels' | 'shop' | 'quests'
+type AdminTab = 'news' | 'admins' | 'players' | 'channels' | 'shop' | 'quests' | 'backgrounds'
+
+// Image de fond d'écran (miroir local de window.d.ts).
+interface BackgroundImage {
+  id: string
+  url: string
+  fileName?: string
+  uploadedAt?: number
+}
 
 interface ChatChannel {
   id: string
@@ -336,19 +344,30 @@ export default function AdminDashboard({
   const [confirmDeleteQuest, setConfirmDeleteQuest] = useState<string | null>(null)
   const [questMsg, setQuestMsg] = useState<string | null>(null)
 
+  // ── Fonds d'écran : galerie d'images (le launcher en tire une au hasard au lancement) ──
+  const [backgrounds, setBackgrounds] = useState<BackgroundImage[]>([])
+  const [backgroundsLoading, setBackgroundsLoading] = useState(false)
+  const [bgUploading, setBgUploading] = useState(false)
+  const [bgError, setBgError] = useState<string | null>(null)
+  const [bgDragging, setBgDragging] = useState(false)
+  const [confirmDeleteBg, setConfirmDeleteBg] = useState<string | null>(null)
+  const bgFileInputRef = useRef<HTMLInputElement>(null)
+
   const fetchAll = async () => {
     setLoading(true)
     try {
-      const [nr, ar, ps, cr] = await Promise.all([
+      const [nr, ar, ps, cr, br] = await Promise.all([
         window.launcher.getNews(),
         window.launcher.getAdmins(),
         window.launcher.getPlayersSeen(),
         window.launcher.chatGetChannels(),
+        window.launcher.getBackgrounds(),
       ])
       if (nr.success) setNews(nr.news)
       if (ar.success) setAdmins(Object.keys(ar.admins).filter(k => ar.admins[k]))
       if (Array.isArray(ps)) setPlayers([...ps].sort((a, b) => a.localeCompare(b)))
       if (cr.success) setChannels(cr.channels)
+      if (br.success) setBackgrounds(br.backgrounds)
     } finally {
       setLoading(false)
     }
@@ -483,6 +502,64 @@ export default function AdminDashboard({
       window.removeEventListener('drop', prevent)
     }
   }, [])
+
+  // ── Fonds d'écran ──
+  const fetchBackgrounds = useCallback(async () => {
+    setBackgroundsLoading(true)
+    try {
+      const res = await window.launcher.getBackgrounds()
+      if (res.success) setBackgrounds(res.backgrounds)
+    } finally {
+      setBackgroundsLoading(false)
+    }
+  }, [])
+
+  // Upload direct (sélecteur, glisser-déposer ou presse-papier) : réhéberge l'image
+  // sur Firebase Storage puis l'enregistre dans /backgrounds. Le main revalide tout
+  // (magic bytes, 4 Mo, admin). Pas de formulaire : ajout immédiat à la galerie.
+  const uploadBackground = useCallback(async (file: File | null | undefined) => {
+    setBgError(null)
+    if (!file) return
+    if (!file.type.startsWith('image/')) { setBgError('Choisis une image (PNG, JPEG, GIF, WebP).'); return }
+    if (file.size > 4 * 1024 * 1024) { setBgError('Image trop lourde (max 4 Mo).'); return }
+    setBgUploading(true)
+    try {
+      const dataUrl = await blobToDataUrl(file)
+      const up = await window.launcher.uploadBackgroundImage({ dataUrl, mime: file.type, name: file.name || 'fond' })
+      if (!up.success || !up.url) { setBgError(up.error || "Échec de l'envoi."); return }
+      const created = await window.launcher.createBackground({ url: up.url, fileName: file.name || '' })
+      if (!created.success) { setBgError(created.error || "Échec de l'enregistrement."); return }
+      await fetchBackgrounds()
+    } catch {
+      setBgError('Image illisible.')
+    } finally {
+      setBgUploading(false)
+    }
+  }, [fetchBackgrounds])
+
+  const deleteBackground = async (id: string) => {
+    await window.launcher.deleteBackground(id)
+    setConfirmDeleteBg(null)
+    await fetchBackgrounds()
+  }
+
+  // Coller (Ctrl+V) une image quand l'onglet Fonds d'écran est ouvert.
+  useEffect(() => {
+    if (tab !== 'backgrounds') return
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i]
+        if (it.kind === 'file' && it.type.startsWith('image/')) {
+          const file = it.getAsFile()
+          if (file) { e.preventDefault(); uploadBackground(file); break }
+        }
+      }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [tab, uploadBackground])
 
   const saveNews = async () => {
     if (!form.title.trim() || !form.body.trim()) return
@@ -828,12 +905,12 @@ export default function AdminDashboard({
         <div className="flex flex-col gap-[2px]">
           <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px] leading-none">Administration</p>
           <p className="font-ui text-[14px] text-white/40 tracking-[-0.3px]">
-            {tab === 'news' ? 'Gestion du contenu' : tab === 'admins' ? 'Gestion des accès' : tab === 'players' ? 'Carrousel d\'accueil' : tab === 'channels' ? 'Salons de discussion' : tab === 'shop' ? 'Boutique du serveur' : 'Quêtes du serveur'}
+            {tab === 'news' ? 'Gestion du contenu' : tab === 'admins' ? 'Gestion des accès' : tab === 'players' ? 'Carrousel d\'accueil' : tab === 'channels' ? 'Salons de discussion' : tab === 'shop' ? 'Boutique du serveur' : tab === 'quests' ? 'Quêtes du serveur' : 'Fonds d\'écran du launcher'}
           </p>
         </div>
 
         <div className="flex gap-[3px] bg-[rgba(0,0,0,0.22)] border border-[rgba(255,255,255,0.06)] rounded-full p-[3px]">
-          {(['news', 'admins', 'players', 'channels', 'shop', 'quests'] as AdminTab[]).map(t => (
+          {(['news', 'admins', 'players', 'channels', 'shop', 'quests', 'backgrounds'] as AdminTab[]).map(t => (
             <button
               key={t}
               className={`font-ui text-[14px] tracking-[-0.3px] px-[14px] h-[28px] rounded-full transition-colors ${
@@ -841,9 +918,9 @@ export default function AdminDashboard({
                   ? 'bg-[rgba(255,255,255,0.12)] text-white font-semibold'
                   : 'text-white/40 hover:text-white/70'
               }`}
-              onClick={() => { setTab(t); setShowForm(false); setConfirmDeleteId(null); setConfirmRemoveAdmin(null); setConfirmRemovePlayer(null); setPlayersMsg(null); setShowChannelForm(false); setConfirmDeleteChannel(null); setChannelMsg(null); setShowOfferForm(false); setConfirmDeleteOffer(null); setOfferMsg(null); setShopMsg(null); setShowQuestForm(false); setConfirmDeleteQuest(null); setQuestMsg(null) }}
+              onClick={() => { setTab(t); setShowForm(false); setConfirmDeleteId(null); setConfirmRemoveAdmin(null); setConfirmRemovePlayer(null); setPlayersMsg(null); setShowChannelForm(false); setConfirmDeleteChannel(null); setChannelMsg(null); setShowOfferForm(false); setConfirmDeleteOffer(null); setOfferMsg(null); setShopMsg(null); setShowQuestForm(false); setConfirmDeleteQuest(null); setQuestMsg(null); setConfirmDeleteBg(null); setBgError(null) }}
             >
-              {t === 'news' ? 'Actualités' : t === 'admins' ? 'Administrateurs' : t === 'players' ? 'Joueurs' : t === 'channels' ? 'Salons' : t === 'shop' ? 'Shop' : 'Quêtes'}
+              {t === 'news' ? 'Actualités' : t === 'admins' ? 'Administrateurs' : t === 'players' ? 'Joueurs' : t === 'channels' ? 'Salons' : t === 'shop' ? 'Shop' : t === 'quests' ? 'Quêtes' : 'Fonds'}
             </button>
           ))}
         </div>
@@ -2103,6 +2180,110 @@ export default function AdminDashboard({
                           </svg>
                         </button>
                       </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══ ONGLET FONDS D'ÉCRAN ═══ */}
+        {tab === 'backgrounds' && (
+          <div className="flex flex-col gap-[14px]">
+
+            {/* Barre supérieure */}
+            <div className="flex items-center min-h-[34px] shrink-0">
+              <p className="font-ui text-[14px] text-white/40 tracking-[-0.3px]">
+                {backgrounds.length} fond{backgrounds.length !== 1 ? 's' : ''} d'écran — un est tiré au hasard à chaque lancement du launcher
+              </p>
+            </div>
+
+            {/* Zone de dépôt (upload immédiat) */}
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => bgFileInputRef.current?.click()}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); bgFileInputRef.current?.click() } }}
+              onDragOver={e => { e.preventDefault(); setBgDragging(true) }}
+              onDragLeave={() => setBgDragging(false)}
+              onDrop={e => { e.preventDefault(); setBgDragging(false); uploadBackground(e.dataTransfer.files?.[0]) }}
+              className={`flex flex-col items-center justify-center gap-[7px] rounded-[10px] border border-dashed px-[16px] py-[22px] cursor-pointer text-center outline-none transition-colors ${bgDragging ? 'border-[rgba(0,255,225,0.55)] bg-[rgba(0,255,225,0.07)]' : 'border-[rgba(255,255,255,0.2)] bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.06)]'}`}
+            >
+              {bgUploading ? (
+                <p className="font-ui text-[14px] text-white/70">Envoi en cours…</p>
+              ) : (
+                <>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="text-white/45">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <circle cx="8.5" cy="8.5" r="1.5" />
+                    <path d="m21 15-5-5L5 21" />
+                  </svg>
+                  <p className="font-ui text-[14px] text-white/70 tracking-[-0.3px]">
+                    Glisse une image, colle (Ctrl+V) ou clique pour ajouter un fond
+                  </p>
+                  <p className="font-ui text-[13px] text-white/35">PNG, JPEG, GIF ou WebP — 4 Mo max · format paysage conseillé</p>
+                </>
+              )}
+            </div>
+
+            <input
+              ref={bgFileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              className="hidden"
+              onChange={e => { uploadBackground(e.target.files?.[0]); e.currentTarget.value = '' }}
+            />
+
+            {bgError && (
+              <p className="font-ui text-[13px] text-[rgba(255,120,120,0.9)]">{bgError}</p>
+            )}
+
+            {/* Galerie */}
+            {backgroundsLoading ? (
+              <p className="font-ui text-[14px] text-white/25 text-center py-[40px]">Chargement…</p>
+            ) : backgrounds.length === 0 ? (
+              <p className="font-ui text-[14px] text-white/30 text-center py-[40px] tracking-[-0.3px]">
+                Aucun fond d'écran — le fond par défaut du launcher est utilisé
+              </p>
+            ) : (
+              <div className="grid grid-cols-3 gap-[10px]">
+                {backgrounds.map(bg => (
+                  <div
+                    key={bg.id}
+                    className="relative aspect-[16/10] rounded-[10px] overflow-hidden border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.04)] group"
+                  >
+                    <RemoteNewsImage src={bg.url} className="size-full object-cover" fallback={null} />
+                    {confirmDeleteBg === bg.id ? (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-[8px] bg-black/72 px-[10px] text-center">
+                        <p className="font-ui text-[13px] text-white tracking-[-0.3px]">Supprimer ce fond ?</p>
+                        <div className="flex gap-[6px]">
+                          <button
+                            onClick={() => setConfirmDeleteBg(null)}
+                            className="font-ui text-[13px] text-white/70 px-[12px] h-[30px] rounded-[8px] border border-[rgba(255,255,255,0.18)] hover:bg-[rgba(255,255,255,0.08)] transition-colors"
+                          >
+                            Annuler
+                          </button>
+                          <button
+                            onClick={() => deleteBackground(bg.id)}
+                            className="font-ui font-bold text-[13px] text-white px-[12px] h-[30px] rounded-[8px] bg-[rgba(255,60,60,0.85)] hover:bg-[rgba(255,60,60,1)] transition-colors"
+                          >
+                            Supprimer
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmDeleteBg(bg.id)}
+                        title="Supprimer"
+                        className="absolute top-[6px] right-[6px] flex items-center justify-center size-[28px] rounded-[8px] text-white/85 bg-black/45 opacity-0 group-hover:opacity-100 hover:bg-[rgba(255,60,60,0.6)] transition-all"
+                      >
+                        <svg width="13" height="14" viewBox="0 0 11 12" fill="currentColor">
+                          <rect x="0.6" y="2.1" width="9.8" height="2.2" rx="1.1" />
+                          <rect x="3.6" y="0.4" width="3.8" height="2.1" rx="1" />
+                          <path d="M1.55 4.6h7.9l-.62 6.1a1.05 1.05 0 0 1-1.04.9H3.21a1.05 1.05 0 0 1-1.04-.9L1.55 4.6Z" />
+                        </svg>
+                      </button>
                     )}
                   </div>
                 ))}

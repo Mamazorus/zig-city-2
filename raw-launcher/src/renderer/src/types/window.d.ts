@@ -46,6 +46,14 @@ interface NewsItem {
 
 type NewsFormData = Omit<NewsItem, 'id' | 'createdAt'>
 
+// Image de fond d'écran : le launcher en tire une au hasard à chaque lancement.
+interface BackgroundImage {
+  id: string
+  url: string
+  fileName?: string
+  uploadedAt?: number
+}
+
 // Statistiques d'un joueur, telles que publiées par l'exporteur serveur dans
 // Firebase /stats. Toutes optionnelles (un joueur peut ne pas avoir chaque stat).
 interface PlayerStats {
@@ -193,6 +201,13 @@ declare global {
       getAdmins: () => Promise<{ success: boolean; admins: Record<string, boolean> }>
       addAdmin: (username: string) => Promise<{ success: boolean; error?: string }>
       removeAdmin: (username: string) => Promise<{ success: boolean; error?: string }>
+
+      // ── Fonds d'écran (un est tiré au hasard à chaque lancement) ──
+      getBackgrounds: () => Promise<{ success: boolean; backgrounds: BackgroundImage[]; error?: string }>
+      createBackground: (data: { url: string; fileName?: string }) => Promise<{ success: boolean; id?: string; error?: string }>
+      deleteBackground: (id: string) => Promise<{ success: boolean; error?: string }>
+      // Image de fond : upload Firebase Storage → URL permanente (enregistrée via createBackground).
+      uploadBackgroundImage: (data: { dataUrl: string; mime?: string; name?: string }) => Promise<{ success: boolean; url?: string; mime?: string; error?: string }>
 
       // ── Shop du jour (calendrier) ──
       getShop: () => Promise<{ success: boolean; offers: ShopOffer[]; config: ShopConfig; date?: string; error?: string }>

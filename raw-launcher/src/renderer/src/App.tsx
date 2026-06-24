@@ -1045,6 +1045,8 @@ export default function App() {
   const [newsClosing, setNewsClosing] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
   const [dynamicNews, setDynamicNews] = useState<DynamicNewsItem[]>([])
+  // Fond d'écran : URL tirée au hasard parmi ceux configurés en admin (null = fond par défaut).
+  const [bgUrl, setBgUrl] = useState<string | null>(null)
   const [shopOffers, setShopOffers] = useState<ShopOfferView[]>([])
   const [shopCurrencyIcon, setShopCurrencyIcon] = useState('')
   const [shopCurrencyItem, setShopCurrencyItem] = useState('')
@@ -1351,6 +1353,20 @@ export default function App() {
     })()
   }, [checkAndInstall, fetchNews])
 
+  // Fond d'écran : lecture publique de la bibliothèque (gérée en admin) et tirage
+  // d'une image au hasard, une seule fois au lancement. Tant qu'aucun fond n'est
+  // configuré (ou en cas d'échec), on garde le fond par défaut embarqué.
+  useEffect(() => {
+    window.launcher.getBackgrounds()
+      .then((res) => {
+        if (res.success && res.backgrounds.length > 0) {
+          const pick = res.backgrounds[Math.floor(Math.random() * res.backgrounds.length)]
+          if (pick?.url) setBgUrl(pick.url)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   useEffect(() => {
     const fetchStatus = async () => {
       const data = await window.launcher.getServerStatus()
@@ -1582,11 +1598,15 @@ export default function App() {
 
   const onlineLabel = serverStatus.loading ? '...' : `${serverStatus.online} en ligne`
 
+  // Fond résolu : l'image distante choisie (via le main, pour contourner proxy/VPN/AV)
+  // une fois prête, sinon le fond par défaut embarqué tant qu'elle charge / si absente.
+  const resolvedBg = useRemoteImage(bgUrl, bgImage)
+
   return (
     <div className="relative w-full h-full overflow-hidden">
       {/* ── FOND ── */}
       <div className="absolute inset-0">
-        <img src={bgImage} className="absolute inset-0 w-full h-full object-cover" />
+        <img src={resolvedBg} className="absolute inset-0 w-full h-full object-cover" />
         <div className="absolute inset-0 bg-[#0e0b16]/50" />
         {/* Vignetage haut */}
         <div
