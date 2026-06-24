@@ -26,8 +26,6 @@ import net.neoforged.neoforge.client.event.ScreenEvent;
 public final class QuotaOverlay {
     private QuotaOverlay() {}
 
-    /** Largeur de la fenêtre du marchand vanilla (constante de MerchantScreen). */
-    private static final int MERCHANT_WIDTH = 276;
     /** Au-delà de ce seuil, l'offre est considérée illimitée (maxUses = Integer.MAX_VALUE). */
     private static final int LIMIT_THRESHOLD = 100_000;
 
@@ -42,7 +40,9 @@ public final class QuotaOverlay {
         }
         GuiGraphics gui = event.getGuiGraphics();
         Font font = Minecraft.getInstance().font;
-        int x = screen.getGuiLeft() + MERCHANT_WIDTH + 6;
+        // À GAUCHE de la fenêtre : textes alignés à droite, finissant juste avant le bord
+        // gauche (zone dégagée — à droite, les items portés/inventaire passaient par-dessus).
+        int rightEdge = screen.getGuiLeft() - 6;
         int y = screen.getGuiTop() + 8;
 
         boolean titleDrawn = false;
@@ -52,7 +52,8 @@ public final class QuotaOverlay {
                 continue; // offre illimitée : rien à afficher
             }
             if (!titleDrawn) {
-                gui.drawString(font, Component.literal("§eTon quota"), x, y, 0xFFFFFF);
+                Component title = Component.literal("§eTon quota");
+                gui.drawString(font, title, rightEdge - font.width(title), y, 0xFFFFFF);
                 y += 12;
                 titleDrawn = true;
             }
@@ -61,7 +62,7 @@ public final class QuotaOverlay {
             Component line = Component.empty()
                     .append(offer.getCostA().getHoverName())
                     .append(Component.literal(" " + color + remaining + "§7/" + max));
-            gui.drawString(font, line, x, y, 0xFFFFFF);
+            gui.drawString(font, line, rightEdge - font.width(line), y, 0xFFFFFF);
             y += 11;
         }
     }
