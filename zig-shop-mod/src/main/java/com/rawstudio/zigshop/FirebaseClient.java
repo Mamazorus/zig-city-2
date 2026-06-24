@@ -45,6 +45,11 @@ public final class FirebaseClient {
         return getJson("/shop/store").thenApply(FirebaseClient::parseOffers);
     }
 
+    /** Offres « COURSE » (/shop/race — trades PARTAGÉS entre tous : maxUses = limite globale). */
+    public static CompletableFuture<List<ShopOffer>> fetchRaceOffers() {
+        return getJson("/shop/race").thenApply(FirebaseClient::parseOffers);
+    }
+
     /**
      * Publie (PUT) le compteur d'échanges {@code count} d'un joueur pour une offre, sous
      * {@code /shop/trades/{player}/{offerId}}. Écriture AUTHENTIFIÉE (secret SERVEUR, cf.

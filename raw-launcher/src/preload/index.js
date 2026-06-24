@@ -71,6 +71,11 @@ contextBridge.exposeInMainWorld('launcher', {
   createShopStoreOffer: (data) => ipcRenderer.invoke('create-shop-store-offer', data),
   updateShopStoreOffer: (data) => ipcRenderer.invoke('update-shop-store-offer', data),
   deleteShopStoreOffer: (data) => ipcRenderer.invoke('delete-shop-store-offer', data),
+  // ── Course (3e marchand, trades partagés — limite globale) ──
+  getShopRace:          () => ipcRenderer.invoke('get-shop-race'),
+  createShopRaceOffer:  (data) => ipcRenderer.invoke('create-shop-race-offer', data),
+  updateShopRaceOffer:  (data) => ipcRenderer.invoke('update-shop-race-offer', data),
+  deleteShopRaceOffer:  (data) => ipcRenderer.invoke('delete-shop-race-offer', data),
   getItemCatalog:    () => ipcRenderer.invoke('get-item-catalog'),
   getItemIcons:      (ids) => ipcRenderer.invoke('get-item-icons', ids),
 

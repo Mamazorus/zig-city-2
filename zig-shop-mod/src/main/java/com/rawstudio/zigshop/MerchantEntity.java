@@ -57,6 +57,8 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
     private final Map<UUID, Map<String, Integer>> tradeCounts = new HashMap<>();
     /** Limite par offre du dernier menu construit (identifiant d'offre → maxUses, 0 = illimité). */
     private final Map<String, Integer> offerMaxUses = new HashMap<>();
+    /** Compteur GLOBAL (mode "race") : identifiant d'offre → nombre total d'échanges (tous joueurs confondus). */
+    private final Map<String, Integer> raceCounts = new HashMap<>();
 
     public MerchantEntity(EntityType<? extends PathfinderMob> type, Level level) {
         super(type, level);
@@ -89,7 +91,7 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
 
     /** Définit la source ("daily" ou "store"). Appelé à la création via la commande. */
     public void setShopKind(String kind) {
-        this.shopKind = "store".equals(kind) ? "store" : "daily";
+        this.shopKind = ("store".equals(kind) || "race".equals(kind)) ? kind : "daily";
     }
 
     @Override
@@ -110,6 +112,14 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
             }
         }
         tag.put("TradeCounts", counts);
+        // Compteur global (mode course) : { <offerId>: count }.
+        CompoundTag race = new CompoundTag();
+        for (Map.Entry<String, Integer> e : this.raceCounts.entrySet()) {
+            if (e.getValue() != null && e.getValue() > 0) {
+                race.putInt(e.getKey(), e.getValue());
+            }
+        }
+        tag.put("RaceCounts", race);
     }
 
     @Override
@@ -134,6 +144,13 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
                 }
             }
         }
+        this.raceCounts.clear();
+        if (tag.contains("RaceCounts")) {
+            CompoundTag race = tag.getCompound("RaceCounts");
+            for (String offerId : race.getAllKeys()) {
+                this.raceCounts.put(offerId, race.getInt(offerId));
+            }
+        }
     }
 
     @Override
@@ -146,9 +163,12 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
             return InteractionResult.CONSUME;
         }
         boolean isStore = "store".equals(this.shopKind);
-        // Lecture asynchrone des offres (boutique fixe OU shop du jour), puis ouverture
+        boolean isRace = "race".equals(this.shopKind);
+        // Lecture asynchrone des offres (course OU boutique OU shop du jour), puis ouverture
         // du menu sur le thread serveur.
-        var future = isStore ? FirebaseClient.fetchStoreOffers() : FirebaseClient.fetchDayOffers(ZigShopDate.today());
+        var future = isRace ? FirebaseClient.fetchRaceOffers()
+                : isStore ? FirebaseClient.fetchStoreOffers()
+                : FirebaseClient.fetchDayOffers(ZigShopDate.today());
         future.whenComplete((list, err) -> server.execute(() -> {
             if (this.isRemoved() || !player.isAlive()) {
                 return;
@@ -159,13 +179,14 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
             }
             this.rebuildOffers(list, player);
             if (this.offers.isEmpty()) {
-                player.sendSystemMessage(Component.literal(isStore
-                        ? "§7[Zig Shop] La boutique est vide pour le moment."
+                player.sendSystemMessage(Component.literal(isRace
+                        ? "§7[Zig Shop] Aucune course en cours."
+                        : isStore ? "§7[Zig Shop] La boutique est vide pour le moment."
                         : "§7[Zig Shop] Aucune offre aujourd'hui."));
                 return;
             }
             this.setTradingPlayer(player);
-            Component title = Component.literal(isStore ? "Boutique" : "Shop du jour");
+            Component title = Component.literal(isRace ? "Course" : isStore ? "Boutique" : "Shop du jour");
             this.openTradingScreen(player, title, 1);
         }));
         return InteractionResult.CONSUME;
@@ -181,7 +202,10 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
         this.offerIds.clear();
         this.offerMaxUses.clear();
         if (list != null) {
-            Map<String, Integer> used = this.tradeCounts.getOrDefault(player.getUUID(), Map.of());
+            // mode course : compteur GLOBAL partagé ; sinon, compteur propre au joueur.
+            Map<String, Integer> used = "race".equals(this.shopKind)
+                    ? this.raceCounts
+                    : this.tradeCounts.getOrDefault(player.getUUID(), Map.of());
             for (ShopOffer o : list) {
                 Item input = resolveItem(o.input());
                 Item output = resolveItem(o.output());
@@ -255,6 +279,11 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
             return;
         }
         String offerId = this.offerIds.get(idx);
+        if ("race".equals(this.shopKind)) {
+            // Course : compteur GLOBAL partagé — une fois la limite atteinte, bloqué pour tous.
+            this.raceCounts.merge(offerId, 1, Integer::sum);
+            return;
+        }
         int count = this.tradeCounts
                 .computeIfAbsent(player.getUUID(), k -> new HashMap<>())
                 .merge(offerId, 1, Integer::sum);

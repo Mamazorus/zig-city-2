@@ -2036,6 +2036,16 @@ async function fetchShopStore() {
     .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
 }
 
+// Offres « COURSE » (/shop/race) : trades PARTAGÉS entre tous (maxUses = limite GLOBALE ;
+// le compteur partagé est tenu côté serveur de jeu). Même structure qu'une offre.
+async function fetchShopRace() {
+  const map = normalizeFbMap(await firebaseRequest('GET', '/shop/race', null, false))
+  return Object.entries(map)
+    .filter(([, o]) => o && typeof o === 'object')
+    .map(normalizeShopRow)
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+}
+
 // Migration best-effort (one-shot) : si aucun jour n'existe encore mais qu'un
 // ancien /shop/pool est présent, convertit ses offres (achat « product pour
 // price ») en échanges d'aujourd'hui (donner price×monnaie -> recevoir productQty×product).
@@ -2237,6 +2247,59 @@ ipcMain.handle('delete-shop-store-offer', async (_, { id } = {}) => {
   if (!isValidPushId(id)) return { success: false, error: 'Offre introuvable.' }
   try {
     await firebaseRequest('DELETE', `/shop/store/${id}`, null, true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+// ── IPC : COURSE (3e marchand, trades partagés — maxUses = limite GLOBALE, 1er arrivé) ──
+ipcMain.handle('get-shop-race', async () => {
+  if (!isFirebaseConfigured()) return { success: false, offers: [], config: { ...SHOP_DEFAULT_CONFIG } }
+  try {
+    const config = readShopConfig(await firebaseRequest('GET', '/shop/config', null, false))
+    const offers = await attachShopIcons(await fetchShopRace())
+    return { success: true, offers, config }
+  } catch (e) {
+    return { success: false, offers: [], config: { ...SHOP_DEFAULT_CONFIG }, error: e.message }
+  }
+})
+
+ipcMain.handle('create-shop-race-offer', async (_, data = {}) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  const offer = sanitizeShopOffer(data)
+  if (!offer.input || !offer.output) return { success: false, error: 'Indique un item d\'entrée et un item de sortie.' }
+  try {
+    const result = await firebaseRequest('POST', '/shop/race', { ...offer, createdAt: Date.now() }, true)
+    await addToLibraryDedup(offer)
+    return { success: true, id: result?.name }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle('update-shop-race-offer', async (_, { id, ...data } = {}) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  if (!isValidPushId(id)) return { success: false, error: 'Offre introuvable.' }
+  try {
+    await firebaseRequest('PATCH', `/shop/race/${id}`, sanitizeShopOffer(data), true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle('delete-shop-race-offer', async (_, { id } = {}) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  if (!isValidPushId(id)) return { success: false, error: 'Offre introuvable.' }
+  try {
+    await firebaseRequest('DELETE', `/shop/race/${id}`, null, true)
     return { success: true }
   } catch (e) {
     return { success: false, error: e.message }

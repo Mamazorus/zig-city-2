@@ -194,6 +194,11 @@ declare global {
       createShopStoreOffer: (data: ShopOfferForm) => Promise<{ success: boolean; id?: string; error?: string }>
       updateShopStoreOffer: (data: { id: string } & Partial<ShopOfferForm>) => Promise<{ success: boolean; error?: string }>
       deleteShopStoreOffer: (data: { id: string }) => Promise<{ success: boolean; error?: string }>
+      // ── Course (3e marchand, trades partagés — limite globale) ──
+      getShopRace: () => Promise<{ success: boolean; offers: ShopOffer[]; config: ShopConfig; error?: string }>
+      createShopRaceOffer: (data: ShopOfferForm) => Promise<{ success: boolean; id?: string; error?: string }>
+      updateShopRaceOffer: (data: { id: string } & Partial<ShopOfferForm>) => Promise<{ success: boolean; error?: string }>
+      deleteShopRaceOffer: (data: { id: string }) => Promise<{ success: boolean; error?: string }>
       getItemCatalog: () => Promise<{ success: boolean; items: ItemCatalogEntry[]; error?: string }>
       // Descripteurs d'icône pour un lot d'ids : sprite plat (item-objet) ou modèle
       // de bloc rendu en 3D isométrique côté renderer. Clés absentes = pas d'icône.

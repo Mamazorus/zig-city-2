@@ -32,7 +32,8 @@ public final class ZigShopCommand {
                 .then(Commands.literal("spawn")
                         .executes(ctx -> spawn(ctx, "daily"))
                         .then(Commands.literal("daily").executes(ctx -> spawn(ctx, "daily")))
-                        .then(Commands.literal("store").executes(ctx -> spawn(ctx, "store")))));
+                        .then(Commands.literal("store").executes(ctx -> spawn(ctx, "store")))
+                        .then(Commands.literal("race").executes(ctx -> spawn(ctx, "race")))));
     }
 
     /** Fait apparaître un marchand ("daily" = shop du jour, "store" = boutique) à la position de l'exécutant. */
@@ -47,7 +48,7 @@ public final class ZigShopCommand {
         }
         merchant.setShopKind(kind);
         merchant.moveTo(pos.x, pos.y, pos.z, src.getRotation().y, 0.0f);
-        String label = "store".equals(kind) ? "Boutique" : "Marchand du jour";
+        String label = "race".equals(kind) ? "Marchand course" : "store".equals(kind) ? "Boutique" : "Marchand du jour";
         src.sendSuccess(() -> Component.literal("§a[Zig Shop] " + label + " créé. Clique dessus."), true);
         return 1;
     }

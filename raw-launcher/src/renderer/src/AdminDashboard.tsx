@@ -285,7 +285,7 @@ export default function AdminDashboard({
   const [channelMsg, setChannelMsg] = useState<string | null>(null)
 
   // ── Shop : 2 catégories — « daily » = shop du jour (calendrier), « store » = boutique (offres fixes) ──
-  const [shopCat, setShopCat] = useState<'daily' | 'store'>('daily')
+  const [shopCat, setShopCat] = useState<'daily' | 'store' | 'race'>('daily')
   const [dayOffset, setDayOffset] = useState(0)              // 0 = aujourd'hui, 1 = demain…
   const [dayOffers, setDayOffers] = useState<ShopOfferRow[]>([])
   const [shopLoading, setShopLoading] = useState(false)
@@ -335,9 +335,11 @@ export default function AdminDashboard({
   const loadShopDay = useCallback(async () => {
     setShopLoading(true)
     try {
-      const r = shopCat === 'store'
-        ? await window.launcher.getShopStore()
-        : await window.launcher.getShopDay(dayKeyFromOffset(dayOffset))
+      const r = shopCat === 'race'
+        ? await window.launcher.getShopRace()
+        : shopCat === 'store'
+          ? await window.launcher.getShopStore()
+          : await window.launcher.getShopDay(dayKeyFromOffset(dayOffset))
       if (r.success) {
         setDayOffers(r.offers as ShopOfferRow[])
         setShopConfig({ currencyName: r.config.currencyName, currencyItem: r.config.currencyItem ?? '', currencyIcon: r.config.currencyIcon ?? '' })
@@ -616,7 +618,9 @@ export default function AdminDashboard({
     // boutique = dépenser des coins pour acheter (entrée).
     setOfferForm(shopCat === 'store'
       ? { ...EMPTY_OFFER, input: shopConfig.currencyItem || '' }
-      : { ...EMPTY_OFFER, output: shopConfig.currencyItem || '' })
+      : shopCat === 'race'
+        ? { ...EMPTY_OFFER } // course : l'admin choisit l'objet à rapporter, pas de pré-remplissage
+        : { ...EMPTY_OFFER, output: shopConfig.currencyItem || '' })
     setEditingOfferId(null); setShowOfferForm(true); setConfirmDeleteOffer(null); setOfferMsg(null)
   }
   const openEditOffer = (o: ShopOfferRow) => {
@@ -624,6 +628,20 @@ export default function AdminDashboard({
     setEditingOfferId(o.id); setShowOfferForm(true); setConfirmDeleteOffer(null); setOfferMsg(null)
   }
   const cancelOfferForm = () => { setShowOfferForm(false); setEditingOfferId(null); setOfferMsg(null) }
+
+  // Aiguille les écritures vers la bonne catégorie : jour daté / boutique / course.
+  const createOfferApi = (data: OfferForm) =>
+    shopCat === 'race' ? window.launcher.createShopRaceOffer(data)
+      : shopCat === 'store' ? window.launcher.createShopStoreOffer(data)
+        : window.launcher.createShopOffer({ date: shopDayKey, ...data })
+  const updateOfferApi = (id: string, data: OfferForm) =>
+    shopCat === 'race' ? window.launcher.updateShopRaceOffer({ id, ...data })
+      : shopCat === 'store' ? window.launcher.updateShopStoreOffer({ id, ...data })
+        : window.launcher.updateShopOffer({ date: shopDayKey, id, ...data })
+  const deleteOfferApi = (id: string) =>
+    shopCat === 'race' ? window.launcher.deleteShopRaceOffer({ id })
+      : shopCat === 'store' ? window.launcher.deleteShopStoreOffer({ id })
+        : window.launcher.deleteShopOffer({ date: shopDayKey, id })
 
   const saveOffer = async () => {
     if (!offerForm.input.trim() || !offerForm.output.trim()) { setOfferMsg('Indique un item d\'entrée et un item de sortie.'); return }
@@ -636,13 +654,7 @@ export default function AdminDashboard({
         outputQty: Math.max(1, Math.floor(offerForm.outputQty) || 1),
         maxUses: Math.max(0, Math.floor(offerForm.maxUses) || 0),
       }
-      const res = shopCat === 'store'
-        ? (editingOfferId
-            ? await window.launcher.updateShopStoreOffer({ id: editingOfferId, ...payload })
-            : await window.launcher.createShopStoreOffer(payload))
-        : (editingOfferId
-            ? await window.launcher.updateShopOffer({ date: shopDayKey, id: editingOfferId, ...payload })
-            : await window.launcher.createShopOffer({ date: shopDayKey, ...payload }))
+      const res = editingOfferId ? await updateOfferApi(editingOfferId, payload) : await createOfferApi(payload)
       if (!res.success) { setOfferMsg(res.error || 'Échec de l\'enregistrement.'); return }
       setShowOfferForm(false); setEditingOfferId(null)
       await loadShopDay()
@@ -652,9 +664,7 @@ export default function AdminDashboard({
   }
 
   const doDeleteOffer = async (id: string) => {
-    const res = shopCat === 'store'
-      ? await window.launcher.deleteShopStoreOffer({ id })
-      : await window.launcher.deleteShopOffer({ date: shopDayKey, id })
+    const res = await deleteOfferApi(id)
     setConfirmDeleteOffer(null)
     if (res.success) await loadShopDay()
   }
@@ -662,9 +672,7 @@ export default function AdminDashboard({
   // Copie une offre à l'identique (pour créer vite une variante).
   const duplicateOffer = async (o: ShopOfferRow) => {
     const data = { input: o.input, inputQty: o.inputQty, output: o.output, outputQty: o.outputQty, maxUses: o.maxUses ?? 0 }
-    const res = shopCat === 'store'
-      ? await window.launcher.createShopStoreOffer(data)
-      : await window.launcher.createShopOffer({ date: shopDayKey, ...data })
+    const res = await createOfferApi(data)
     if (res.success) await loadShopDay()
   }
 
@@ -679,10 +687,8 @@ export default function AdminDashboard({
   }
   const addFromLibrary = async (o: ShopOfferRow) => {
     const data = { input: o.input, inputQty: o.inputQty, output: o.output, outputQty: o.outputQty, maxUses: o.maxUses ?? 0 }
-    const res = shopCat === 'store'
-      ? await window.launcher.createShopStoreOffer(data)
-      : await window.launcher.createShopOffer({ date: shopDayKey, ...data })
-    if (res.success) { setLibMsg(shopCat === 'store' ? 'Ajouté à la boutique' : `Ajouté à ${dayLabel(dayOffset).toLowerCase()}`); await loadShopDay() }
+    const res = await createOfferApi(data)
+    if (res.success) { setLibMsg(shopCat === 'daily' ? `Ajouté à ${dayLabel(dayOffset).toLowerCase()}` : shopCat === 'race' ? 'Ajouté à la course' : 'Ajouté à la boutique'); await loadShopDay() }
   }
   const deleteFromLibrary = async (id: string) => {
     const res = await window.launcher.deleteShopLibraryOffer(id)
@@ -1506,7 +1512,7 @@ export default function AdminDashboard({
 
             {/* Sélecteur de catégorie : shop du jour (calendrier) vs boutique (offres fixes) */}
             <div className="flex items-center gap-[4px] p-[3px] rounded-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] w-fit shrink-0">
-              {([['daily', 'Shop du jour'], ['store', 'Boutique']] as const).map(([key, label]) => (
+              {([['daily', 'Shop du jour'], ['store', 'Boutique'], ['race', 'Course']] as const).map(([key, label]) => (
                 <button
                   key={key}
                   className={`font-ui font-semibold text-[13px] tracking-[-0.3px] px-[16px] h-[30px] rounded-[9px] transition-colors ${shopCat === key ? 'bg-white text-[#0e0b16]' : 'text-white/55 hover:text-white'}`}
@@ -1539,7 +1545,7 @@ export default function AdminDashboard({
                 </button>
               </div>
               ) : (
-                <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px]">Boutique <span className="text-white/40 font-medium">· offres permanentes (on y dépense les coins)</span></p>
+                <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px]">{shopCat === 'race' ? 'Course' : 'Boutique'} <span className="text-white/40 font-medium">{shopCat === 'race' ? '· trades partagés (1er arrivé bloque les autres)' : '· offres permanentes (on y dépense les coins)'}</span></p>
               )}
               <div className="flex items-center gap-[8px]">
                 <button
@@ -1631,13 +1637,15 @@ export default function AdminDashboard({
 
                 {/* Limite d'échanges par joueur (0 = illimité) */}
                 <div className="flex items-center gap-[10px]">
-                  <p className="font-ui text-[13px] text-white/60 tracking-[-0.3px] shrink-0">Limite par joueur</p>
+                  <p className="font-ui text-[13px] text-white/60 tracking-[-0.3px] shrink-0">{shopCat === 'race' ? 'Limite (tous joueurs)' : 'Limite par joueur'}</p>
                   <div className="w-[116px]">
                     <QtyInput value={offerForm.maxUses} onChange={n => setOfferForm(f => ({ ...f, maxUses: n }))} min={0} />
                   </div>
                   <p className="font-ui text-[12px] text-white/35 tracking-[-0.3px]">
                     {offerForm.maxUses > 0
-                      ? `${offerForm.maxUses} max par joueur${shopCat === 'store' ? '' : ' / jour'}`
+                      ? (shopCat === 'race'
+                          ? `${offerForm.maxUses} fois au total (tous joueurs)`
+                          : `${offerForm.maxUses} max par joueur${shopCat === 'store' ? '' : ' / jour'}`)
                       : '0 = illimité'}
                   </p>
                 </div>
@@ -1715,7 +1723,7 @@ export default function AdminDashboard({
               <p className="font-ui text-[14px] text-white/25 text-center py-[40px]">Chargement…</p>
             ) : dayOffers.length === 0 ? (
               <div className="flex flex-col items-center gap-[14px] py-[60px]">
-                <p className="font-ui text-[14px] text-white/30 tracking-[-0.3px]">{shopCat === 'store' ? 'Aucune offre dans la boutique' : `Aucune offre pour ${dayOffset === 0 ? "aujourd'hui" : 'ce jour'}`}</p>
+                <p className="font-ui text-[14px] text-white/30 tracking-[-0.3px]">{shopCat === 'race' ? 'Aucune course en cours' : shopCat === 'store' ? 'Aucune offre dans la boutique' : `Aucune offre pour ${dayOffset === 0 ? "aujourd'hui" : 'ce jour'}`}</p>
                 {!showOfferForm && (
                   <button
                     className="flex items-center gap-[7px] bg-white text-[#0e0b16] font-ui font-bold text-[14px] tracking-[-0.3px] px-[16px] h-[34px] rounded-[12px] hover:bg-white/90 active:scale-[0.98] transition-all"
@@ -1748,8 +1756,8 @@ export default function AdminDashboard({
                     </div>
 
                     {(o.maxUses ?? 0) > 0 && (
-                      <span className="shrink-0 font-ui text-[11px] font-medium text-[rgba(0,255,225,0.85)] tracking-[-0.2px] px-[8px] h-[22px] inline-flex items-center rounded-full border border-[rgba(0,255,225,0.25)] bg-[rgba(0,255,225,0.08)] whitespace-nowrap" title={`Chaque joueur peut faire cet échange ${o.maxUses} fois${shopCat === 'store' ? '' : ' par jour'}`}>
-                        max {o.maxUses}/joueur
+                      <span className="shrink-0 font-ui text-[11px] font-medium text-[rgba(0,255,225,0.85)] tracking-[-0.2px] px-[8px] h-[22px] inline-flex items-center rounded-full border border-[rgba(0,255,225,0.25)] bg-[rgba(0,255,225,0.08)] whitespace-nowrap" title={shopCat === 'race' ? `Disponible ${o.maxUses} fois au total, tous joueurs confondus` : `Chaque joueur peut faire cet échange ${o.maxUses} fois${shopCat === 'store' ? '' : ' par jour'}`}>
+                        {shopCat === 'race' ? `max ${o.maxUses} total` : `max ${o.maxUses}/joueur`}
                       </span>
                     )}
 
