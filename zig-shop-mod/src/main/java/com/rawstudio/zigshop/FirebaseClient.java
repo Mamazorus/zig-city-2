@@ -75,7 +75,8 @@ public final class FirebaseClient {
                     str(o, "input"),
                     intVal(o, "inputQty"),
                     str(o, "output"),
-                    intVal(o, "outputQty")
+                    intVal(o, "outputQty"),
+                    maxUsesVal(o)
             ));
         }
         return out;
@@ -90,6 +91,15 @@ public final class FirebaseClient {
             return o.has(key) && !o.get(key).isJsonNull() ? Math.max(1, o.get(key).getAsInt()) : 1;
         } catch (RuntimeException ex) {
             return 1;
+        }
+    }
+
+    /** Limite par joueur : 0 (illimité) si absent/invalide, sinon la valeur (≥ 0). */
+    private static int maxUsesVal(JsonObject o) {
+        try {
+            return o.has("maxUses") && !o.get("maxUses").isJsonNull() ? Math.max(0, o.get("maxUses").getAsInt()) : 0;
+        } catch (RuntimeException ex) {
+            return 0;
         }
     }
 }

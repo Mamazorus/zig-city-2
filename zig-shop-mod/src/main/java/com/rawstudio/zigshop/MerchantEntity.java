@@ -25,14 +25,22 @@ import net.minecraft.world.item.trading.MerchantOffers;
 import net.minecraft.world.level.Level;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 /**
- * Marchand connecté au shop du jour. Au clic, lit les offres du jour (Firebase) et
- * ouvre l'interface de troc VANILLA (système marchand) : donner {@code inputQty × input}
- * → recevoir {@code outputQty × output}. Le retrait des items d'entrée et le don de
- * la sortie sont gérés par le menu marchand de Minecraft. L'apparence de l'UI sera
- * peaufinée plus tard (pour l'instant on réutilise l'écran villageois).
+ * Marchand connecté au shop du launcher. Au clic, lit les offres (shop du jour OU
+ * boutique selon {@link #shopKind}) depuis Firebase et ouvre l'interface de troc
+ * VANILLA : donner inputQty × input → recevoir outputQty × output.
+ *
+ * <p><b>Limite par joueur</b> : chaque offre porte un {@code maxUses} (0 = illimité).
+ * Le nombre d'échanges déjà faits est mémorisé PAR JOUEUR et PAR identifiant d'offre
+ * ({@link #tradeCounts}, persisté en NBT). Comme le shop du jour change d'identifiants
+ * chaque jour, la limite y repart à zéro chaque jour ; en boutique (identifiants
+ * fixes) c'est une limite à vie. Limite atteinte ⇒ l'offre apparaît grisée (rupture).
  *
  * <p>NoAI + invulnérable + persistant : ne bouge pas, ne meurt pas, ne despawn pas.
  */
@@ -41,8 +49,12 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
     @Nullable
     private Player tradingPlayer;
     private MerchantOffers offers = new MerchantOffers();
+    /** Identifiants d'offre Firebase, dans le MÊME ordre que {@link #offers} (mappe une offre marchande → son id). */
+    private final List<String> offerIds = new ArrayList<>();
     /** Source du marchand : "daily" = shop du jour (calendrier), "store" = boutique (offres fixes). */
     private String shopKind = "daily";
+    /** Échanges déjà effectués : joueur (UUID) → (identifiant d'offre → nombre d'utilisations). */
+    private final Map<UUID, Map<String, Integer>> tradeCounts = new HashMap<>();
 
     public MerchantEntity(EntityType<? extends PathfinderMob> type, Level level) {
         super(type, level);
@@ -82,6 +94,20 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
     public void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
         tag.putString("ShopKind", this.shopKind);
+        // Compteurs d'échanges par joueur : { <uuid>: { <offerId>: count } }.
+        CompoundTag counts = new CompoundTag();
+        for (Map.Entry<UUID, Map<String, Integer>> byPlayer : this.tradeCounts.entrySet()) {
+            CompoundTag perOffer = new CompoundTag();
+            for (Map.Entry<String, Integer> e : byPlayer.getValue().entrySet()) {
+                if (e.getValue() != null && e.getValue() > 0) {
+                    perOffer.putInt(e.getKey(), e.getValue());
+                }
+            }
+            if (!perOffer.isEmpty()) {
+                counts.put(byPlayer.getKey().toString(), perOffer);
+            }
+        }
+        tag.put("TradeCounts", counts);
     }
 
     @Override
@@ -89,6 +115,22 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
         super.readAdditionalSaveData(tag);
         if (tag.contains("ShopKind")) {
             this.shopKind = "store".equals(tag.getString("ShopKind")) ? "store" : "daily";
+        }
+        this.tradeCounts.clear();
+        if (tag.contains("TradeCounts")) {
+            CompoundTag counts = tag.getCompound("TradeCounts");
+            for (String uuid : counts.getAllKeys()) {
+                CompoundTag perOffer = counts.getCompound(uuid);
+                Map<String, Integer> map = new HashMap<>();
+                for (String offerId : perOffer.getAllKeys()) {
+                    map.put(offerId, perOffer.getInt(offerId));
+                }
+                try {
+                    this.tradeCounts.put(UUID.fromString(uuid), map);
+                } catch (IllegalArgumentException ignored) {
+                    // uuid corrompu : ignoré
+                }
+            }
         }
     }
 
@@ -113,7 +155,7 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
                 player.sendSystemMessage(Component.literal("§c[Zig Shop] Lecture du shop impossible."));
                 return;
             }
-            this.offers = buildOffers(list);
+            this.rebuildOffers(list, player);
             if (this.offers.isEmpty()) {
                 player.sendSystemMessage(Component.literal(isStore
                         ? "§7[Zig Shop] La boutique est vide pour le moment."
@@ -127,24 +169,37 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
         return InteractionResult.CONSUME;
     }
 
-    /** Convertit les offres Firebase en offres marchandes. Items introuvables ignorés. */
-    private static MerchantOffers buildOffers(List<ShopOffer> list) {
+    /**
+     * (Re)construit les offres marchandes pour {@code player}. Items introuvables ignorés.
+     * Pour chaque offre limitée, on pré-consomme le nombre d'échanges déjà faits par ce
+     * joueur (via {@code increaseUses}) : une fois la limite atteinte, l'offre est en rupture.
+     */
+    private void rebuildOffers(List<ShopOffer> list, Player player) {
         MerchantOffers result = new MerchantOffers();
-        if (list == null) {
-            return result;
-        }
-        for (ShopOffer o : list) {
-            Item input = resolveItem(o.input());
-            Item output = resolveItem(o.output());
-            if (input == null || output == null) {
-                continue;
+        this.offerIds.clear();
+        if (list != null) {
+            Map<String, Integer> used = this.tradeCounts.getOrDefault(player.getUUID(), Map.of());
+            for (ShopOffer o : list) {
+                Item input = resolveItem(o.input());
+                Item output = resolveItem(o.output());
+                if (input == null || output == null) {
+                    continue;
+                }
+                ItemCost cost = new ItemCost(input, Math.max(1, o.inputQty()));
+                ItemStack out = new ItemStack(output, Math.max(1, o.outputQty()));
+                int maxUses = o.maxUses() > 0 ? o.maxUses() : Integer.MAX_VALUE;
+                MerchantOffer mo = new MerchantOffer(cost, out, maxUses, 0, 0.0f);
+                if (o.maxUses() > 0) {
+                    int uses = Math.min(Math.max(0, used.getOrDefault(o.id(), 0)), maxUses);
+                    for (int i = 0; i < uses; i++) {
+                        mo.increaseUses();
+                    }
+                }
+                result.add(mo);
+                this.offerIds.add(o.id());
             }
-            ItemCost cost = new ItemCost(input, Math.max(1, o.inputQty()));
-            ItemStack out = new ItemStack(output, Math.max(1, o.outputQty()));
-            // maxUses très élevé = marchand qui ne s'épuise pas ; xp 0 ; pas de variation de prix.
-            result.add(new MerchantOffer(cost, out, Integer.MAX_VALUE, 0, 0.0f));
         }
-        return result;
+        this.offers = result;
     }
 
     /** Résout un identifiant d'item ; null si introuvable (le registre ITEM est defaulté sur AIR). */
@@ -186,6 +241,19 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
     @Override
     public void notifyTrade(MerchantOffer offer) {
         offer.increaseUses();
+        // Mémorise l'échange pour le joueur en cours (limite par joueur, persistée en NBT).
+        Player player = this.tradingPlayer;
+        if (player == null) {
+            return;
+        }
+        int idx = this.offers.indexOf(offer);
+        if (idx < 0 || idx >= this.offerIds.size()) {
+            return;
+        }
+        String offerId = this.offerIds.get(idx);
+        this.tradeCounts
+                .computeIfAbsent(player.getUUID(), k -> new HashMap<>())
+                .merge(offerId, 1, Integer::sum);
     }
 
     @Override

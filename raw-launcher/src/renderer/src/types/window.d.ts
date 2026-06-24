@@ -104,6 +104,7 @@ interface ShopOffer {
   inputQty: number
   output: string
   outputQty: number
+  maxUses?: number // limite d'échanges par joueur (0/absent = illimité)
   createdAt?: number
   inputIcon?: import('../block-renderer').ItemIconDesc | null
   outputIcon?: import('../block-renderer').ItemIconDesc | null
@@ -114,6 +115,7 @@ type ShopOfferForm = {
   inputQty: number
   output: string
   outputQty: number
+  maxUses: number // limite d'échanges par joueur (0 = illimité)
 }
 
 // Entrée du catalogue d'items (extrait des jars du modpack installé) pour

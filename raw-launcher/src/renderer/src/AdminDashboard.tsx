@@ -44,13 +44,14 @@ interface ShopOfferRow {
   inputQty: number
   output: string
   outputQty: number
+  maxUses?: number
   createdAt?: number
   inputIcon?: ItemIconDesc | null
   outputIcon?: ItemIconDesc | null
 }
 
-interface OfferForm { input: string; inputQty: number; output: string; outputQty: number }
-const EMPTY_OFFER: OfferForm = { input: '', inputQty: 1, output: '', outputQty: 1 }
+interface OfferForm { input: string; inputQty: number; output: string; outputQty: number; maxUses: number }
+const EMPTY_OFFER: OfferForm = { input: '', inputQty: 1, output: '', outputQty: 1, maxUses: 0 }
 
 interface ShopConfigState { currencyName: string; currencyItem: string; currencyIcon: string }
 
@@ -619,7 +620,7 @@ export default function AdminDashboard({
     setEditingOfferId(null); setShowOfferForm(true); setConfirmDeleteOffer(null); setOfferMsg(null)
   }
   const openEditOffer = (o: ShopOfferRow) => {
-    setOfferForm({ input: o.input ?? '', inputQty: o.inputQty ?? 1, output: o.output ?? '', outputQty: o.outputQty ?? 1 })
+    setOfferForm({ input: o.input ?? '', inputQty: o.inputQty ?? 1, output: o.output ?? '', outputQty: o.outputQty ?? 1, maxUses: o.maxUses ?? 0 })
     setEditingOfferId(o.id); setShowOfferForm(true); setConfirmDeleteOffer(null); setOfferMsg(null)
   }
   const cancelOfferForm = () => { setShowOfferForm(false); setEditingOfferId(null); setOfferMsg(null) }
@@ -633,6 +634,7 @@ export default function AdminDashboard({
         inputQty: Math.max(1, Math.floor(offerForm.inputQty) || 1),
         output: offerForm.output.trim(),
         outputQty: Math.max(1, Math.floor(offerForm.outputQty) || 1),
+        maxUses: Math.max(0, Math.floor(offerForm.maxUses) || 0),
       }
       const res = shopCat === 'store'
         ? (editingOfferId
@@ -659,7 +661,7 @@ export default function AdminDashboard({
 
   // Copie une offre à l'identique (pour créer vite une variante).
   const duplicateOffer = async (o: ShopOfferRow) => {
-    const data = { input: o.input, inputQty: o.inputQty, output: o.output, outputQty: o.outputQty }
+    const data = { input: o.input, inputQty: o.inputQty, output: o.output, outputQty: o.outputQty, maxUses: o.maxUses ?? 0 }
     const res = shopCat === 'store'
       ? await window.launcher.createShopStoreOffer(data)
       : await window.launcher.createShopOffer({ date: shopDayKey, ...data })
@@ -676,7 +678,7 @@ export default function AdminDashboard({
     } finally { setLibraryLoading(false) }
   }
   const addFromLibrary = async (o: ShopOfferRow) => {
-    const data = { input: o.input, inputQty: o.inputQty, output: o.output, outputQty: o.outputQty }
+    const data = { input: o.input, inputQty: o.inputQty, output: o.output, outputQty: o.outputQty, maxUses: o.maxUses ?? 0 }
     const res = shopCat === 'store'
       ? await window.launcher.createShopStoreOffer(data)
       : await window.launcher.createShopOffer({ date: shopDayKey, ...data })
@@ -1627,8 +1629,21 @@ export default function AdminDashboard({
                   </div>
                 </div>
 
+                {/* Limite d'échanges par joueur (0 = illimité) */}
+                <div className="flex items-center gap-[10px]">
+                  <p className="font-ui text-[13px] text-white/60 tracking-[-0.3px] shrink-0">Limite par joueur</p>
+                  <div className="w-[116px]">
+                    <QtyInput value={offerForm.maxUses} onChange={n => setOfferForm(f => ({ ...f, maxUses: n }))} min={0} />
+                  </div>
+                  <p className="font-ui text-[12px] text-white/35 tracking-[-0.3px]">
+                    {offerForm.maxUses > 0
+                      ? `${offerForm.maxUses} max par joueur${shopCat === 'store' ? '' : ' / jour'}`
+                      : '0 = illimité'}
+                  </p>
+                </div>
+
                 <p className="font-ui text-[13px] text-white/35 tracking-[-0.3px] leading-snug">
-                  Le joueur donne l'entrée au marchand et reçoit la sortie (phase 2). Les icônes sont automatiques.
+                  Le joueur donne l'entrée au marchand et reçoit la sortie. Les icônes sont automatiques.
                 </p>
 
                 {offerMsg && <p className="font-ui text-[13px] text-[rgba(255,120,120,0.9)]">{offerMsg}</p>}
@@ -1731,6 +1746,12 @@ export default function AdminDashboard({
                         <span className="font-ui text-[13px] text-white/35 truncate">{o.output === shopConfig.currencyItem ? (shopConfig.currencyName || 'monnaie') : o.output.replace(/^minecraft:/, '')}</span>
                       </div>
                     </div>
+
+                    {(o.maxUses ?? 0) > 0 && (
+                      <span className="shrink-0 font-ui text-[11px] font-medium text-[rgba(0,255,225,0.85)] tracking-[-0.2px] px-[8px] h-[22px] inline-flex items-center rounded-full border border-[rgba(0,255,225,0.25)] bg-[rgba(0,255,225,0.08)] whitespace-nowrap" title={`Chaque joueur peut faire cet échange ${o.maxUses} fois${shopCat === 'store' ? '' : ' par jour'}`}>
+                        max {o.maxUses}/joueur
+                      </span>
+                    )}
 
                     {confirmDeleteOffer === o.id ? (
                       <div className="flex gap-[6px] items-center shrink-0">

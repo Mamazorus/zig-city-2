@@ -2003,19 +2003,26 @@ function readShopConfig(raw) {
     : { ...SHOP_DEFAULT_CONFIG }
 }
 
+// Normalise une entrée Firebase {pushId: {…}} en ligne d'offre. `maxUses` = limite
+// d'échanges par joueur (0 = illimité).
+function normalizeShopRow([id, o]) {
+  return {
+    id,
+    input: String(o.input ?? ''),
+    inputQty: Number(o.inputQty) > 0 ? Math.floor(Number(o.inputQty)) : 1,
+    output: String(o.output ?? ''),
+    outputQty: Number(o.outputQty) > 0 ? Math.floor(Number(o.outputQty)) : 1,
+    maxUses: Number(o.maxUses) > 0 ? Math.floor(Number(o.maxUses)) : 0,
+    createdAt: o.createdAt || 0,
+  }
+}
+
 // Offres d'un jour donné (triées par date de création).
 async function fetchShopDay(dayKey) {
   const map = normalizeFbMap(await firebaseRequest('GET', `/shop/days/${dayKey}`, null, false))
   return Object.entries(map)
     .filter(([, o]) => o && typeof o === 'object')
-    .map(([id, o]) => ({
-      id,
-      input: String(o.input ?? ''),
-      inputQty: Number(o.inputQty) > 0 ? Math.floor(Number(o.inputQty)) : 1,
-      output: String(o.output ?? ''),
-      outputQty: Number(o.outputQty) > 0 ? Math.floor(Number(o.outputQty)) : 1,
-      createdAt: o.createdAt || 0,
-    }))
+    .map(normalizeShopRow)
     .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
 }
 
@@ -2025,14 +2032,7 @@ async function fetchShopStore() {
   const map = normalizeFbMap(await firebaseRequest('GET', '/shop/store', null, false))
   return Object.entries(map)
     .filter(([, o]) => o && typeof o === 'object')
-    .map(([id, o]) => ({
-      id,
-      input: String(o.input ?? ''),
-      inputQty: Number(o.inputQty) > 0 ? Math.floor(Number(o.inputQty)) : 1,
-      output: String(o.output ?? ''),
-      outputQty: Number(o.outputQty) > 0 ? Math.floor(Number(o.outputQty)) : 1,
-      createdAt: o.createdAt || 0,
-    }))
+    .map(normalizeShopRow)
     .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
 }
 
@@ -2079,14 +2079,7 @@ async function fetchShopLibrary() {
   const map = normalizeFbMap(await firebaseRequest('GET', '/shop/library', null, false))
   return Object.entries(map)
     .filter(([, o]) => o && typeof o === 'object')
-    .map(([id, o]) => ({
-      id,
-      input: String(o.input ?? ''),
-      inputQty: Number(o.inputQty) > 0 ? Math.floor(Number(o.inputQty)) : 1,
-      output: String(o.output ?? ''),
-      outputQty: Number(o.outputQty) > 0 ? Math.floor(Number(o.outputQty)) : 1,
-      createdAt: o.createdAt || 0,
-    }))
+    .map(normalizeShopRow)
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
 }
 async function addToLibraryDedup(offer) {
@@ -2106,6 +2099,9 @@ function sanitizeShopOffer(input) {
     inputQty: qty(o.inputQty),
     output: String(o.output ?? '').trim().slice(0, 120),
     outputQty: qty(o.outputQty),
+    // Limite d'échanges par joueur (0 = illimité). Shop du jour : repart à zéro chaque
+    // jour (les offres changent d'identifiant) ; boutique : limite à vie de l'offre.
+    maxUses: Number.isFinite(+o.maxUses) && +o.maxUses > 0 ? Math.min(Math.floor(+o.maxUses), 9999) : 0,
   }
 }
 
