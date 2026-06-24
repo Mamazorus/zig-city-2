@@ -8,6 +8,7 @@ import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent;
 
 import org.slf4j.Logger;
 
@@ -23,9 +24,15 @@ public class ZigShop {
 
     public ZigShop(IEventBus modEventBus, ModContainer modContainer) {
         LOGGER.info("[ZigShop] Chargement du mod (modid={})", MODID);
-        // RegisterCommandsEvent est diffusé sur le bus de JEU (NeoForge.EVENT_BUS),
-        // pas sur le bus du mod.
+        // Registres sur le bus du MOD.
+        ModEntities.ENTITIES.register(modEventBus);
+        modEventBus.addListener(this::onRegisterAttributes);
+        // RegisterCommandsEvent est diffusé sur le bus de JEU (NeoForge.EVENT_BUS).
         NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
+    }
+
+    private void onRegisterAttributes(EntityAttributeCreationEvent event) {
+        event.put(ModEntities.MERCHANT.get(), MerchantEntity.createAttributes().build());
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {
