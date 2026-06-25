@@ -629,7 +629,7 @@
     },
     {
       "name": "zigshop-0.1.10.jar",
-      "url": "https://github.com/Mamazorus/zig-city-2/releases/download/zigshop-v0.1.10/zigshop-0.1.10.jar"
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/zigshop-0.1.10.jar"
     }
   ]
 }
