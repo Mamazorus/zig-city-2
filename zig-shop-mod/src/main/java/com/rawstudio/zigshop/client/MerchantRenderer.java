@@ -1,6 +1,7 @@
 package com.rawstudio.zigshop.client;
 
 import com.rawstudio.zigshop.MerchantEntity;
+import com.rawstudio.zigshop.MerchantSkins;
 
 import net.minecraft.client.model.PlayerModel;
 import net.minecraft.client.model.geom.ModelLayers;
@@ -9,13 +10,14 @@ import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
 import net.minecraft.resources.ResourceLocation;
 
 /**
- * Rendu du marchand. Pour la phase 2 on réutilise le modèle JOUEUR vanilla et la
- * texture par défaut (Steve) — aucun modèle/texture custom à créer. L'apparence
- * sera peaufinée plus tard (texture dédiée, accessoires…).
+ * Rendu du marchand : modèle JOUEUR vanilla + skin choisi par PNJ. Le skin provient des
+ * textures embarquées du mod (voir {@link MerchantSkins}, dossier
+ * {@code assets/zigshop/textures/entity/}) ; à défaut (nom vide ou inconnu) on retombe sur
+ * le Steve vanilla.
  */
 public class MerchantRenderer extends HumanoidMobRenderer<MerchantEntity, PlayerModel<MerchantEntity>> {
 
-    private static final ResourceLocation TEXTURE =
+    private static final ResourceLocation STEVE =
             ResourceLocation.withDefaultNamespace("textures/entity/player/wide/steve.png");
 
     public MerchantRenderer(EntityRendererProvider.Context context) {
@@ -24,6 +26,7 @@ public class MerchantRenderer extends HumanoidMobRenderer<MerchantEntity, Player
 
     @Override
     public ResourceLocation getTextureLocation(MerchantEntity entity) {
-        return TEXTURE;
+        ResourceLocation custom = MerchantSkins.texture(entity.getSkin());
+        return custom != null ? custom : STEVE;
     }
 }

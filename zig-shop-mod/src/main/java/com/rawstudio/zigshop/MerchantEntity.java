@@ -3,12 +3,17 @@ package com.rawstudio.zigshop;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.EntityDataSerializers;
+import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.PathfinderMob;
@@ -42,9 +47,16 @@ import java.util.UUID;
  * chaque jour, la limite y repart à zéro chaque jour ; en boutique (identifiants
  * fixes) c'est une limite à vie. Limite atteinte ⇒ l'offre apparaît grisée (rupture).
  *
- * <p>NoAI + invulnérable + persistant : ne bouge pas, ne meurt pas, ne despawn pas.
+ * <p>NoAI + persistant : ne bouge pas, ne despawn pas. Indestructible en survie (aucun
+ * dégât ordinaire ne passe) ; un joueur en créatif le supprime d'un seul coup (clic
+ * gauche), ce qui sert à replacer/retirer les PNJ pendant le build. Voir {@link #hurt}.
  */
 public class MerchantEntity extends PathfinderMob implements Merchant {
+
+    /** Nom du skin embarqué de ce PNJ ("" = skin par défaut) ; voir {@link MerchantSkins}.
+     *  Synchronisé client↔serveur (le rendu est côté client) et persisté en NBT. */
+    private static final EntityDataAccessor<String> DATA_SKIN =
+            SynchedEntityData.defineId(MerchantEntity.class, EntityDataSerializers.STRING);
 
     @Nullable
     private Player tradingPlayer;
@@ -64,14 +76,21 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
         super(type, level);
         this.setPersistenceRequired();
         this.setNoAi(true);
-        this.setInvulnerable(true);
         this.setSilent(true);
+        // Pas de setInvulnerable(true) : l'invulnérabilité est gérée dans hurt() pour
+        // rester destructible par un joueur en créatif. Voir hurt().
     }
 
     public static AttributeSupplier.Builder createAttributes() {
         return Mob.createMobAttributes()
                 .add(Attributes.MAX_HEALTH, 20.0)
                 .add(Attributes.MOVEMENT_SPEED, 0.0);
+    }
+
+    @Override
+    protected void defineSynchedData(SynchedEntityData.Builder builder) {
+        super.defineSynchedData(builder);
+        builder.define(DATA_SKIN, "");
     }
 
     @Override
@@ -89,15 +108,47 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
         return false;
     }
 
+    /**
+     * Indestructible en survie : aucun dégât ordinaire ne passe. Exception 1 : un joueur
+     * en mode créatif le supprime d'un seul coup (pratique pour replacer/retirer les PNJ
+     * en build). Exception 2 : les dégâts qui ignorent l'invulnérabilité ({@code /kill},
+     * le vide…) restent applicables pour l'administration.
+     */
+    @Override
+    public boolean hurt(DamageSource source, float amount) {
+        if (source.is(DamageTypeTags.BYPASSES_INVULNERABILITY)) {
+            return super.hurt(source, amount);
+        }
+        if (source.getEntity() instanceof Player player && player.getAbilities().instabuild) {
+            if (!this.level().isClientSide) {
+                this.discard();
+            }
+            return true;
+        }
+        return false;
+    }
+
     /** Définit la source ("daily" ou "store"). Appelé à la création via la commande. */
     public void setShopKind(String kind) {
         this.shopKind = ("store".equals(kind) || "race".equals(kind) || "quest".equals(kind)) ? kind : "daily";
+    }
+
+    /** Skin embarqué de ce PNJ ("" = défaut). Voir {@link MerchantSkins}. */
+    public String getSkin() {
+        return this.entityData.get(DATA_SKIN);
+    }
+
+    /** Applique un skin embarqué ; null/"" ⇒ skin par défaut. La validation du nom (qu'il
+     *  existe vraiment) revient à l'appelant (commande) via {@link MerchantSkins#exists}. */
+    public void setSkin(String name) {
+        this.entityData.set(DATA_SKIN, name == null ? "" : name);
     }
 
     @Override
     public void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
         tag.putString("ShopKind", this.shopKind);
+        tag.putString("Skin", this.getSkin());
         // Compteurs d'échanges par joueur : { <uuid>: { <offerId>: count } }.
         CompoundTag counts = new CompoundTag();
         for (Map.Entry<UUID, Map<String, Integer>> byPlayer : this.tradeCounts.entrySet()) {
@@ -126,7 +177,13 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
     public void readAdditionalSaveData(CompoundTag tag) {
         super.readAdditionalSaveData(tag);
         if (tag.contains("ShopKind")) {
-            this.shopKind = "store".equals(tag.getString("ShopKind")) ? "store" : "daily";
+            // setShopKind valide tous les types (daily/store/race/quest). Bug historique :
+            // l'ancienne lecture ne reconnaissait que "store", donc un PNJ race ou quest
+            // redevenait "daily" (shop du jour) après un rechargement du monde.
+            this.setShopKind(tag.getString("ShopKind"));
+        }
+        if (tag.contains("Skin")) {
+            this.setSkin(tag.getString("Skin"));
         }
         this.tradeCounts.clear();
         if (tag.contains("TradeCounts")) {
