@@ -30,9 +30,10 @@ public final class MerchantSkins {
      * deux côtés DOIVENT partager cette liste, d'où la classe commune (pas client-only).
      */
     public static final List<String> NAMES = List.of(
-            // Aucun skin embarqué pour l'instant — dépose tes PNG dans
-            // assets/zigshop/textures/entity/ puis liste leurs noms ici, ex :
-            //   "garde", "marchand_robe", "banquier"
+            "charlie-kirk",
+            "un-vendeur-de-tacos",
+            "vendeur",
+            "zebre"
     );
 
     /** Vrai si {@code name} correspond à un skin embarqué connu. */
