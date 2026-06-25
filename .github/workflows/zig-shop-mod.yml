@@ -1,9 +1,13 @@
 name: Build Zig Shop mod
 
 # Compile le mod NeoForge et publie le .jar en artefact téléchargeable.
-# Se déclenche sur tout push touchant le mod, et manuellement.
+# Se déclenche sur les push de la branche main touchant le mod, et manuellement.
+# (branches: main -> évite que les tags de release du launcher le redéclenchent ;
+#  les filtres paths ne s'appliquent pas aux tags.)
 on:
   push:
+    branches:
+      - main
     paths:
       - 'zig-shop-mod/**'
       - '.github/workflows/zig-shop-mod.yml'

@@ -1,9 +1,13 @@
 name: Build Police mod
 
 # Compile le mod NeoForge "policemod" et publie le .jar.
-# Se déclenche sur tout push touchant le mod, et manuellement.
+# Se déclenche sur les push de la branche main touchant le mod, et manuellement.
+# (branches: main -> évite que les tags de release du launcher le redéclenchent ;
+#  les filtres paths ne s'appliquent pas aux tags.)
 on:
   push:
+    branches:
+      - main
     paths:
       - 'policemod/**'
       - '.github/workflows/policemod.yml'
