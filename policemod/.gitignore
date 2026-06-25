@@ -1,0 +1,14 @@
+# Gradle / build
+.gradle/
+build/
+repo/
+
+# Environnements de run (dev local)
+run/
+runs/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+eclipse/

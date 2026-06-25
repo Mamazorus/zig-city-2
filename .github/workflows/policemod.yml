@@ -1,0 +1,67 @@
+name: Build Police mod
+
+# Compile le mod NeoForge "policemod" et publie le .jar.
+# Se déclenche sur tout push touchant le mod, et manuellement.
+on:
+  push:
+    paths:
+      - 'policemod/**'
+      - '.github/workflows/policemod.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # NeoGradle userdev 7.0.x -> Gradle 8.8 (version du wrapper du projet).
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.8'
+
+      - name: Build
+        working-directory: policemod
+        run: gradle build --no-daemon --stacktrace
+
+      - name: Publier le .jar (artefact, filet de secours)
+        uses: actions/upload-artifact@v4
+        with:
+          name: policemod-jar
+          path: policemod/build/libs/policemod-*.jar
+          if-no-files-found: error
+
+      # Dépose le .jar buildé sur la branche mod-jars (raw), d'où le launcher le télécharge
+      # (cf. raw-launcher/modpack.json). On AJOUTE le jar versionné (on garde les anciens).
+      # Seulement sur main : les pushes de branches/PR ne publient pas.
+      - name: Déposer le .jar sur la branche mod-jars
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          JAR=$(ls policemod/build/libs/policemod-*.jar | grep -v -- '-sources' | head -1)
+          test -n "$JAR" || { echo "::error::jar introuvable dans build/libs"; exit 1; }
+          NAME=$(basename "$JAR")
+          echo "Dépôt de $NAME sur mod-jars"
+          cp "$JAR" "$RUNNER_TEMP/$NAME"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin mod-jars:mod-jars
+          git checkout mod-jars
+          cp "$RUNNER_TEMP/$NAME" "./$NAME"
+          git add "$NAME"
+          if git diff --cached --quiet; then
+            echo "Aucun changement ($NAME déjà présent) — rien à pousser."
+          else
+            git commit -m "build: $NAME (CI)"
+            git push origin mod-jars
+          fi
