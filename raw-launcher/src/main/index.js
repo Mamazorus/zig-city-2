@@ -1054,6 +1054,30 @@ ipcMain.handle('export-skin', async (_, { dataUrl, name } = {}) => {
 })
 
 // ─── IPC : MODPACK ───────────────────────────────────────────────────────────
+// Vérifie qu'un .jar est un ZIP complet : présence de la signature de fin d'archive
+// (EOCD « PK\x05\x06 ») dans les derniers octets. Un téléchargement tronqué (coupure
+// réseau) ne l'a pas -> on considère le jar corrompu. Lecture de la seule fin du
+// fichier : rapide et sans charger le jar en mémoire.
+function isJarIntact(filePath) {
+  let fd
+  try {
+    fd = fs.openSync(filePath, 'r')
+    const size = fs.fstatSync(fd).size
+    if (size < 22) return false
+    const readLen = Math.min(size, 65557) // 22 (EOCD) + 65535 (commentaire ZIP max)
+    const buf = Buffer.alloc(readLen)
+    fs.readSync(fd, buf, 0, readLen, size - readLen)
+    for (let i = buf.length - 22; i >= 0; i--) {
+      if (buf[i] === 0x50 && buf[i + 1] === 0x4b && buf[i + 2] === 0x05 && buf[i + 3] === 0x06) return true
+    }
+    return false
+  } catch (e) {
+    return false
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd) } catch (e) { /* rien */ } }
+  }
+}
+
 ipcMain.handle('check-modpack', async () => {
   const modsDir = path.join(GAME_DIR, 'mods')
   fs.mkdirSync(modsDir, { recursive: true })
@@ -1069,6 +1093,19 @@ ipcMain.handle('check-modpack', async () => {
       fs.unlinkSync(fullPath)
     } catch (e) {
       console.log(`[RawLauncher] Impossible de supprimer ${file} :`, e.message)
+    }
+  }
+
+  // Intégrité : un mod attendu mais corrompu/tronqué (ex. téléchargement coupé sur une
+  // install antérieure au correctif downloadFile) est supprimé ici -> il repasse en
+  // « manquant » et sera re-téléchargé proprement, sans aucune manip du joueur.
+  for (const mod of MODPACK.mods) {
+    const p = path.join(modsDir, mod.name)
+    if (fs.existsSync(p) && !isJarIntact(p)) {
+      try {
+        fs.unlinkSync(p)
+        console.log(`[RawLauncher] Mod corrompu supprimé (re-téléchargement) : ${mod.name}`)
+      } catch (e) { /* rien */ }
     }
   }
 
