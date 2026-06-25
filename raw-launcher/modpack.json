@@ -3,7 +3,7 @@
   "packName": "ZIG CITY 2",
   "minecraft": "1.21.1",
   "loader": "neoforge",
-  "loaderVersion": "21.1.143",
+  "loaderVersion": "21.1.228",
   "maxRam": 10,
   "minRam": 4,
   "server": "109.239.153.124",
@@ -11,7 +11,11 @@
   "configs": [
     {
       "path": "config/simplehats.json5",
-      "merge": { "COMMON": { "allowHatInHelmetSlot": true } }
+      "merge": {
+        "COMMON": {
+          "allowHatInHelmetSlot": true
+        }
+      }
     },
     {
       "path": "config/fancymenu/options.txt",
@@ -25,607 +29,783 @@
   "mods": [
     {
       "name": "[1.21.1] SecurityCraft v1.9.12.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1xaONqyWHQ4-6ox3imJUcKSv_S3LWFFgb&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1ts1_eqnzKZzliORB1zw463Y_g2YcHjRH&export=download&confirm=t"
     },
     {
       "name": "accessories_cclayer-9.3.1-beta.28+1.21.1-neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1zDjnvMW7D91BzbMmbRE-gJQtaB-En_3g&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1036FD-A0QMh4gOigAEo6lbzG_fLcGJYg&export=download&confirm=t"
     },
     {
       "name": "accessories-neoforge-1.1.0-beta.42+1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1pyw5zBtcRmqiM9Q-eqQYjw5GParTOYCU&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1CGhAmPxZY-ASbF4wUABzuceyN1kBQw58&export=download&confirm=t"
     },
     {
       "name": "additional_lights-neoforge-1.21-2.1.9.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1XYoBeKdtyI8jzJVTr4PA-KsS9e2QnDN-&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1t9gpTemH73DrJPvOUORswCJUFv-kELMn&export=download&confirm=t"
+    },
+    {
+      "name": "AmbientSounds_NEOFORGE_v6.3.8_mc1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=10uXSX5V3sin0UER8E5n1c-PpshXZuonI&export=download&confirm=t"
     },
     {
       "name": "amendments-1.21-1.2.24-neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1oFtNUCcZISGNHNd33SYr8_O5PcBUE9kS&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1OrJDCgOrWvhvfT7SWed1VwOsigHJ4KMn&export=download&confirm=t"
+    },
+    {
+      "name": "ancientstructures-neoforge-1.21.1-0.1.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1zdWj4DpQrnNgA5c7IoYBaRCSupGFp-Tr&export=download&confirm=t"
     },
     {
       "name": "architectury-13.0.8-neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1NvogQ0wqCIFlQm6-hlgqZ85eEvE-_SMP&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1RE68P7UnmUNRhGxDHlNxTe_cxHk8-3Dz&export=download&confirm=t"
+    },
+    {
+      "name": "armoroftheages-neoforge-1.21.1-1.5.10.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1cWQCjohdDtLQMmqx6aAHUEtpYoN--D5J&export=download&confirm=t"
     },
     {
       "name": "armourersworkshop-forge-1.21.1-3.2.0-beta.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1g-q3nojS4NnCDUvzHGlER-PyZtovdEJ8&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1A0DNNTjohcuLmSn6TwaDCaYvMJXXFsEr&export=download&confirm=t"
+    },
+    {
+      "name": "astral_dimension-neoforge-1.21.1-2.2.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1K5ydoNtw0wbfumgz54VVvNW3EXt-l_jP&export=download&confirm=t"
     },
     {
       "name": "athena-neoforge-1.21-4.0.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1leWPrB_YPPiVyrN4uqaDfKVCrpMjYbOw&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1pgHDTcGSGee3y-A-T2fPwA377LWoPy77&export=download&confirm=t"
     },
     {
       "name": "ATi Structures V1.4.2 (1.21+).jar",
-      "url": "https://drive.usercontent.google.com/download?id=1NfPrb23lc-jIGNQmAjp7rNjmVAnSuEbh&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1TFvlnp-qwz06N3ZYLuZ8t_v2RrfoG9Zq&export=download&confirm=t"
     },
     {
       "name": "automobility-0.5.0.c+1.21.1-neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1FUpoDZuesS8NK9HCJ3X5UoXCS3JzizA6&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1BOEbFrznchQZNMCGVuWL9Y8kHdL9Zsrl&export=download&confirm=t"
     },
     {
-      "name": "Axiom-4.8.0-for-MC1.21.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1uga_iy6WTgtpw2dLPqKCtjwnXsIzKDwA&export=download&confirm=t"
+      "name": "Axiom-5.4.2-for-MC1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1A6wx7whe9pXKtd_NXUVjGxuYQl8B8kYw&export=download&confirm=t"
     },
     {
-      "name": "balm-neoforge-1.21.1-21.0.31.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1_nysdCRGwfGp82m5mE0OmHZpm9ELC7h_&export=download&confirm=t"
+      "name": "balm-neoforge-1.21.1-21.0.59.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1VPdeao-YufB8xXsQ0FiWNfJ3en-UT6BJ&export=download&confirm=t"
+    },
+    {
+      "name": "BetterF3-11.0.3-NeoForge-1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1daJYCaRaIVpUHdbHR3--j7TGYAwiNxPf&export=download&confirm=t"
     },
     {
       "name": "bibliocraft-1.21.1-1.4.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1y6Pb3NZLDmpE09E7XEQrX2hCt-s8wlDJ&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1NDcSko2rKkD5vCYZGgSWM5WIZUmxpdKb&export=download&confirm=t"
+    },
+    {
+      "name": "block_factorys_bosses-2.1.2-neo-1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1Srm3B2FTzGCkC3e_PUcWzijcXjSuLMa7&export=download&confirm=t"
     },
     {
       "name": "blockui-1.0.199-1.21.1-snapshot.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1thTZ46P_sZL9LtnHcYnaLKE2TQ2hBeMm&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1U_DvNmtoXo3TPAGr89wkprBtwlFLfPk_&export=download&confirm=t"
     },
     {
       "name": "burgermod-neoforge-2.10.1-1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1eGt04YfQS5OivkVoxor9HofgnR-ZLs41&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1Gyk4mcPVFnVF4B4i4AJxQMTANMkoCQlv&export=download&confirm=t"
     },
     {
       "name": "butcher-3.1-neoforge-1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1dI8ba3kpjX1AUr9KnRPYf8xpIog1bkxM&export=download&confirm=t"
-    },
-    {
-      "name": "c2me-neoforge-mc1.21.1-0.3.0+alpha.0.63.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1gMgrQORL5TzfJpwBExCYLUdJY2dersWl&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1L8eeYjROHsECOFjHjb1UuZsut9NB-Bvz&export=download&confirm=t"
     },
     {
       "name": "camera-neoforge-1.21.1-1.0.19.jar",
-      "url": "https://drive.usercontent.google.com/download?id=19aGO01kIj4pBBMPAMDfoL_sk6E4MMxSr&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1qzJ_M2-w0R9AYPC7iPZGBE3SGiOp2ixQ&export=download&confirm=t"
     },
     {
       "name": "chipped-neoforge-1.21.1-4.0.2.jar",
-      "url": "https://drive.usercontent.google.com/download?id=17SvZo3pWBcmYaHAelO6y_bq_-KOJcxwo&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1lVVL9g8k8HXYRglSCcC38PE_fXyuBWjH&export=download&confirm=t"
     },
     {
       "name": "choccos_mobs-0.1.3-neoforge-1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1uRl0UrJ6Zpe5kZxlcdkaHmR_eGcaNvam&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1iuRzpf8AugZfqnDoOtJN-qbpz0HU2B46&export=download&confirm=t"
     },
     {
       "name": "cloth-config-15.0.140-neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=10qQLYtWUr1SXJZpuiM04gnZ2KdnNmyCl&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1CIx0XUZzPqU8esSx9MDHzA612xzsIqz0&export=download&confirm=t"
     },
     {
-      "name": "connector-2.0.0-beta.7+1.21.1-full.jar",
-      "url": "https://drive.usercontent.google.com/download?id=19WefD2NN_bSrl5Lbm32ctZ1szL1lo1Cp&export=download&confirm=t"
+      "name": "coastercart-1.0.2.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1Ym-QzVgVtOqZLL76MFnIObHff68pdYF-&export=download&confirm=t"
+    },
+    {
+      "name": "common-networking-neoforge-1.0.21-1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1AMQrvmUYbtsvoyWRk9Gf330pHe8254AW&export=download&confirm=t"
+    },
+    {
+      "name": "connector-2.0.0-beta.14+1.21.1-full.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1zFO9GeE0gkPT0JEK9h6zX4iN5oo0xmAd&export=download&confirm=t"
     },
     {
       "name": "ConnectorExtras-1.12.1+1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1aUNzmpDOb5mabfL0sPllPW7uZeRDAYQd&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1KfgsAAj0ILNrxl6FGWCeO_ogQ21rl3i2&export=download&confirm=t"
     },
     {
       "name": "corail_woodcutter-neoforge-1.21.1-3.4.2.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1kJaNL5QXW4eggTmmhemN4x8kJULD2Baj&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1J53y0SoslvzwQK85xWpLp788O6CrviLx&export=download&confirm=t"
     },
     {
       "name": "corpse-neoforge-1.21.1-1.1.5.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1U8iQmcUTvOayUoFOvEsa7e3bmSw1Bqof&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1ENHNjjAgZi8h_51NoEUyruF8oz5MTT56&export=download&confirm=t"
     },
     {
       "name": "cosmeticarmorreworked-1.21.1-v1-neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1zkEbneukpybCvwnU5tyOnmawkNfu6GgE&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1O8BhFbQtxwPuwPzbUEOUYNXkvXin1GMF&export=download&confirm=t"
     },
     {
       "name": "craftedcore-5.8.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1VByVSEQtBqrv05IuEpeYQtiBa_A23-M3&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1rzO4Cbz4omCOHqWVO-eY6rUNXMrG26NU&export=download&confirm=t"
     },
     {
       "name": "CraftTweaker-neoforge-1.21.1-21.0.27.jar",
-      "url": "https://drive.usercontent.google.com/download?id=14p0avBHI6tGp1OzAh7Imtqq-xSOeGCos&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1d0gXfjAdBl9jwe5Z6lrdzs4pZraSrnKu&export=download&confirm=t"
     },
     {
       "name": "crazythings-1.1.1-neoforge-1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1xDmhO25vZYM27gK3X465a-EXXC1TQ2ug&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1U6WC4BkIBvqt2Ldb3vpTrK2cHRcyACkY&export=download&confirm=t"
     },
     {
-      "name": "create-1.21.1-6.0.2.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1vG5qQDLnG_VfsTblCfu20CpqXGCX5Rhu&export=download&confirm=t"
+      "name": "create-1.21.1-6.0.10.jar",
+      "url": "https://drive.usercontent.google.com/download?id=18pJLsJE-eVPQRwp24F2yZ9gW2r3tKJh7&export=download&confirm=t"
+    },
+    {
+      "name": "create-aeronautics-bundled-1.21.1-1.2.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1qkpSYeemDOnPHeNWwHJyIe5_uuDA9-MS&export=download&confirm=t"
     },
     {
       "name": "create-stuff-additions1.21.1_v2.1.0e.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1JdWm-cd8Pc9jKeFluRZpWtIX8SmCFjXo&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1d2hvwGo3dqVRHGcmmA0hpo9nOD2oPXdh&export=download&confirm=t"
     },
     {
-      "name": "CreativeCore_NEOFORGE_v2.13.6_mc1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1TsM7MIsWEZ9mFkxJvSMR2U4OJvinnWWv&export=download&confirm=t"
+      "name": "CreativeCore_NEOFORGE_v2.13.41_mc1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1RK8sbTbTiKLLgHbPTW789lA_Gg_Beuup&export=download&confirm=t"
     },
     {
       "name": "CreeperOverhaul-neoforge-1.21.1-4.0.6.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1XpmDCrZQhRYA7UsAXsBMCU-TmkKLy83V&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1FOgvSG5toZMsjZzM-RAG_cIBzh9L328e&export=download&confirm=t"
+    },
+    {
+      "name": "crittersandcompanions-neoforge-1.21.1-2.3.4.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1SfZMMLXmhGUt3503xKTOEyZiqV9SJtgf&export=download&confirm=t"
     },
     {
       "name": "CTM-1.21-1.2.1+3.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1PQ-x8BGj2stxR2bjbw6IA-SL9qhRdTQ_&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1ATnJg2Xyrgbd5cJ46cFRoIJ2pIWLbsCL&export=download&confirm=t"
     },
     {
       "name": "cupboard-1.21-2.9.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1T5Kqj0Yzpw4-8rJQP3vCVoO01NH0BEDs&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1B6J21U8rcavVBhUiHShs6Ii-r64K_r4u&export=download&confirm=t"
     },
     {
       "name": "CustomNPCs-Unofficial-NeoForge-1.21.1.20241226.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1_NMj_oB_r8IXm8lV03jhm_onSFkbcXca&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1UwJ0f8tvxMaAJYx63J1IQf9WB7SQqDIT&export=download&confirm=t"
+    },
+    {
+      "name": "dawnoftimebuilder-neoforge-1.21.1-1.6.6.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1S770XbLgYKLLjWu8tVTC_DOk1l4lhdPL&export=download&confirm=t"
+    },
+    {
+      "name": "decocraft-3.0.11-1.21.1-neoforge.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1ymR2gzrEYydjdVSz0f2dXH3WVtrksTO9&export=download&confirm=t"
+    },
+    {
+      "name": "deeperdarker-neoforge-1.21.1-1.4.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1A8CVwcZP06KCTEm4uqLCmfAfIJQipxoJ&export=download&confirm=t"
+    },
+    {
+      "name": "displaydelight-1.7.0.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1AVPiXIx6BuO1qNBKkViy6xHUr9OwtROE&export=download&confirm=t"
     },
     {
       "name": "domum-ornamentum-1.0.213-snapshot-main.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1kZxAITID2vGmaSfkH31-RO9BP4QxYMfb&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1FWesphBrcpyPaby-2CKcf08gHEvu6w1Q&export=download&confirm=t"
     },
     {
       "name": "downwithdestruction-neoforge-1.21-1.21.0.2.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1NLvBaUN_ajLAZaD8AXcJ_zHWfWmmMf5H&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1uEGXh7O_tO0CoHDWmENzg-K0xmf3AVS9&export=download&confirm=t"
     },
     {
       "name": "DungeonCrawl-NeoForge-1.21-2.3.15.jar",
-      "url": "https://drive.usercontent.google.com/download?id=12m7VWT7mA3AtUOcfCI0lFQJ0gzgeWni6&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1IJEO473qLl4S1kAT61g-uZyktXJJeyrh&export=download&confirm=t"
     },
     {
       "name": "DungeonsArise-1.21.x-2.1.64-release.jar",
-      "url": "https://drive.usercontent.google.com/download?id=19YyXj9bN-NBVHPlIQpNMupOiJzScKLHO&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1gGiC8a6TZIpk65p-U7DFKf26OHiGY0h_&export=download&confirm=t"
+    },
+    {
+      "name": "DustyDecorations_1.21.1Neoforge_V1.13.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1ap_QqbECgApGZ9arYWQ5vnEzIUZvazDM&export=download&confirm=t"
+    },
+    {
+      "name": "ecologics-1.21.1-2.3.6.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1ErT08ZrUBI3o-xTu5bfGo9-osxoyhInQ&export=download&confirm=t"
     },
     {
       "name": "EdivadLib-1.21-3.0.0.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1MPsNVe91-IF74Q34YE_599Zo_2jPXpu0&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1A81R7HZvv9NrH2xFkLDOaOfuk3ceSSdo&export=download&confirm=t"
     },
     {
       "name": "emotecraft-for-MC1.21.1-2.4.9-neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1fgS4bOHgwx-qcvhtc-JdimZ8MWOD0DUY&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=14dN-I67cDs9MZDkpwUNyDpK8K2D5DxBk&export=download&confirm=t"
     },
     {
       "name": "endermanoverhaul-neoforge-1.21.1-2.0.2.jar",
-      "url": "https://drive.usercontent.google.com/download?id=13R2tkUYUQ90f4fe6uqd6fxaO8D0_aQjY&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=10znnGXJw1bYVu1212QGOuBJtHTtlvf90&export=download&confirm=t"
+    },
+    {
+      "name": "envelope-neoforge-1.21.1-0.6.2.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1VJAgFGNymdpKSn4gFlE6mOYpYJQTgcR6&export=download&confirm=t"
     },
     {
       "name": "etched-4.0.0.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1GHBwpFzq_I3IW4RklaaeuN-1VeUqwld5&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=18asipmfhom5nhs_oelD63SSDpcupiUoc&export=download&confirm=t"
+    },
+    {
+      "name": "evil_stone_golem-merged-1.21.1-1.0.0.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1GpEVGXUgOLVO6raGatsOKe4bmGSwWouB&export=download&confirm=t"
+    },
+    {
+      "name": "exposure_catalog-neoforge-1.1.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1Lp4P-zksYxwi0nEEUtVErU7rvoDoW9zY&export=download&confirm=t"
+    },
+    {
+      "name": "exposure_polaroid-neoforge-1.21.1-1.1.5.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1QsfO2tyPN5rcEvxL3MFW9d6F95WvapMs&export=download&confirm=t"
+    },
+    {
+      "name": "exposure-neoforge-1.21.1-1.9.18.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1cR3kzV16T6aL_gH9YwKvrNgnzYZorv47&export=download&confirm=t"
     },
     {
       "name": "ExtraStorage-1.21.1-5.0.2.jar",
-      "url": "https://drive.usercontent.google.com/download?id=11KEaTrDVsYuNsvMeTeWHU12Oo0n2xi2L&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1bBIhkktgEZw6pM8J7Jg8bkt9P4FusDjn&export=download&confirm=t"
+    },
+    {
+      "name": "FallingTree-1.21.1-1.21.1.11.jar",
+      "url": "https://drive.usercontent.google.com/download?id=16bywTcXuTQlX2gkeYWgDHIDkQXuBT-ev&export=download&confirm=t"
     },
     {
       "name": "fancymenu_neoforge_3.4.6_MC_1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1F7Eav5VZqqnR5VRW5TmCNI1ZGgBiBVBw&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1gStXqzs_hdLViGmy-wncpsWFBfa5myVv&export=download&confirm=t"
+    },
+    {
+      "name": "FarmersDelight-1.21.1-1.3.2.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1LCJceOXRCe1fC8daaESrkQo8i6dzFXXk&export=download&confirm=t"
     },
     {
       "name": "farsight-1.21-3.8.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1kAnn27VsUdxrGH1W9RbkIrmQe-nanci8&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1gzg6cmRABRpWqDSb-Mhw6s5Q8sbvlTY_&export=download&confirm=t"
     },
     {
       "name": "ferritecore-7.0.2-neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1oEY5CjpVXyuXCUPZh3v6iMUMiWYnVgG2&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1q4IJH6JEEKC3MV-pxznKp7CdTC7HKvd6&export=download&confirm=t"
+    },
+    {
+      "name": "feur_extension_desert-1.21.1-neoforge.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1_LDdxf2ipkxg99UIl9W0_LHcWXeqXLh1&export=download&confirm=t"
     },
     {
       "name": "figura-0.1.5+1.21.1-neoforge-mc.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1RmS9JokmUhcCXXpz0o7UdHa0L5P_LOJq&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1tltl5w05SSRCBwHTzf-Y8gd5RHQjNhVD&export=download&confirm=t"
     },
     {
       "name": "ForgeConfigAPIPort-v21.1.3-1.21.1-NeoForge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1TxCEK7QacXTYSLBawlB60qevbWuXfkes&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1HGkzQpVaqRktpHakXEtySxjnIXAw9PZV&export=download&confirm=t"
     },
     {
-      "name": "forgified-fabric-api-0.107.0+2.0.25+1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1Gvy_jQ19XmfnMVSOn-4GoIOJjUIGRHt0&export=download&confirm=t"
+      "name": "forgified-fabric-api-0.116.7+2.2.4+1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1-ZqribDPyfSYYFeQzwGsH6gvli6keKx7&export=download&confirm=t"
     },
     {
       "name": "FramedBlocks-10.3.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1W2ENNAWZme4VjVgdUo2KqrP4cMOn7LC_&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1c3LsGQG2bFoZp2uEqIT3tehgogP6y9jE&export=download&confirm=t"
     },
     {
       "name": "framework-neoforge-1.21.1-0.9.6.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1eOVzjPFzQ-FF7xdUsZt01NfdveN1BKA_&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1bKlf8sKsMNciJTQfVN9vDge_Vi7BPMTW&export=download&confirm=t"
     },
     {
-      "name": "geckolib-neoforge-1.21.1-4.7.5.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=16c0kZURj09kn3SiowO6zy6bCE7NP8t_4&export=download&confirm=t"
+      "name": "fzzy_config-0.7.6+1.21+neoforge.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1xvuBLzwuW_bsL5X-fBrhGJfAm5ZQE8Xa&export=download&confirm=t"
+    },
+    {
+      "name": "geckolib-neoforge-1.21.1-4.9.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1V7gps14RGWcsI1_NrRQGC4Bl0Illk9Gz&export=download&confirm=t"
     },
     {
       "name": "GlitchCore-neoforge-1.21.1-2.1.0.0.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1Aq01VJ0aicyBrA7daGoPFmXno70bmRIf&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=10AADWQ5DviDFWpDBKoJqyMlDiLZfCkyO&export=download&confirm=t"
     },
     {
       "name": "goatduloat-2.2.2-neoforge-1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1GtOLo6b0f21w-JoIBhXVR6B38-qSW1W8&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1-M6GUJT8_ac37ZwQS-cVAlJfTZ7ftI4e&export=download&confirm=t"
     },
     {
       "name": "goblintraders-neoforge-1.21.1-1.11.2.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1YExnhSfXOFkKBiA4qN3cxFMFCmPc8ip3&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1U_z-o0b3GEZUmPq6ejlvNbhhqmOaOa_S&export=download&confirm=t"
     },
     {
       "name": "hiddennames-1.21.0-1.0.5.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1FWiOed3J3jYOcIDgIiYtJ5GdOjff_B0L&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=15uZZvHw5gWCNcab6UZqdEZZ_g2hwQzAj&export=download&confirm=t"
+    },
+    {
+      "name": "hollowmarch-1.2.2-mc1.21.1-neoforge.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1DuQHiyFuf6-AE0gykndGWHhn_BOUePVj&export=download&confirm=t"
+    },
+    {
+      "name": "illager_chef-1.0.1-neoforge-1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1QikWdUPCNJmLzGvPgg5y2_Xynhy_hggC&export=download&confirm=t"
+    },
+    {
+      "name": "illagerstructures-neoforge-1.21.1-0.0.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1meglv3OwgkMMxvDKpwFzYbgNNpUqFkrF&export=download&confirm=t"
+    },
+    {
+      "name": "ImmediatelyFast-NeoForge-1.6.9+1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=12T2TYSXIThftC3b4S2sWTWh7cAfpyzm8&export=download&confirm=t"
+    },
+    {
+      "name": "immersive_paintings-neoforge-1.21.1-0.7.6.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1gjPyhrU-bm1ASmCBJIw94uW_eJD-Pgf2&export=download&confirm=t"
     },
     {
       "name": "incontrol-1.21-10.1.2.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1QXcg5COxwT09BX3-ldM_wwDs5E-Krekv&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1ksXwhqmI5uVXlAKbETmcZkicShxgz5E2&export=download&confirm=t"
     },
     {
-      "name": "iris-neoforge-1.8.8+mc1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=128LzjvEOoPxY5Qr3IyRj5SsEbLQK966q&export=download&confirm=t"
+      "name": "iris-neoforge-1.8.12+mc1.21.1.jar",
+      "url": "https://cdn.modrinth.com/data/YL57xq9U/versions/t3ruzodq/iris-neoforge-1.8.12%2Bmc1.21.1.jar"
     },
     {
       "name": "Jade-1.21.1-NeoForge-15.10.0.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1ykPSy1GKtTQoCoe-AbhZFEqbPq9jm4D1&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=19EfoUkllFSrCr-v_ksGWlfT1ogggROmX&export=download&confirm=t"
     },
     {
       "name": "jei-1.21.1-neoforge-19.21.0.247.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1oVFS8-g_6hScG6KkP8wwDUNTEuQBSGEF&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1dgJmSjnXd7C1-ylq5p0VlO-ztp2QliBq&export=download&confirm=t"
+    },
+    {
+      "name": "JustMoreCakes-neoforge-1.21-1.19.2.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1aqTvklg69kyr-Cf1fnZmt4k1i0MwvR9i&export=download&confirm=t"
+    },
+    {
+      "name": "kaleidoscopetavern-1.1.2-neoforge+mc1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1JneCZQS-2AWWwRNlwTogBphrvznTX-U2&export=download&confirm=t"
     },
     {
       "name": "kanrommon-neoforge-1.21-1.21.0.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1Fr5hqfo6YnvnlN0cZgAsXbBsd6QLoj1f&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1TRbwIct0jpDCrL-FnGY3cG_w7uVYZBjK&export=download&confirm=t"
+    },
+    {
+      "name": "kawaiidishes-1.13.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1hYrRzf-iz3g5x3wli65AfeVSz_RKP7WO&export=download&confirm=t"
     },
     {
       "name": "knightlib-neoforge-1.21-1.2.0.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1LOmn2O_oV3YQ7BdfF1rlmXl2Dvm6qTrN&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1oYjDiHrP8op5h4sRFx0U21u0sJB1MP-2&export=download&confirm=t"
     },
     {
       "name": "knightquest-neoforge-1.21-1.8.6.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1hAjpPHpSz8Ar6GApvzsBsXKAJjyFHJTz&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1G4bkQr_M2wUxa36AIBq6SIS_vUByMlO3&export=download&confirm=t"
     },
     {
       "name": "konkrete_neoforge_1.9.9_MC_1.21.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1tQK1Av0_r5KJORQzUQsq0bKwFJy-Xrru&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1RY6UppM-fZoEQCK32rxdNuz50z2C0O2W&export=download&confirm=t"
     },
     {
       "name": "kotlinforforge-5.8.0-all.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1ou0rZmZ6oKnIAAAmG7eMv9KJiRQP-nwz&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1YISABpmuFZPhQ5p-58vgmbIGqiI9mkAM&export=download&confirm=t"
+    },
+    {
+      "name": "lithium-neoforge-0.15.1+mc1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1SnY7KJyXhtfkGmNjvkTEsw3EQcaFsTWc&export=download&confirm=t"
     },
     {
       "name": "mcw-bridges-3.1.1-mc1.21.1neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1h92wpApYZ5F9kaHTqLhJk3I2qROzKfcL&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1U0KQY-zCamr2tuTv9LJSu6mYfWOa8U49&export=download&confirm=t"
     },
     {
       "name": "mcw-doors-1.1.2-mc1.21.1neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1fVkGq8y8nEEGm0Oqm-iY4h-JZJmBKFvC&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1xKxLwefTNE1Qzqwn7zz9Vw2v3jfoSIy4&export=download&confirm=t"
     },
     {
       "name": "mcw-fences-1.2.0-1.21.1neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1rLhlxyEzQ9RFW6PBUmXRqSNRShGg73Qb&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1betKvYmruaGn_NCI4CcHa8Y7cGMde6ih&export=download&confirm=t"
     },
     {
       "name": "mcw-furniture-3.3.0-mc1.21.1neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1taeptCB5cIvJscTfstQSMp-4A8hXgyye&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1yd2tgzKDwNvhqFxfrE7SX7MWoeJ6rkMv&export=download&confirm=t"
     },
     {
       "name": "mcw-holidays-1.1.0-mc1.21.1neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1iHIoCv05u78ZX8RLmzGtaAFEHwx-jNW8&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1j4TJmSQ78q16oIKPcA_8RA1PD5MvIDMD&export=download&confirm=t"
     },
     {
       "name": "mcw-lights-1.1.2-mc1.21.1neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1k9O1fXQvlJ62i4Jp2uSXXUvSUu7fJ_Gl&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1CaYlyfBmB7ZCJGjXtHoHY9msTgsLBhnx&export=download&confirm=t"
     },
     {
       "name": "mcw-paths-1.1.0neoforge-mc1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1YbUzvBbDRDAROYU6PweS35pM3O3OC48x&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1D0T_LTiuLD-wHWmjoaPPU4LK1Ao8JUv2&export=download&confirm=t"
     },
     {
       "name": "mcw-roofs-2.3.2-mc1.21.1neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1AUkYfHB6Skrjx5ArhSdf0ByK90YCl21g&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1YVQoRxexxBr-JKtiXmAkQg_dR5RyOr00&export=download&confirm=t"
     },
     {
       "name": "mcw-stairs-1.0.1-1.21.1neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1l-ILFGyc7E1qCO8q8T5B9Z67FRgjyV5k&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=19OHIzV9u-fAOfUIQiKxG4M2EOK9IwESd&export=download&confirm=t"
     },
     {
       "name": "mcw-trapdoors-1.1.4-mc1.21.1neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1iOVgyzjjfeard9bpRYRdJM94v3Hb6K8m&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1ASgZYYB8wm3I7qs3Wki_ckqCcrXCq0CF&export=download&confirm=t"
     },
     {
       "name": "mcw-windows-2.3.0-mc1.21.1neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1jDDAZFxmp4Nph7XyR91HEaj3UtHH9AaL&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1ZOFw3gKX3oTaNZjKbU8CEfZsVP7FCXIA&export=download&confirm=t"
     },
     {
       "name": "Mekanism-1.21.1-10.7.14.79.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1HG3r4h-VpI71iQ1_r_M8wtEXZ_BaH1re&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1_TgxnyF6PBuMuwrHaNa8G1kXrYuOW2Hp&export=download&confirm=t"
     },
     {
       "name": "mekanismcovers-1.3-BETA+1.21.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1Mdxc_IiLnjhv46_eO50gto-ioDxjylek&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1HzAJA0PueVDTnOMQf6UplCmM9tckqxCJ&export=download&confirm=t"
     },
     {
       "name": "MekanismGenerators-1.21.1-10.7.14.79.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1olI2StTe22rJljijmiCRz0a7DGama160&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1rQdZCy6lhCjPQiaC2Ix_Oiwt7ClTw54r&export=download&confirm=t"
     },
     {
       "name": "MekanismTools-1.21.1-10.7.14.79.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1xZuJAbUOrJfeYX3ExpR_rZaVvSbcVNay&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1UogZFYC-YAGZQxcQwwlovnfjm7JIccgw&export=download&confirm=t"
     },
     {
       "name": "melody_neoforge_1.0.10_MC_1.21.jar",
-      "url": "https://drive.usercontent.google.com/download?id=169PnseH0VWofnnfKLN53C2Ca697LBwqn&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=12Or5YMZVrnamhzHt1wIo92PINspqftp7&export=download&confirm=t"
     },
     {
       "name": "minecolonies-1.1.972-1.21.1-snapshot.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1ftAjZoA-vx00Nr1hf3AOGxb3-4YheOaL&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1G-Mlcey-cUN-kIlcas10fgpSvJXSRFmE&export=download&confirm=t"
     },
     {
-      "name": "moonlight-1.21-2.18.13-neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1gTOu38gtVbw_posiIPGNHyBsEOxcGJSj&export=download&confirm=t"
+      "name": "mns-1.0.8-1.21.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1D0EO5AiBSTAKVivjwG7L8PEIKPvBDSwM&export=download&confirm=t"
+    },
+    {
+      "name": "moonlight-neoforge-1.21.1-3.0.17.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1cG5zsO8X51Ma71wh1uDaxExG7O10ithw&export=download&confirm=t"
     },
     {
       "name": "MutantMonsters-v21.1.0-1.21.1-NeoForge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1IQkpz0Ew00OHSxCRVMZrD6YZNUu_ieem&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1yqqSdIAbq2Pmw7s9CqcQ1NufgYUMbMhx&export=download&confirm=t"
+    },
+    {
+      "name": "mvs-4.3.0-1.21.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1dAumoNP4LITDsCKLk2Yck05Uouu1GRgm&export=download&confirm=t"
     },
     {
       "name": "NeoAuth-1.21.1-1.0.0.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1tuTkt-0qQyfQZXn3yzJVahlpGNt7BQEa&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1ZH388cSZf0IdDx-Q1Y_o7FuyZ9OAm2sH&export=download&confirm=t"
     },
     {
       "name": "neoncraft-1.1.1-neoforge-1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1C_Wu-HfwMckvnyNFj8Pelca0ansX32xh&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=14y0_2rYcfsSALYDpbTqvhETG4z8gvft6&export=download&confirm=t"
+    },
+    {
+      "name": "nirvana-forge-2.0.11.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1D9mkLKU7W5qEGC9NDprj2QtCqy0grkD_&export=download&confirm=t"
     },
     {
       "name": "no-tnt-griefing-1.21.1-1.0.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1XUGWWvnc3AGposs0jTYGMN2lzlOPn8Om&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=17qeIpwOBRhiZ-sBKWx6fmnWb0cRUtMWk&export=download&confirm=t"
     },
     {
       "name": "owo-lib-neoforge-0.12.15.1-beta.3+1.21.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1OLFsqGMA5L9HxhBl09gRNhquDxLzzMOP&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1h4xnpDCB6C6aF1k3f9MnGeR2FpqyxEUK&export=download&confirm=t"
     },
     {
       "name": "pipeorgans-0.6.1+1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1uvSs_k5zPtA5YL6jzCIHo1dkx8o80xP8&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1OjUihZh13M3vSFJUhB1hTV-zq3QddyCK&export=download&confirm=t"
     },
     {
       "name": "platform-neoforge-1.21.1-1.2.9.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1QtvYGlH6-oeAwRhq8GEnM4jtEst3yC-h&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1XgAUXKlYrrlQrLL7QpEL6gGmfEQj8Kbd&export=download&confirm=t"
     },
     {
       "name": "pointblank-neoforge-1.21-1.9.6.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1uKZ2zBIBLHLkVFAA0NOUQjHQgBoFGWOL&export=download&confirm=t"
+      "url": "https://drive.usercontent.google.com/download?id=1nTy3_x-KTvSwsTc08oI7KpVugA2VivD9&export=download&confirm=t"
+    },
+    {
+      "name": "potleaves-neoforge-1.21.1-1.1.0.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1jxxqaS6Rttz_5JYgqaWKbXJuz3lvmnhD&export=download&confirm=t"
+    },
+    {
+      "name": "pottery-1.0.2a-neoforge-mc1.21.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1nJtDFh-ObagfTrWOojJM9Bj8o7NqUwBK&export=download&confirm=t"
+    },
+    {
+      "name": "PuzzlesLib-v21.1.36-1.21.1-NeoForge.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1MVj1h7IfL8n2HxYgxZmDterqSRovwgIW&export=download&confirm=t"
+    },
+    {
+      "name": "reeses-sodium-options-neoforge-1.8.3+mc1.21.4.jar",
+      "url": "https://cdn.modrinth.com/data/Bh37bMuy/versions/xAiCe6w8/reeses-sodium-options-neoforge-1.8.3%2Bmc1.21.4.jar"
+    },
+    {
+      "name": "refinedstorage-curios-integration-1.0.0.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1XH8g-Z3ct4bprvydwpsxetPpMEnWj5VW&export=download&confirm=t"
+    },
+    {
+      "name": "refinedstorage-jei-integration-neoforge-1.0.0.jar",
+      "url": "https://drive.usercontent.google.com/download?id=15oZEOJGMkp67B0D_9ftd9nzyTOGW9vLU&export=download&confirm=t"
+    },
+    {
+      "name": "refinedstorage-mekanism-integration-1.0.0.jar",
+      "url": "https://drive.usercontent.google.com/download?id=16Uw4CamyXlLfkhMwvxJ_GCpvgOmJc5jH&export=download&confirm=t"
+    },
+    {
+      "name": "refinedstorage-neoforge-2.0.0-beta.2.jar",
+      "url": "https://drive.usercontent.google.com/download?id=14pLv6Z3jNlCiBzpO6Eo8b0ONa-pb36IO&export=download&confirm=t"
+    },
+    {
+      "name": "refinedstorage-quartz-arsenal-neoforge-1.0.0.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1jwUNWqWzpnZ6hpj_-rfuPHWzIBZv5_Wj&export=download&confirm=t"
+    },
+    {
+      "name": "refurbished_furniture-neoforge-1.21.1-1.0.12.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1q7SiyIn-HDnpVfptCPC6lwK6dYpVMNnb&export=download&confirm=t"
+    },
+    {
+      "name": "reptilian-1.1.0-neoforge-1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1vp6ESWjWlPKZATyAzSv3VR7gJSyAbAYG&export=download&confirm=t"
+    },
+    {
+      "name": "repurposed_structures-7.5.15+1.21.1-neoforge.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1O-KcmV8dQwUVQDvg9ZqrKWO2v6bgrUnu&export=download&confirm=t"
+    },
+    {
+      "name": "resourcefulconfig-neoforge-1.21-3.0.11.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1Nsp8CTicdKHahfzW0u8RFYKwnVW3gCVV&export=download&confirm=t"
+    },
+    {
+      "name": "resourcefullib-neoforge-1.21-3.0.12.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1CZcu6BqmicFrG26UNQzL83Vh1_DzxsTn&export=download&confirm=t"
+    },
+    {
+      "name": "rottencreatures-neoforge-1.21.1-1.1.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1PsGG_oFKywAgfg9wEv6MgA0JMAPshFlC&export=download&confirm=t"
+    },
+    {
+      "name": "rusticdelight-neoforge-1.21-1.6.0.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1zC4QVG4GusLocYg3r5sqLem-QJ0fJGSP&export=download&confirm=t"
+    },
+    {
+      "name": "sable-neoforge-1.21.1-1.2.2.jar",
+      "url": "https://cdn.modrinth.com/data/T9PomCSv/versions/3FMsUjO4/sable-neoforge-1.21.1-1.2.2.jar"
+    },
+    {
+      "name": "scabbard-neoforge-1.21.1-1.2.3.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1TBOX_jXGavn6D_8OyKlqHmLLWk4BMTmw&export=download&confirm=t"
+    },
+    {
+      "name": "selfexpression_slim-1.5-neoforge-1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1a-wRV7qIree98xxGcvm4BVt5HhXjxbF_&export=download&confirm=t"
+    },
+    {
+      "name": "selfexpression-2.21.2-neoforge-1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1gEBK6Y8d1PbMTxlkvm9p-qga3tXwu61a&export=download&confirm=t"
+    },
+    {
+      "name": "simplehats-neoforge-1.21.1-0.4.0.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1B57HTj7k1DyxZxuknApuC3EEZdO-Kc-F&export=download&confirm=t"
+    },
+    {
+      "name": "simpleplanes-1.21.1-5.3.6.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1N4kShEaPewTbctXAZ1knW7GLiC9HrzRv&export=download&confirm=t"
+    },
+    {
+      "name": "simplytents-4.6-1.21.1.neo.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1kXAztVIqJYGpmU8sZNhPyrs6Yy-laiFi&export=download&confirm=t"
+    },
+    {
+      "name": "skinrestorer-2.3.1+1.21-neoforge.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1V1vgWQyO5tJJdX7yuOw-7LX6gpN7o9UW&export=download&confirm=t"
+    },
+    {
+      "name": "slayersbeasts-neoforge-1.21.1-5.2.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1vkkBlggcgKYaWYHnKMaDTR1J8K8mqOL3&export=download&confirm=t"
+    },
+    {
+      "name": "slotsmachine1.21.1-1.1.8.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1v0LdqDoIDmsR0PvUcwwag33-fbSiCdq4&export=download&confirm=t"
+    },
+    {
+      "name": "smallships-neoforge-1.21.1-2.0.0-b2.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1QVTOuZyg4tZjGfrah9OKHDXrvYrTX82x&export=download&confirm=t"
+    },
+    {
+      "name": "sodium-neoforge-0.6.13+mc1.21.1.jar",
+      "url": "https://cdn.modrinth.com/data/AANobbMI/versions/Pb3OXVqC/sodium-neoforge-0.6.13%2Bmc1.21.1.jar"
+    },
+    {
+      "name": "sodiumdynamiclights-neoforge-1.0.10-1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1QSXLsX_-55aVK-PtgCwJfP98pf94hlUe&export=download&confirm=t"
+    },
+    {
+      "name": "sodiumoptionsapi-neoforge-1.0.10-1.21.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=17ZGdVRWhkZ2xdt_pSADVWlNNd8np9SBz&export=download&confirm=t"
+    },
+    {
+      "name": "sophisticatedbackpacks-1.21.1-3.23.3.1191.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1vxfYWuAZ8ttDSuvBfbfsCWBxnhiYiDBk&export=download&confirm=t"
+    },
+    {
+      "name": "sophisticatedcore-1.21.1-1.2.6.856.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1NA8gkG4UjK75YvF7WtNioiDSM1fHQEo2&export=download&confirm=t"
+    },
+    {
+      "name": "sophisticatedstorage-1.21.1-1.3.3.1057.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1x8by5CtzlKAcZ1ZaWNi1XktoOLuYQ1wJ&export=download&confirm=t"
+    },
+    {
+      "name": "spark-1.10.124-neoforge.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1nZ5dwRM_KVMrxnLrttgj1dI-b9tdLYZb&export=download&confirm=t"
+    },
+    {
+      "name": "Stellarity-3.0.6.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1JLQ9nSF8S-mzuh72WDYkZbj5w2E4Vnff&export=download&confirm=t"
+    },
+    {
+      "name": "StrawStatues-v21.1.0-1.21.1-NeoForge.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1byC-EytB4C6BK0nOkP2FgdZTHdLKSEsI&export=download&confirm=t"
+    },
+    {
+      "name": "Structory_1.21.x_v1.3.10.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1L6Ur4c5r8RrEmQcvYB2TH1xuEgIWafkI&export=download&confirm=t"
+    },
+    {
+      "name": "Structory_Towers_1.21.x_v1.0.11.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1eLKO8ozU3jVyIQhD3KnI1wX3IAVSFyVx&export=download&confirm=t"
+    },
+    {
+      "name": "structurize-1.0.774-1.21.1-snapshot.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1cA2TktRb5g9XOqwRUg9NTQB_F3aJ8Hmb&export=download&confirm=t"
+    },
+    {
+      "name": "supermartijn642configlib-1.1.8-neoforge-mc1.21.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1jqOHBbrQax87_6Mb72Q_pl2sBeNjFs9y&export=download&confirm=t"
+    },
+    {
+      "name": "supermartijn642corelib-1.1.18a-neoforge-mc1.21.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1GkovzWzv8hkoDZ81RtSeAsmRtqGecYX0&export=download&confirm=t"
+    },
+    {
+      "name": "supplementaries-1.21-3.1.8-neoforge.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1UErXpDVrfSA29eGxTXwxtkPZjEgOYctU&export=download&confirm=t"
+    },
+    {
+      "name": "TerraBlender-neoforge-1.21.1-4.1.0.8.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1yy06E33bZ_iePELqo-Z_821JzoLlWLqN&export=download&confirm=t"
+    },
+    {
+      "name": "Terralith_1.21.x_v2.5.5.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1q_1aVPd5zBXo_37oLDaH10NBOuhAJY0U&export=download&confirm=t"
+    },
+    {
+      "name": "TheGreatOutdoors_1.21.1Neoforge_V1.2.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1qMLpObIontumh4phc4L-uAstaP_zkq0X&export=download&confirm=t"
+    },
+    {
+      "name": "toms_storage-1.21-2.1.3.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1qvFMToCQ-5Q_rBSiCWQOSjWn-4QelA5g&export=download&confirm=t"
+    },
+    {
+      "name": "voicechat-neoforge-1.21.1-2.5.28.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1aczpmO4NRzLHHrUcgeAoiZPRs_AdTfmH&export=download&confirm=t"
+    },
+    {
+      "name": "walkers-5.7.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1h3TgJH6WhOlhGfdrJQeNaRpt8-lHQgfD&export=download&confirm=t"
+    },
+    {
+      "name": "waterframes-NEOFORGE-mc1.21.1-v2.1.14.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1lb4FBfmIsjI4Dhu4VRhWwDtT-MJcxDaz&export=download&confirm=t"
+    },
+    {
+      "name": "watermedia-2.1.24.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1LPFNKujqbTT4LSxyjaQdENgjdaBQQoMb&export=download&confirm=t"
+    },
+    {
+      "name": "worldedit-mod-7.3.8.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1s5m8H3DXar7-Icbloz0PhEwYuXW3vj6j&export=download&confirm=t"
+    },
+    {
+      "name": "xtonesreworked-1.1.0-NF-1.21_21.0.167.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1pxmEBB70G8f8A4ZHGdC3ofTH4tjS2a8l&export=download&confirm=t"
+    },
+    {
+      "name": "yawp-1.21.1-neoforge-0.5.2-beta4.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1vZAhMeSGW2EFGWOmNZY4SE8mUzgkAAxr&export=download&confirm=t"
+    },
+    {
+      "name": "yet_another_config_lib_v3-3.8.2+1.21.1-neoforge.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1EV9LAZbiXBpB374_u4hFXxmmP9kDyPkB&export=download&confirm=t"
+    },
+    {
+      "name": "YungsApi-1.21.1-NeoForge-5.1.5.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1u_hF_Ku7vNkE4lQIHExbG5s_yiR6xoa3&export=download&confirm=t"
+    },
+    {
+      "name": "YungsBetterDesertTemples-1.21.1-NeoForge-4.1.5.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1o8bGQ_7SrtCNMoJVyCj7zMrny53xEMhc&export=download&confirm=t"
+    },
+    {
+      "name": "YungsBetterDungeons-1.21.1-NeoForge-5.1.4.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1ni-LorxCLp4wcefp2P1AQj0qUpPMiCJz&export=download&confirm=t"
+    },
+    {
+      "name": "YungsBetterEndIsland-1.21.1-NeoForge-3.1.2.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1Gqbxlz8hOUkea4W4D1oStK43axiSm5ys&export=download&confirm=t"
+    },
+    {
+      "name": "YungsBetterJungleTemples-1.21.1-NeoForge-3.1.2.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1-ssP6dpNnej4qYojHpwfmCJkMVP5RAHa&export=download&confirm=t"
+    },
+    {
+      "name": "YungsBetterMineshafts-1.21.1-NeoForge-5.1.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1xlSLCfODI7WDh1nsDUCoiqauRKRQkLoy&export=download&confirm=t"
+    },
+    {
+      "name": "YungsBetterNetherFortresses-1.21.1-NeoForge-3.1.4.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1XBhflPClxBMWvOoQ2T3PFIX3QxbZYDcf&export=download&confirm=t"
+    },
+    {
+      "name": "YungsBetterOceanMonuments-1.21.1-NeoForge-4.1.2.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1z1bCy6ogzQ7v3A58BDTgpC9uxx0BNLML&export=download&confirm=t"
+    },
+    {
+      "name": "YungsBetterStrongholds-1.21.1-NeoForge-5.1.3.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1BD9GgO77wLsaGIB-GcOz3cumFfiL_FQC&export=download&confirm=t"
+    },
+    {
+      "name": "YungsBetterWitchHuts-1.21.1-NeoForge-4.1.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1iJbt7lQQksps-kt_4kHvgpm1tX_chKYv&export=download&confirm=t"
+    },
+    {
+      "name": "YungsExtras-1.21.1-NeoForge-5.1.1.jar",
+      "url": "https://drive.usercontent.google.com/download?id=1XzsyxQsj9O5Q03Xe0-_6hy_Om-7ZGqFX&export=download&confirm=t"
     },
     {
       "name": "policemod-1.0.1.jar",
       "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/policemod-1.0.1.jar"
-    },
-    {
-      "name": "pottery-1.0.2a-neoforge-mc1.21.jar",
-      "url": "https://drive.usercontent.google.com/download?id=12fgPiCrpOAwmVKdMe7VktIuwk7gO1BMW&export=download&confirm=t"
-    },
-    {
-      "name": "PuzzlesLib-v21.1.36-1.21.1-NeoForge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1g7P8vdvNOgPbnFGqgRQU2BXFycBhoKW1&export=download&confirm=t"
-    },
-    {
-      "name": "reeses-sodium-options-neoforge-1.8.3+mc1.21.4.jar",
-      "url": "https://drive.usercontent.google.com/download?id=191mKmtsVNY7-wlSzYsu6TuBhjJ-jnG12&export=download&confirm=t"
-    },
-    {
-      "name": "refinedstorage-curios-integration-1.0.0.jar",
-      "url": "https://drive.usercontent.google.com/download?id=14tSe1Wv6nhb_mHtsh1zJZ-VFK-d5wOGJ&export=download&confirm=t"
-    },
-    {
-      "name": "refinedstorage-jei-integration-neoforge-1.0.0.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1aAc-aM707cn2DTwqFBkc1S9h2OYFkqSZ&export=download&confirm=t"
-    },
-    {
-      "name": "refinedstorage-mekanism-integration-1.0.0.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1t-RyqYMiQF_xAS9eKrORW5R9DA6oAc-n&export=download&confirm=t"
-    },
-    {
-      "name": "refinedstorage-neoforge-2.0.0-beta.2.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1V1CkTLNRpcxjZEZgWeAm7rQ7fuAdodcO&export=download&confirm=t"
-    },
-    {
-      "name": "refinedstorage-quartz-arsenal-neoforge-1.0.0.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1U1Cz5HKq_j8CroxhjiFA6khXbEWF8Pth&export=download&confirm=t"
-    },
-    {
-      "name": "refurbished_furniture-neoforge-1.21.1-1.0.12.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1qdL56GzZnyEiIPhQzgSM5_RiD4_rktQh&export=download&confirm=t"
-    },
-    {
-      "name": "regions_unexplored-neoforge-1.21.1-0.5.6.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1lwFWCm8uPtDojir8e940WHhK_CMwuRiT&export=download&confirm=t"
-    },
-    {
-      "name": "reptilian-1.1.0-neoforge-1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1md81xpCJFUz6Ysys7Fkjl26gSfPrUfc2&export=download&confirm=t"
-    },
-    {
-      "name": "repurposed_structures-7.5.15+1.21.1-neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=13JpCMnmbdHhxbAPZ65jAXJd6PRpzuMM_&export=download&confirm=t"
-    },
-    {
-      "name": "resourcefulconfig-neoforge-1.21-3.0.11.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1egcyh_EtRUXs7gfBNicZkbmnDd25MYQJ&export=download&confirm=t"
-    },
-    {
-      "name": "resourcefullib-neoforge-1.21-3.0.12.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1cuO2wvZQsNRuj4Thzqy1YtU-SrcRypdy&export=download&confirm=t"
-    },
-    {
-      "name": "rottencreatures-neoforge-1.21.1-1.1.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1VOO-XgUS7h2_xVYOC-45tvdLr11RT1FC&export=download&confirm=t"
-    },
-    {
-      "name": "selfexpression_slim-1.5-neoforge-1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1IzrVtgZyH--FdCwYkZzw_acyclgcg1WL&export=download&confirm=t"
-    },
-    {
-      "name": "selfexpression-2.21.2-neoforge-1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1R71QNuyBSoUnEroUK7lVX95fAapdVa17&export=download&confirm=t"
-    },
-    {
-      "name": "simplehats-neoforge-1.21.1-0.4.0.jar",
-      "url": "https://drive.usercontent.google.com/download?id=11cuYbqxrve7cKRU4lwEWNoGnexShMaRa&export=download&confirm=t"
-    },
-    {
-      "name": "simpleplanes-1.21.1-5.3.6.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1fN77DKAz4VoIBxXqkh2YIqHQDJBTTFYc&export=download&confirm=t"
-    },
-    {
-      "name": "skinrestorer-2.3.1+1.21-neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1Q-pC7LbGelVQNVGuG0ty-J45nDInRkXg&export=download&confirm=t"
-    },
-    {
-      "name": "sodium-neoforge-0.6.9+mc1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1BB6UMXtHh7CxYL95TmIa0ucZGBHa2kMT&export=download&confirm=t"
-    },
-    {
-      "name": "sodiumdynamiclights-neoforge-1.0.10-1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=16O76YBr763h0F2ZwK4NPelY3k80zaEj4&export=download&confirm=t"
-    },
-    {
-      "name": "sodiumoptionsapi-neoforge-1.0.10-1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1XRH3qVtTtGynOEchxv1D6v12vNvXmkEh&export=download&confirm=t"
-    },
-    {
-      "name": "sophisticatedbackpacks-1.21.1-3.23.3.1191.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1Qmgqx-ZozQU_JcScESAvVULPkClQP7LN&export=download&confirm=t"
-    },
-    {
-      "name": "sophisticatedcore-1.21.1-1.2.6.856.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1S-TUeuU3EnOV01qUis_V1Weg0IKO7RAE&export=download&confirm=t"
-    },
-    {
-      "name": "sophisticatedstorage-1.21.1-1.3.3.1057.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1RUpj2iiFFDhgMXMrThId3v16PDX0adss&export=download&confirm=t"
-    },
-    {
-      "name": "spark-1.10.124-neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1Cr8j90bdnAc9lTiBwJFaIv8ZO3t8Q0cu&export=download&confirm=t"
-    },
-    {
-      "name": "splinecart-0.3.1+1.21.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1R-eA-UV9QenkzbSSIzLPL7KUzcw0smRy&export=download&confirm=t"
-    },
-    {
-      "name": "StrawStatues-v21.1.0-1.21.1-NeoForge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1oAVyd_SGctIBQaiE8VomoeIXJ7hHaySV&export=download&confirm=t"
-    },
-    {
-      "name": "Structory_1.21.x_v1.3.10.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1q8u1YGlBcOp-RqVbQR2L7pBl-E6ngBm4&export=download&confirm=t"
-    },
-    {
-      "name": "Structory_Towers_1.21.x_v1.0.11.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1lPGMw2AP5ocvhtSRxbxrXWArfKUZBrSO&export=download&confirm=t"
-    },
-    {
-      "name": "structurize-1.0.774-1.21.1-snapshot.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1Si_FeIsdYgedACrxEuFAeR--YPd9ZTRD&export=download&confirm=t"
-    },
-    {
-      "name": "supermartijn642configlib-1.1.8-neoforge-mc1.21.jar",
-      "url": "https://drive.usercontent.google.com/download?id=18PwtSj27f0ICsik0JAZaRQSwhoGiuoCm&export=download&confirm=t"
-    },
-    {
-      "name": "supermartijn642corelib-1.1.18a-neoforge-mc1.21.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1CARkGEU3fWvlqzCgoJUOkkkpig-vxWC0&export=download&confirm=t"
-    },
-    {
-      "name": "supplementaries-1.21-3.1.8-neoforge.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1JOEqhzBEcw0F2w6IWSVw5KybNMhmOu09&export=download&confirm=t"
-    },
-    {
-      "name": "TerraBlender-neoforge-1.21.1-4.1.0.8.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1RSOsp7KCYWJyQQKZjyjtc6fxQ9EaTEH8&export=download&confirm=t"
-    },
-    {
-      "name": "toms_storage-1.21-2.1.3.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1Vp4RegVeUFQya0_sIZ5NjW0I6DhYDxv_&export=download&confirm=t"
-    },
-    {
-      "name": "voicechat-neoforge-1.21.1-2.5.28.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1268p9Yb-hp4hWNp2HnSzMSpmMHL_gQCP&export=download&confirm=t"
-    },
-    {
-      "name": "walkers-5.7.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1PjqRbYM9BqXugkjBXci9gjzMiJLNz3Ie&export=download&confirm=t"
-    },
-    {
-      "name": "waterframes-NEOFORGE-mc1.21.1-v2.1.14.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1x7ZmjOfwtfDDsEBTI1JLdo_igPXTmBqd&export=download&confirm=t"
-    },
-    {
-      "name": "watermedia-2.1.24.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1HyAin89xQ1tUSFyiJ1CpBxy5rR2aYy0m&export=download&confirm=t"
-    },
-    {
-      "name": "worldedit-mod-7.3.8.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1jUGAGxTvFzr_9UQPa7e_JdZ9_xNk5w0A&export=download&confirm=t"
-    },
-    {
-      "name": "xercamusic-1.21.1-1.0.0.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1H_xztx2phfjVGJyN6WGytRf5IsSziT2O&export=download&confirm=t"
-    },
-    {
-      "name": "xercapaint-1.21.1-1.0.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1mata-G-wEXoH49wLw85eK6_Cinkbu0W7&export=download&confirm=t"
-    },
-    {
-      "name": "xtonesreworked-1.1.0-NF-1.21_21.0.167.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1A9pQ9UvhgH7UzHW7ZGD05KDgRe4hx0vQ&export=download&confirm=t"
-    },
-    {
-      "name": "yawp-1.21.1-neoforge-0.5.2-beta4.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1igKy0404mAl_aqLD3Qg4s2-PAEm8qsD_&export=download&confirm=t"
-    },
-    {
-      "name": "YungsApi-1.21.1-NeoForge-5.1.5.jar",
-      "url": "https://drive.usercontent.google.com/download?id=14rQnoAb-uEqhIgmETcNnNYqg0ThQ7zEc&export=download&confirm=t"
-    },
-    {
-      "name": "YungsBetterDesertTemples-1.21.1-NeoForge-4.1.5.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1pRjUGAX3DdH9p1hTzjPYJ4QpMvEQzYeW&export=download&confirm=t"
-    },
-    {
-      "name": "YungsBetterDungeons-1.21.1-NeoForge-5.1.4.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1wnq9sgJ6CPGgj1aRaqmedbv2Vl36oFKY&export=download&confirm=t"
-    },
-    {
-      "name": "YungsBetterEndIsland-1.21.1-NeoForge-3.1.2.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1Tv0ewb4_QwuELag6NeZFSh1uMonwICEw&export=download&confirm=t"
-    },
-    {
-      "name": "YungsBetterJungleTemples-1.21.1-NeoForge-3.1.2.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1bIMJnp4xDmM4lXTL2xCJla1Hqp172EAX&export=download&confirm=t"
-    },
-    {
-      "name": "YungsBetterMineshafts-1.21.1-NeoForge-5.1.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1D0WpK_nYqyrg4jcbPtrVYoqOF8rJJeGg&export=download&confirm=t"
-    },
-    {
-      "name": "YungsBetterNetherFortresses-1.21.1-NeoForge-3.1.4.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1rGlYRRwREp9h_7vAM4vIXWNrEXxM4MpP&export=download&confirm=t"
-    },
-    {
-      "name": "YungsBetterOceanMonuments-1.21.1-NeoForge-4.1.2.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1fTPzkdxrmE8G0abjtU91Hd2enqedXKUr&export=download&confirm=t"
-    },
-    {
-      "name": "YungsBetterStrongholds-1.21.1-NeoForge-5.1.3.jar",
-      "url": "https://drive.usercontent.google.com/download?id=1umPrFi-rvY_A4R2ETyhIjYtLAP186rIv&export=download&confirm=t"
-    },
-    {
-      "name": "YungsBetterWitchHuts-1.21.1-NeoForge-4.1.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=15-jNJnA-ePlfFihpxV8BxSIzxksUVloj&export=download&confirm=t"
-    },
-    {
-      "name": "YungsExtras-1.21.1-NeoForge-5.1.1.jar",
-      "url": "https://drive.usercontent.google.com/download?id=18dVwxEtP7KuTu7RZAfqGgdj2yXRyS1wa&export=download&confirm=t"
     },
     {
       "name": "zigshop-0.1.12.jar",

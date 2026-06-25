@@ -3363,8 +3363,23 @@ function downloadFile(url, dest, redirects = 0) {
         if (fs.existsSync(dest)) fs.unlinkSync(dest)
         return reject(new Error(`Réponse HTML inattendue pour ${path.basename(dest)} — lien Drive expiré ?`))
       }
+      const expected = parseInt(res.headers['content-length'] || '0', 10)
+      let received = 0
+      res.on('data', (chunk) => { received += chunk.length })
       res.pipe(file)
-      file.on('finish', () => { file.close(); resolve() })
+      file.on('finish', () => {
+        file.close(() => {
+          // Téléchargement tronqué (coupure réseau) : sans ce contrôle, un .jar
+          // partiel est conservé, passe ensuite pour « corrompu » (installeur) ou
+          // crashe au chargement (mod), et n'est JAMAIS re-téléchargé car le fichier
+          // existe déjà. On le supprime pour que la prochaine tentative recommence.
+          if (expected && received < expected) {
+            if (fs.existsSync(dest)) fs.unlinkSync(dest)
+            return reject(new Error(`Téléchargement incomplet (${received}/${expected} octets) — ${path.basename(dest)}`))
+          }
+          resolve()
+        })
+      })
     }).on('error', (err) => {
       file.close()
       if (fs.existsSync(dest)) fs.unlinkSync(dest)
