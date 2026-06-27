@@ -1,0 +1,70 @@
+name: Build Zig Menu mod
+
+# Compile le mod NeoForge client "zigmenu" et publie le .jar.
+# Se declenche sur les push de la branche main touchant le mod, et manuellement.
+# (branches: main -> evite que les tags de release du launcher le redeclenchent ;
+#  les filtres paths ne s'appliquent pas aux tags.)
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'zig-menu-mod/**'
+      - '.github/workflows/zigmenu.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.12'
+
+      - name: Build
+        working-directory: zig-menu-mod
+        run: gradle build --no-daemon --stacktrace
+
+      - name: Publier le .jar (artefact, filet de secours)
+        uses: actions/upload-artifact@v4
+        with:
+          name: zigmenu-jar
+          path: zig-menu-mod/build/libs/zigmenu-*.jar
+          if-no-files-found: error
+
+      # Depose le .jar builde sur la branche mod-jars (raw), d'ou le launcher le telecharge
+      # (cf. raw-launcher/modpack.json). On AJOUTE le jar versionne (on garde les anciens).
+      # Seulement sur main : les pushes de branches/PR ne publient pas.
+      - name: Deposer le .jar sur la branche mod-jars
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          JAR=$(ls zig-menu-mod/build/libs/zigmenu-*.jar | grep -v -- '-sources' | head -1)
+          test -n "$JAR" || { echo "::error::jar introuvable dans build/libs"; exit 1; }
+          NAME=$(basename "$JAR")
+          echo "Depot de $NAME sur mod-jars"
+          cp "$JAR" "$RUNNER_TEMP/$NAME"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin mod-jars:mod-jars
+          git checkout mod-jars
+          cp "$RUNNER_TEMP/$NAME" "./$NAME"
+          git add "$NAME"
+          if git diff --cached --quiet; then
+            echo "Aucun changement ($NAME deja present) - rien a pousser."
+          else
+            git commit -m "build: $NAME (CI)"
+            git push origin mod-jars
+          fi
