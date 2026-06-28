@@ -24,6 +24,12 @@
         "modpack_mode": "B:modpack_mode = 'true';",
         "show_customization_overlay": "B:show_customization_overlay = 'false';"
       }
+    },
+    {
+      "path": "config/voicechat/voicechat-client.properties",
+      "setLines": {
+        "hide_icons": "hide_icons=true"
+      }
     }
   ],
   "shaders": [
