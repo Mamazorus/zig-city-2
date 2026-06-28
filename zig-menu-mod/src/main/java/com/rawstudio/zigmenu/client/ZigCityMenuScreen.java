@@ -33,6 +33,9 @@ public class ZigCityMenuScreen extends Screen {
 
     // Taille de la texture de fond (screenshot 16:9).
     private static final int BG_W = 2048, BG_H = 1152;
+    // Fond anime : leger zoom (menage une marge horizontale) + panoramique lent ping-pong.
+    private static final float BG_ZOOM = 1.18f;
+    private static final long BG_PAN_PERIOD_MS = 38000L; // aller-retour complet (~19 s par sens)
 
     // Texture logo (halo exterieur retire pour eviter le "contour" sur fond clair en jeu) :
     // 2684x1308, le logo visible (avec etoiles) occupe la boite ci-dessous.
@@ -158,12 +161,16 @@ public class ZigCityMenuScreen extends Screen {
     }
 
     private void renderSceneBackground(GuiGraphics g) {
-        // Screenshot en "cover" (rempli, recadre au centre).
-        float scale = Math.max((float) this.width / BG_W, (float) this.height / BG_H);
+        // "Cover" + leger zoom pour menager une marge horizontale, puis panoramique lent
+        // gauche <-> droite (ping-pong, ralenti aux bords) facon ecran-titre anime.
+        float scale = Math.max((float) this.width / BG_W, (float) this.height / BG_H) * BG_ZOOM;
         float dw = BG_W * scale;
         float dh = BG_H * scale;
-        float dx = (this.width - dw) / 2f;
-        float dy = (this.height - dh) / 2f;
+        float slackX = Math.max(0f, dw - this.width);                       // marge horizontale a parcourir
+        float phase = (Util.getMillis() % BG_PAN_PERIOD_MS) / (float) BG_PAN_PERIOD_MS;
+        float t = 0.5f - 0.5f * Mth.cos(phase * (float) Math.PI * 2f);      // 0 -> 1 -> 0, sans a-coup
+        float dx = -slackX * t;                                             // du bord gauche au bord droit
+        float dy = (this.height - dh) / 2f;                                 // centre verticalement
         g.pose().pushPose();
         g.pose().translate(dx, dy, 0);
         g.pose().scale(scale, scale, 1f);
