@@ -34,10 +34,11 @@ public class ZigCityMenuScreen extends Screen {
     // Taille de la texture de fond (screenshot 16:9).
     private static final int BG_W = 2048, BG_H = 1152;
 
-    // Texture logo : 1920x1080, le logo visible (avec etoiles) occupe la boite ci-dessous.
-    private static final int LOGO_TEX_W = 1920, LOGO_TEX_H = 1080;
-    private static final int LOGO_BX = 79, LOGO_BY = 268, LOGO_BW = 1761, LOGO_BH = 602;
-    private static final float LOGO_ASPECT = (float) LOGO_BW / (float) LOGO_BH; // ~2.925
+    // Texture logo (halo exterieur retire pour eviter le "contour" sur fond clair en jeu) :
+    // 2684x1308, le logo visible (avec etoiles) occupe la boite ci-dessous.
+    private static final int LOGO_TEX_W = 2684, LOGO_TEX_H = 1308;
+    private static final int LOGO_BX = 117, LOGO_BY = 179, LOGO_BW = 2451, LOGO_BH = 812;
+    private static final float LOGO_ASPECT = (float) LOGO_BW / (float) LOGO_BH; // ~3.018
 
     private static final String SERVER = "109.239.153.124:25965";
 
