@@ -44,7 +44,11 @@ public class ZigCityMenuScreen extends Screen {
     // Layout calcule dans init().
     private int logoX, logoY, logoW, logoH;
     private int zigBtnX, zigBtnY, zigBtnW, zigBtnH;
-    private int headSize, headPeek, headOverlap, headCount;
+    private int headSize, headPeek, headOverlap, headCount, headMaxShift;
+
+    // Animation d'ecartement des tetes au survol du bouton ZIG CITY.
+    private float headSpread = 0f;   // 0 (repos) -> 1 (ecarte), lisse image par image
+    private long headAnimLastMs = 0L;
 
     public ZigCityMenuScreen() {
         super(Component.literal("Zig City 2"));
@@ -65,6 +69,15 @@ public class ZigCityMenuScreen extends Screen {
         // Lance (une seule fois) le chargement asynchrone des tetes du carrousel.
         PlayerHeads.ensureLoaded();
 
+        // Filtrage lineaire du logo : la texture haute resolution est reduite a l'ecran ;
+        // sans ce lissage, les aretes 3D des lettres sont crenelees ("contours" en jeu).
+        // Applique ici (hors batch GUI) ; rejoue a chaque resize (init est rappele).
+        try {
+            this.minecraft.getTextureManager().getTexture(LOGO).setFilter(true, false);
+        } catch (Exception ignore) {
+            // texture indisponible -> rendu nearest par defaut, jamais de crash
+        }
+
         int cx = this.width / 2;
         int bw = Mth.clamp((int) (this.width * 0.46f), 220, 340);
         int bh = Mth.clamp((int) (bw * 0.11f), 22, 30);
@@ -74,6 +87,8 @@ public class ZigCityMenuScreen extends Screen {
         this.headPeek = (int) (this.headSize * 0.6f);
         this.headOverlap = this.headSize - this.headPeek;
         this.headCount = Math.max(1, (int) (0.66f * bw / this.headSize));
+        // Decalage max des rangees au survol : on revele la portion masquee par le bouton.
+        this.headMaxShift = Math.max(3, this.headOverlap);
 
         int splitGap = 8;
         int totalH = 3 * bh + 2 * gap + 2 * this.headPeek;
@@ -136,7 +151,7 @@ public class ZigCityMenuScreen extends Screen {
         renderSceneBackground(g);
         renderLogo(g);
         renderSplash(g);
-        renderHeads(g);
+        renderHeads(g, mouseX, mouseY);
         // Les widgets (boutons) sont rendus par-dessus -> ils masquent le centre des tetes.
         super.render(g, mouseX, mouseY, partialTick);
     }
@@ -186,7 +201,7 @@ public class ZigCityMenuScreen extends Screen {
         g.pose().popPose();
     }
 
-    private void renderHeads(GuiGraphics g) {
+    private void renderHeads(GuiGraphics g, int mouseX, int mouseY) {
         List<ResourceLocation> heads = PlayerHeads.getHeads();
         if (heads.isEmpty()) {
             return;
@@ -195,21 +210,46 @@ public class ZigCityMenuScreen extends Screen {
         if (n <= 0) {
             return;
         }
+
+        // Animation : les rangees s'ecartent quand la souris survole le bouton ZIG CITY
+        // (haut vers le haut, bas vers le bas) pour reveler davantage les tetes.
+        long now = Util.getMillis();
+        float dt = this.headAnimLastMs == 0L ? 0f : (now - this.headAnimLastMs) / 1000f;
+        this.headAnimLastMs = now;
+        boolean hover = mouseX >= this.zigBtnX && mouseX < this.zigBtnX + this.zigBtnW
+                && mouseY >= this.zigBtnY && mouseY < this.zigBtnY + this.zigBtnH;
+        float target = hover ? 1f : 0f;
+        float speed = 6.5f; // course complete en ~0,15 s
+        if (this.headSpread < target) {
+            this.headSpread = Math.min(target, this.headSpread + dt * speed);
+        } else if (this.headSpread > target) {
+            this.headSpread = Math.max(target, this.headSpread - dt * speed);
+        }
+        float eased = this.headSpread * this.headSpread * (3f - 2f * this.headSpread); // smoothstep
+        int shift = Math.round(eased * this.headMaxShift);
+
         int stripW = n * this.headSize;
         int startX = this.width / 2 - stripW / 2;
-        int topRowY = this.zigBtnY - this.headPeek;                       // depasse au-dessus du bouton
-        int botRowY = this.zigBtnY + this.zigBtnH - this.headOverlap;     // depasse en dessous
+        int topRowY = this.zigBtnY - this.headPeek - shift;                    // depasse en haut (monte au survol)
+        int botRowY = this.zigBtnY + this.zigBtnH - this.headOverlap + shift;  // depasse en bas (descend au survol)
         for (int i = 0; i < n; i++) {
             int hx = startX + i * this.headSize;
-            drawHead(g, heads.get(i % heads.size()), hx, topRowY);
-            drawHead(g, heads.get((i + n) % heads.size()), hx, botRowY);
+            drawHead(g, heads.get(i % heads.size()), hx, topRowY, false);
+            // Rangee du bas = reflet par symetrie centrale (rotation 180deg), comme le Figma.
+            drawHead(g, heads.get((n - 1 - i) % heads.size()), hx, botRowY, true);
         }
     }
 
-    private void drawHead(GuiGraphics g, ResourceLocation tex, int x, int y) {
+    private void drawHead(GuiGraphics g, ResourceLocation tex, int x, int y, boolean flip) {
         g.pose().pushPose();
         g.pose().translate(x, y, 0);
         g.pose().scale(this.headSize / 64f, this.headSize / 64f, 1f);
+        if (flip) {
+            // Rotation 180deg autour du centre de la tete (boite 64x64).
+            g.pose().translate(32f, 32f, 0);
+            g.pose().mulPose(Axis.ZP.rotationDegrees(180f));
+            g.pose().translate(-32f, -32f, 0);
+        }
         g.blit(tex, 0, 0, 0f, 0f, 64, 64, 64, 64);
         g.pose().popPose();
     }
