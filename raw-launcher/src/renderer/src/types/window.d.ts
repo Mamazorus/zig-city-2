@@ -162,7 +162,7 @@ declare global {
       librarySave: (payload: { name: string; dataUrl: string; variant: 'classic' | 'slim' }) => Promise<{ success: boolean; id?: string; error?: string }>
       libraryDelete: (id: string) => Promise<{ success: boolean; error?: string }>
       libraryRename: (payload: { id: string; name: string }) => Promise<{ success: boolean; error?: string }>
-      checkModpack: () => Promise<{ total: number; missingMods: number; needsNeoForge: boolean }>
+      checkModpack: () => Promise<{ total: number; missingMods: number; missingShaders: number; needsNeoForge: boolean }>
       installModpack: () => Promise<{ success: boolean; error?: string }>
       launch: () => Promise<{ success: boolean; error?: string }>
       getServerStatus: () => Promise<{ online: number; max: number; players: { name: string; since: number }[]; error?: string }>

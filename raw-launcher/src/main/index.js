@@ -1113,10 +1113,12 @@ ipcMain.handle('check-modpack', async () => {
     !fs.existsSync(path.join(modsDir, mod.name))
   )
   const needsNeoForge = !isNeoForgeInstalled()
+  const missingShaders = missingShaderList().length
 
   return {
     total: MODPACK.mods.length,
     missingMods: missingMods.length,
+    missingShaders,
     needsNeoForge
   }
 })
@@ -1210,6 +1212,9 @@ ipcMain.handle('install-modpack', async () => {
       })
       await downloadFile(mod.url, path.join(modsDir, mod.name))
     }
+
+    // Shaderpacks (Iris) : déposés après les mods, disponibles dès le 1er lancement.
+    await deployShaders()
 
     win?.webContents.send('install-progress', { done: true })
     return { success: true }
@@ -1539,6 +1544,51 @@ function deployConfigs() {
       setConfigLines(dest, cfg.section || null, cfg.setLines)
       console.log('[RawLauncher] Config patchée (lignes) :', cfg.path)
     }
+  }
+}
+
+// ─── SHADERS (Iris) ───────────────────────────────────────────────────────────
+// Iris lit les shaderpacks depuis GAME_DIR/shaderpacks/ (≠ 'shaders/', qui est le
+// dossier d'OptiFine, absent de ce pack). On y dépose les packs listés dans
+// MODPACK.shaders pour qu'ils soient disponibles « de base » dans le menu vidéo
+// (aucun n'est activé d'office). Contrairement aux mods, on NE SUPPRIME PAS les
+// fichiers inconnus : le joueur peut ajouter ses propres shaderpacks.
+const SHADERPACKS_DIR = path.join(GAME_DIR, 'shaderpacks')
+
+// Liste des shaderpacks attendus mais absents. Au passage, supprime un pack ATTENDU
+// mais corrompu (.zip tronqué d'un téléchargement coupé) pour qu'il soit
+// re-téléchargé proprement (isJarIntact vérifie l'EOCD ZIP, valable pour un .zip).
+function missingShaderList() {
+  const shaders = MODPACK.shaders || []
+  if (!shaders.length) return []
+  fs.mkdirSync(SHADERPACKS_DIR, { recursive: true })
+  for (const s of shaders) {
+    const p = path.join(SHADERPACKS_DIR, s.name)
+    if (fs.existsSync(p) && !isJarIntact(p)) {
+      try {
+        fs.unlinkSync(p)
+        console.log(`[RawLauncher] Shader corrompu supprimé (re-téléchargement) : ${s.name}`)
+      } catch (e) { /* rien */ }
+    }
+  }
+  return shaders.filter(s => !fs.existsSync(path.join(SHADERPACKS_DIR, s.name)))
+}
+
+// Télécharge les shaderpacks manquants dans GAME_DIR/shaderpacks/ (progression UI
+// via 'install-progress' step 'shaders', rendu comme les mods côté renderer).
+async function deployShaders() {
+  const missing = missingShaderList()
+  if (!missing.length) return
+  for (let i = 0; i < missing.length; i++) {
+    const s = missing[i]
+    win?.webContents.send('install-progress', {
+      step: 'shaders',
+      current: i + 1,
+      total: missing.length,
+      name: s.name,
+      percent: Math.round((i / missing.length) * 100)
+    })
+    await downloadFile(s.url, path.join(SHADERPACKS_DIR, s.name))
   }
 }
 

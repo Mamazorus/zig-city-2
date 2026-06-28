@@ -26,6 +26,40 @@
       }
     }
   ],
+  "shaders": [
+    {
+      "name": "BSL v8.1.zip",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/shaders/BSL_v8.1.02.3.zip"
+    },
+    {
+      "name": "Photon v1.3b.zip",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/shaders/photon_v1.3b.zip"
+    },
+    {
+      "name": "Prismarine V4.1a.zip",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/shaders/Prismarine_V4.1a.zip"
+    },
+    {
+      "name": "projectLUMA v1.32.zip",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/shaders/projectLUMA_v1.32.zip"
+    },
+    {
+      "name": "SEUS v11.zip",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/shaders/SEUS-v11.0.zip"
+    },
+    {
+      "name": "Sildurs Vibrant Extreme-VL.zip",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/shaders/Sildurs_Vibrant_Extreme-VL.zip"
+    },
+    {
+      "name": "Stracciatella Shaders v1.2.zip",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/shaders/Stracciatella_Shaders_v1.2.zip"
+    },
+    {
+      "name": "Haru v2.zip",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/shaders/Haru_v2_260618.zip"
+    }
+  ],
   "mods": [
     {
       "name": "[1.21.1] SecurityCraft v1.9.12.jar",

@@ -1194,7 +1194,7 @@ export default function App() {
     setProgress(null)
 
     const check = await window.launcher.checkModpack()
-    if (!check.missingMods && !check.needsNeoForge) {
+    if (!check.missingMods && !check.missingShaders && !check.needsNeoForge) {
       setStatus(`Prêt — ${check.total} mods installés`)
       setPhase('ready')
     } else {
@@ -1202,7 +1202,9 @@ export default function App() {
       setStatus(
         check.needsNeoForge
           ? `Installation de NeoForge + ${check.missingMods} mod(s)...`
-          : `${check.missingMods} mod(s) à télécharger...`
+          : check.missingMods
+            ? `${check.missingMods} mod(s) à télécharger...`
+            : `${check.missingShaders} shader(s) à télécharger...`
       )
       await window.launcher.installModpack()
     }
