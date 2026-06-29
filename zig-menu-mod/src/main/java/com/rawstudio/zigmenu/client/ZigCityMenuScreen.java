@@ -37,11 +37,11 @@ public class ZigCityMenuScreen extends Screen {
     private static final float BG_ZOOM = 1.18f;
     private static final long BG_PAN_PERIOD_MS = 38000L; // aller-retour complet (~19 s par sens)
 
-    // Texture logo (halo exterieur retire pour eviter le "contour" sur fond clair en jeu) :
-    // 2684x1308, le logo visible (avec etoiles) occupe la boite ci-dessous.
-    private static final int LOGO_TEX_W = 2684, LOGO_TEX_H = 1308;
-    private static final int LOGO_BX = 117, LOGO_BY = 179, LOGO_BW = 2451, LOGO_BH = 812;
-    private static final float LOGO_ASPECT = (float) LOGO_BW / (float) LOGO_BH; // ~3.018
+    // Texture logo "ZIG CITY 2" (1920x1080, fond transparent propre, sans halo a nettoyer) :
+    // le logo visible (lettres 3D + etoiles + "2" dore) occupe la boite ci-dessous (bbox alpha>0).
+    private static final int LOGO_TEX_W = 1920, LOGO_TEX_H = 1080;
+    private static final int LOGO_BX = 109, LOGO_BY = 277, LOGO_BW = 1693, LOGO_BH = 574;
+    private static final float LOGO_ASPECT = (float) LOGO_BW / (float) LOGO_BH; // ~2.949
 
     private static final String SERVER = "109.239.153.124:25965";
 
