@@ -81,7 +81,7 @@ public class ZigButton extends AbstractButton {
 
         // 4) Bordure : doree (ZIG CITY) ou sombre ; plus claire au survol.
         int bc = this.gold ? (hov ? GOLD_HOV : GOLD) : (hov ? BORDER_HOV : BORDER);
-        int bw = this.gold ? 2 : 1;
+        int bw = 1;   // meme epaisseur de bordure que les autres boutons (le dore se distingue par la couleur)
         g.fill(x, y, x + w, y + bw, bc);
         g.fill(x, y + h - bw, x + w, y + h, bc);
         g.fill(x, y, x + bw, y + h, bc);
