@@ -22,9 +22,9 @@ public class ZigButton extends AbstractButton {
             ResourceLocation.fromNamespaceAndPath("minecraft", "textures/block/stone.png");
     private static final int TILE = 16;
 
-    // Voile gris pose SUR la texture pleine : alpha 0xCC (80 %) -> le grain de pierre ne
-    // ressort qu'a ~20 %. La couleur RGB (0x767679) est l'aplat gris "pierre" de fond.
-    private static final int VEIL        = 0xCC767679;
+    // Voile gris pose SUR la texture pleine : alpha 0xDD (~87 %) -> le grain de pierre ne
+    // ressort qu'a ~13 % (tres leger). La couleur RGB (0x767679) est l'aplat gris de fond.
+    private static final int VEIL        = 0xDD767679;
     private static final int BASE        = 0xFF767679;   // aplat sous la texture (bords)
     private static final int TEXT        = 0xFFFFFFFF;
     private static final int BORDER      = 0xFF1C1C1E;
