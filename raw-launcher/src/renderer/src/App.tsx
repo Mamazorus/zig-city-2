@@ -240,6 +240,19 @@ function Skin3DThumb({ dataUrl, variant, width }: { dataUrl: string; variant: 'c
   )
 }
 
+// Parties du corps (pour masquer un membre et peindre les faces autrement cachées)
+type SkinPart = 'head' | 'body' | 'rightArm' | 'leftArm' | 'rightLeg' | 'leftLeg'
+type PartVisible = Record<SkinPart, boolean>
+const SKIN_PARTS: { key: SkinPart; label: string }[] = [
+  { key: 'head', label: 'Tête' },
+  { key: 'body', label: 'Corps' },
+  { key: 'rightArm', label: 'Bras D.' },
+  { key: 'leftArm', label: 'Bras G.' },
+  { key: 'rightLeg', label: 'Jambe D.' },
+  { key: 'leftLeg', label: 'Jambe G.' },
+]
+const ALL_PARTS_VISIBLE: PartVisible = { head: true, body: true, rightArm: true, leftArm: true, rightLeg: true, leftLeg: true }
+
 // Aperçu 3D du personnage (skinview3d / WebGL). Statique (pas d'animation) ;
 // clic gauche = peindre directement sur le modèle (à la Novaskin), clic droit =
 // pivoter, molette = zoomer. Le clic est converti en pixel via l'UV : skinview3d
@@ -253,6 +266,7 @@ function Skin3DViewer({
   paintLayer,
   showBase,
   showOverlay,
+  partVisible,
   hoverColor,
   hoverErasing,
   onModelDown,
@@ -267,6 +281,7 @@ function Skin3DViewer({
   paintLayer: 'base' | 'overlay'
   showBase: boolean
   showOverlay: boolean
+  partVisible: PartVisible
   hoverColor: string
   hoverErasing: boolean
   onModelDown: (px: number, py: number) => void
@@ -284,23 +299,33 @@ function Skin3DViewer({
   const painting = useRef(false)
   const layerRef = useRef(paintLayer)
   useEffect(() => { layerRef.current = paintLayer }, [paintLayer])
+  const partRef = useRef(partVisible)
+  useEffect(() => { partRef.current = partVisible }, [partVisible])
 
-  const parts = (): Array<{ inner: Object3D; outer: Object3D }> => {
+  const parts = (): Array<{ name: SkinPart; group: Object3D; inner: Object3D; outer: Object3D }> => {
     const s = viewerRef.current?.playerObject?.skin
     if (!s) return []
-    return [s.head, s.body, s.rightArm, s.leftArm, s.rightLeg, s.leftLeg]
-      .map(p => ({ inner: p.innerLayer, outer: p.outerLayer }))
+    const map: [SkinPart, { innerLayer: Object3D; outerLayer: Object3D } & Object3D][] = [
+      ['head', s.head], ['body', s.body], ['rightArm', s.rightArm],
+      ['leftArm', s.leftArm], ['rightLeg', s.rightLeg], ['leftLeg', s.leftLeg],
+    ]
+    return map.map(([name, p]) => ({ name, group: p, inner: p.innerLayer, outer: p.outerLayer }))
   }
 
   const tagMeshes = () => {
     for (const p of parts()) {
-      p.inner.traverse(o => { o.userData.skinLayer = 'inner' })
-      p.outer.traverse(o => { o.userData.skinLayer = 'outer' })
+      p.inner.traverse(o => { o.userData.skinLayer = 'inner'; o.userData.skinPart = p.name })
+      p.outer.traverse(o => { o.userData.skinLayer = 'outer'; o.userData.skinPart = p.name })
     }
   }
 
-  const applyVisibility = (base: boolean, overlay: boolean) => {
-    for (const p of parts()) { p.inner.visible = base; p.outer.visible = overlay }
+  // Visibilité = couche (inner/outer) ET membre (groupe entier masqué) combinés.
+  const applyVisibility = (base: boolean, overlay: boolean, pv: PartVisible) => {
+    for (const p of parts()) {
+      p.group.visible = pv[p.name] !== false
+      p.inner.visible = base
+      p.outer.visible = overlay
+    }
   }
 
   // Initialisation unique du viewer
@@ -364,11 +389,11 @@ function Skin3DViewer({
         }
         viewer.loadSkin(tex, { model: variant === 'slim' ? 'slim' : 'default' })
         tagMeshes()
-        applyVisibility(showBase, showOverlay)
+        applyVisibility(showBase, showOverlay, partVisible)
       } catch {}
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version, variant, sourceCanvas, hoverPixel, showBase, showOverlay, hoverColor, hoverErasing])
+  }, [version, variant, sourceCanvas, hoverPixel, showBase, showOverlay, partVisible, hoverColor, hoverErasing])
 
   // Convertit un point écran en pixel de skin via raycast (couche sélectionnée)
   const pixelFromEvent = (clientX: number, clientY: number): { px: number; py: number } | null => {
@@ -387,6 +412,8 @@ function Skin3DViewer({
     const hits = raycaster.current.intersectObject(viewer.playerObject, true)
     for (const h of hits) {
       if (!h.uv || h.object.userData?.skinLayer !== want) continue
+      // Membre masqué → on le traverse pour atteindre la face cachée derrière
+      if (partRef.current[h.object.userData?.skinPart as SkinPart] === false) continue
       const px = Math.min(63, Math.max(0, Math.floor(h.uv.x * 64)))
       const py = Math.min(63, Math.max(0, Math.floor((1 - h.uv.y) * 64)))
       return { px, py }
@@ -507,6 +534,32 @@ function hsvToHex(h: number, s: number, v: number): string {
   return `#${to(r)}${to(g)}${to(b)}`
 }
 
+const clamp01 = (n: number) => Math.min(1, Math.max(0, n))
+
+function hexToRgb(hex: string): [number, number, number] {
+  const m = /^#?([0-9a-f]{6})$/i.exec((hex || '').trim())
+  if (!m) return [0, 0, 0]
+  const n = parseInt(m[1], 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+const rgbToHex = (r: number, g: number, b: number) =>
+  '#' + [r, g, b].map(n => Math.round(Math.min(255, Math.max(0, n))).toString(16).padStart(2, '0')).join('')
+
+// Couleur courante avec une légère variation aléatoire de luminosité/saturation
+// (outil « Nuances » : casse l'aplat uni, donne du relief).
+function jitterShade(hex: string): string {
+  const { h, s, v } = hexToHsv(hex)
+  return hsvToHex(h, clamp01(s + (Math.random() * 2 - 1) * 0.06), clamp01(v + (Math.random() * 2 - 1) * 0.14))
+}
+// Éclaircit (dir +1) ou assombrit (dir -1) une couleur RGB d'un cran.
+function shiftValue(r: number, g: number, b: number, dir: number): [number, number, number] {
+  const { h, s, v } = hexToHsv(rgbToHex(r, g, b))
+  const nv = clamp01(v + dir * 0.1)
+  const ns = clamp01(s - (dir > 0 ? 0.04 : -0.02))   // vers le blanc en éclaircissant
+  const [nr, ng, nb] = hexToRgb(hsvToHex(h, ns, nv))
+  return [nr, ng, nb]
+}
+
 function ColorPicker({ color, onChange }: { color: string; onChange: (hex: string) => void }) {
   const svRef = useRef<HTMLCanvasElement>(null)
   const [hsv, setHsv] = useState(() => hexToHsv(color))
@@ -586,7 +639,7 @@ function ColorPicker({ color, onChange }: { color: string; onChange: (hex: strin
   )
 }
 
-type EditorTool = 'brush' | 'eraser' | 'eyedropper'
+type EditorTool = 'brush' | 'shade' | 'fill' | 'lighten' | 'darken' | 'eraser' | 'eyedropper'
 interface SkinEditorHandle { getDataURL: () => string | null }
 
 const SkinEditor = forwardRef<SkinEditorHandle, {
@@ -606,6 +659,7 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
   const [activeLayer, setActiveLayer] = useState<'base' | 'overlay'>('base')
   const [baseVisible, setBaseVisible] = useState(true)
   const [overlayVisible, setOverlayVisible] = useState(true)
+  const [partVisible, setPartVisible] = useState<PartVisible>(ALL_PARTS_VISIBLE)   // membres affichés
   const [showFlat, setShowFlat] = useState(true)
   const [hoverCell, setHoverCell] = useState<{ x: number; y: number } | null>(null)   // survol du patron plat
   const [recentColors, setRecentColors] = useState<string[]>(
@@ -730,12 +784,46 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
 
   const applyAt = (x: number, y: number) => {
     const ctx = workCtx()
-    if (toolRef.current === 'eraser') {
+    const t = toolRef.current
+    if (t === 'eraser') {
       ctx.clearRect(x, y, 1, 1)
+    } else if (t === 'shade') {
+      ctx.fillStyle = jitterShade(colorRef.current)   // couleur + légère variation
+      ctx.fillRect(x, y, 1, 1)
+    } else if (t === 'lighten' || t === 'darken') {
+      let d: Uint8ClampedArray
+      try { d = ctx.getImageData(x, y, 1, 1).data } catch { return }
+      if (d[3] === 0) return                           // pixel vide → rien à nuancer
+      const [r, g, b] = shiftValue(d[0], d[1], d[2], t === 'lighten' ? 1 : -1)
+      ctx.fillStyle = rgbToHex(r, g, b)
+      ctx.fillRect(x, y, 1, 1)
     } else {
-      ctx.fillStyle = colorRef.current
+      ctx.fillStyle = colorRef.current                 // pinceau
       ctx.fillRect(x, y, 1, 1)
     }
+  }
+
+  // Pot de peinture : remplit la zone contiguë de même couleur (4-connexité).
+  const floodFill = (sx: number, sy: number) => {
+    const ctx = workCtx()
+    let img: ImageData
+    try { img = ctx.getImageData(0, 0, SKIN_PX, SKIN_PX) } catch { return }
+    const data = img.data
+    const at = (x: number, y: number) => (y * SKIN_PX + x) * 4
+    const si = at(sx, sy)
+    const t0 = data[si], t1 = data[si + 1], t2 = data[si + 2], t3 = data[si + 3]
+    const [fr, fg, fb] = hexToRgb(colorRef.current)
+    if (t0 === fr && t1 === fg && t2 === fb && t3 === 255) return    // déjà cette couleur
+    const stack: [number, number][] = [[sx, sy]]
+    while (stack.length) {
+      const [x, y] = stack.pop()!
+      if (x < 0 || y < 0 || x >= SKIN_PX || y >= SKIN_PX) continue
+      const i = at(x, y)
+      if (data[i] !== t0 || data[i + 1] !== t1 || data[i + 2] !== t2 || data[i + 3] !== t3) continue
+      data[i] = fr; data[i + 1] = fg; data[i + 2] = fb; data[i + 3] = 255
+      stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1])
+    }
+    ctx.putImageData(img, 0, 0)
   }
 
   // trace une ligne entre deux cellules (évite les trous en déplacement rapide)
@@ -783,8 +871,17 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const cell = cellFromEvent(e)
     if (!cell) return
-    if (toolRef.current === 'eyedropper') { pickAt(cell.x, cell.y); return }
-    if (toolRef.current === 'brush') noteColorUsed(colorRef.current)
+    const t = toolRef.current
+    if (t === 'eyedropper') { pickAt(cell.x, cell.y); return }
+    if (t === 'fill') {
+      noteColorUsed(colorRef.current)
+      setHoverCell(null)
+      pushUndo()
+      floodFill(cell.x, cell.y)
+      renderAll()
+      return                                   // pot = action unique (pas de glisser)
+    }
+    if (t === 'brush' || t === 'shade') noteColorUsed(colorRef.current)
     e.currentTarget.setPointerCapture(e.pointerId)
     pushUndo()
     painting.current = true
@@ -821,8 +918,10 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
 
   // ── Dessin direct sur le modèle 3D (pixel par pixel, sans interpolation) ──
   const model3DDown = (px: number, py: number) => {
-    if (toolRef.current === 'eyedropper') { pickAt(px, py); return }
-    if (toolRef.current === 'brush') noteColorUsed(colorRef.current)
+    const t = toolRef.current
+    if (t === 'eyedropper') { pickAt(px, py); return }
+    if (t === 'fill') { noteColorUsed(colorRef.current); pushUndo(); floodFill(px, py); renderAll(); return }
+    if (t === 'brush' || t === 'shade') noteColorUsed(colorRef.current)
     pushUndo()
     painting.current = true
     applyAt(px, py)
@@ -857,13 +956,14 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
     <button
       onClick={() => setTool(t)}
       title={label}
-      className={`flex items-center justify-center size-[44px] rounded-[11px] border transition-colors ${
+      className={`flex items-center gap-[9px] px-[11px] py-[9px] rounded-[10px] border font-ui text-[13px] font-semibold transition-colors ${
         tool === t
           ? 'border-[rgba(0,255,225,0.55)] bg-[rgba(0,255,225,0.14)] text-white'
-          : 'border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.04)] text-white/60 hover:text-white hover:bg-[rgba(255,255,255,0.08)]'
+          : 'border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.04)] text-white/65 hover:text-white hover:bg-[rgba(255,255,255,0.08)]'
       }`}
     >
-      {icon}
+      <span className="shrink-0 flex items-center justify-center" style={{ width: 20, height: 20 }}>{icon}</span>
+      <span className="truncate">{label}</span>
     </button>
   )
 
@@ -911,6 +1011,7 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
           paintLayer={activeLayer}
           showBase={baseVisible}
           showOverlay={overlayVisible}
+          partVisible={partVisible}
           hoverColor={color}
           hoverErasing={tool === 'eraser'}
           onModelDown={model3DDown}
@@ -977,35 +1078,66 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
           </div>
         </div>
 
+        {/* Membres — masquer un membre pour peindre les faces autrement cachées */}
+        <div className="flex flex-col gap-[6px]">
+          <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px]">Membres</p>
+          <div className="grid grid-cols-3 gap-[6px]">
+            {SKIN_PARTS.map(({ key, label }) => {
+              const vis = partVisible[key] !== false
+              return (
+                <button
+                  key={key}
+                  onClick={() => setPartVisible(p => ({ ...p, [key]: !(p[key] !== false) }))}
+                  title={vis ? `Masquer ${label} (pour peindre derrière)` : `Afficher ${label}`}
+                  className={`px-[6px] py-[7px] rounded-[8px] border font-ui text-[12px] font-semibold transition-colors ${
+                    vis
+                      ? 'border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.05)] text-white/80 hover:bg-[rgba(255,255,255,0.08)]'
+                      : 'border-[rgba(255,255,255,0.07)] bg-transparent text-white/30 line-through hover:text-white/50'
+                  }`}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
         <div className="border-t border-[rgba(255,255,255,0.08)]" />
 
         {/* Outils */}
-        <div className="flex items-center gap-[8px]">
-          {toolBtn('brush', 'Pinceau', (
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path d="M4 20l4-1L19 8l-3-3L5 16l-1 4Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"/>
-              <path d="M14.5 6.5l3 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-            </svg>
-          ))}
-          {toolBtn('eraser', 'Gomme', (
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path d="M9 18l-4-4 8-8 4 4-8 8Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"/>
-              <path d="M8.5 18.5H20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-            </svg>
-          ))}
-          {toolBtn('eyedropper', 'Pipette', (
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path d="M5 19l.8-3.2 7.4-7.4 2.4 2.4-7.4 7.4L5 19Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"/>
-              <path d="M14 7l3-3 3 3-3 3" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"/>
-            </svg>
-          ))}
-          <div className="flex-1" />
-          <button onClick={undo} disabled={!undoStack.current.length} title="Annuler" className={miniBtn(false)}>
-            <svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M6 4 3 7l3 3M3 7h6.5A3.5 3.5 0 0 1 13 10.5v0A3.5 3.5 0 0 1 9.5 14H6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </button>
-          <button onClick={redo} disabled={!redoStack.current.length} title="Refaire" className={miniBtn(false)}>
-            <svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M10 4l3 3-3 3M13 7H6.5A3.5 3.5 0 0 0 3 10.5v0A3.5 3.5 0 0 0 6.5 14H10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </button>
+        <div className="flex flex-col gap-[8px]">
+          <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px]">Outils</p>
+          <div className="grid grid-cols-2 gap-[8px]">
+            {toolBtn('brush', 'Pinceau', (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M9.06 11.9l8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08"/><path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z"/></svg>
+            ))}
+            {toolBtn('shade', 'Nuances', (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="9" cy="9" r="6.5"/><circle cx="15" cy="15" r="6.5"/></svg>
+            ))}
+            {toolBtn('lighten', 'Éclaircir', (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>
+            ))}
+            {toolBtn('darken', 'Assombrir', (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"><path d="M12 3a6.4 6.4 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+            ))}
+            {toolBtn('fill', 'Remplir', (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M19 11 11 3l-8.3 8.3a1.5 1.5 0 0 0 0 2.1l5 5a1.5 1.5 0 0 0 2.1 0L19 11Z"/><path d="m5 5 4 4"/><path d="M2.5 13.5h15"/><path d="M21.5 19.5a1.8 1.8 0 1 1-3.6 0c0-1.4 1.8-3 1.8-3s1.8 1.6 1.8 3Z"/></svg>
+            ))}
+            {toolBtn('eraser', 'Gomme', (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M7 21 3.3 17.3a1.8 1.8 0 0 1 0-2.5l9-9a1.8 1.8 0 0 1 2.5 0l4.4 4.4a1.8 1.8 0 0 1 0 2.5L13 21"/><path d="M21 21H8"/><path d="m6 12 6 6"/></svg>
+            ))}
+            {toolBtn('eyedropper', 'Pipette', (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m2 22 1.5-.5 9-9"/><path d="M12.5 12.5 8 8"/><path d="m15 6 3-3a2.1 2.1 0 0 1 3 3l-3 3 .5.5a2 2 0 0 1-2.8 2.8l-4-4A2 2 0 0 1 12 8.5l.5.5Z"/></svg>
+            ))}
+          </div>
+          <div className="flex gap-[8px]">
+            <button onClick={undo} disabled={!undoStack.current.length} title="Annuler" className={miniBtn(false) + ' flex-1'}>
+              <svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M6 4 3 7l3 3M3 7h6.5A3.5 3.5 0 0 1 13 10.5v0A3.5 3.5 0 0 1 9.5 14H6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+            <button onClick={redo} disabled={!redoStack.current.length} title="Refaire" className={miniBtn(false) + ' flex-1'}>
+              <svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M10 4l3 3-3 3M13 7H6.5A3.5 3.5 0 0 0 3 10.5v0A3.5 3.5 0 0 0 6.5 14H10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+          </div>
         </div>
 
         {/* Repères de zones */}
@@ -2704,40 +2836,43 @@ export default function App() {
             {/* Pied : actions (onglet Éditeur) */}
             {!skinInfoLoading && !(skinError && !editorSrc) && skinTab === 'editor' && (
               <div className="flex items-center gap-[10px] px-[24px] py-[14px] shrink-0 border-t border-[rgba(255,255,255,0.08)]">
-                {/* Utilitaires fichier (icônes, cohérent avec la barre d'outils) */}
+                {/* Utilitaires fichier (icône + libellé) */}
                 <button
                   onClick={handlePickSkin}
                   disabled={skinBusy}
                   title="Importer un fichier PNG comme base"
-                  className="flex items-center justify-center size-[44px] rounded-[11px] text-white/70 border border-[rgba(255,255,255,0.14)] hover:bg-[rgba(255,255,255,0.07)] hover:text-white transition-colors disabled:opacity-40"
+                  className="flex items-center gap-[8px] px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[14px] text-white/75 border border-[rgba(255,255,255,0.14)] hover:bg-[rgba(255,255,255,0.07)] hover:text-white transition-colors disabled:opacity-40 whitespace-nowrap"
                 >
-                  <svg width="19" height="19" viewBox="0 0 20 20" fill="none">
+                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
                     <path d="M2.5 5.8A1.5 1.5 0 0 1 4 4.3h3l1.5 1.8H16a1.5 1.5 0 0 1 1.5 1.5v6.1A1.5 1.5 0 0 1 16 15.2H4a1.5 1.5 0 0 1-1.5-1.5V5.8Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
                   </svg>
+                  Importer un skin
                 </button>
 
                 <button
                   onClick={handleExportSkin}
                   disabled={skinBusy}
                   title="Exporter le skin en fichier PNG"
-                  className="flex items-center justify-center size-[44px] rounded-[11px] text-white/70 border border-[rgba(255,255,255,0.14)] hover:bg-[rgba(255,255,255,0.07)] hover:text-white transition-colors disabled:opacity-40"
+                  className="flex items-center gap-[8px] px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[14px] text-white/75 border border-[rgba(255,255,255,0.14)] hover:bg-[rgba(255,255,255,0.07)] hover:text-white transition-colors disabled:opacity-40 whitespace-nowrap"
                 >
-                  <svg width="19" height="19" viewBox="0 0 20 20" fill="none">
+                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
                     <path d="M10 4v9M10 13l-3.5-3.5M10 13l3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                     <path d="M3.5 13v2A1.5 1.5 0 005 16.5h10a1.5 1.5 0 001.5-1.5v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                   </svg>
+                  Exporter
                 </button>
 
                 <button
                   onClick={handleResetSkin}
                   disabled={skinBusy}
                   title="Revenir au skin Minecraft par défaut"
-                  className="flex items-center justify-center size-[44px] rounded-[11px] text-white/55 border border-[rgba(255,255,255,0.12)] hover:bg-[rgba(255,255,255,0.07)] hover:text-white transition-colors disabled:opacity-40"
+                  className="flex items-center gap-[8px] px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[14px] text-white/60 border border-[rgba(255,255,255,0.12)] hover:bg-[rgba(255,255,255,0.07)] hover:text-white transition-colors disabled:opacity-40 whitespace-nowrap"
                 >
-                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                  <svg width="17" height="17" viewBox="0 0 20 20" fill="none">
                     <path d="M15.5 10a5.5 5.5 0 1 1-1.6-3.9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                     <path d="M15.5 3.5V6.5H12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
+                  Réinitialiser
                 </button>
 
                 <div className="flex-1" />
