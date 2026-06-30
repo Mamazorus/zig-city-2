@@ -2488,7 +2488,7 @@ export default function App() {
                             onMouseEnter={name ? (e) => handleHeadEnter(name, e.currentTarget) : undefined}
                             onMouseLeave={name ? handleHeadLeave : undefined}
                           >
-                            <Avatar name={name} className="size-full object-cover" />
+                            <Avatar name={name} version={name && username && name.toLowerCase() === username.toLowerCase() ? skinVersion : undefined} className="size-full object-cover" />
                           </div>
                         ))}
                       </div>
@@ -2573,7 +2573,7 @@ export default function App() {
                     className={`flex gap-[8px] items-center p-[8px] rounded-[8px] w-full ${i % 2 === 0 ? 'bg-[rgba(255,255,255,0.1)]' : ''}`}
                   >
                     <div className="relative rounded-[8px] shrink-0 size-[48px]">
-                      <Avatar name={player.name} className="absolute inset-0 max-w-none object-cover pointer-events-none rounded-[8px] size-full" />
+                      <Avatar name={player.name} version={username && player.name.toLowerCase() === username.toLowerCase() ? skinVersion : undefined} className="absolute inset-0 max-w-none object-cover pointer-events-none rounded-[8px] size-full" />
                     </div>
                     <div className="flex flex-col items-start">
                       <p className="font-mono font-semibold text-[16px] text-white tracking-[-0.64px]">{player.name}</p>
