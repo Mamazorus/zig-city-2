@@ -169,6 +169,77 @@ function SkinPreview({
   )
 }
 
+// ── Vignettes 3D pour la bibliothèque ────────────────────────────────────────
+// Un SEUL viewer WebGL offscreen, réutilisé en série pour rendre chaque skin en
+// image PNG (Chromium plafonne à ~16 contextes WebGL : impossible d'en créer un
+// par vignette). preserveDrawingBuffer + render() manuel → toDataURL fiable.
+let thumbViewer: SkinViewer | null = null
+let thumbCanvas: HTMLCanvasElement | null = null
+let thumbChain: Promise<unknown> = Promise.resolve()
+const thumbCache = new Map<string, string>()
+const THUMB_W = 200
+const THUMB_H = 320
+
+function renderSkinThumb(dataUrl: string, variant: 'classic' | 'slim'): Promise<string> {
+  const key = variant + '|' + dataUrl
+  const cached = thumbCache.get(key)
+  if (cached) return Promise.resolve(cached)
+  // Sérialise : canvas + viewer offscreen partagés, un rendu à la fois.
+  const job = thumbChain.then(() => new Promise<string>((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      try {
+        if (!thumbCanvas) thumbCanvas = document.createElement('canvas')
+        if (!thumbViewer) {
+          thumbViewer = new SkinViewer({ canvas: thumbCanvas, width: THUMB_W, height: THUMB_H, preserveDrawingBuffer: true, renderPaused: true })
+          thumbViewer.animation = null
+          thumbViewer.autoRotate = false
+          thumbViewer.background = null
+          thumbViewer.fov = 38
+          thumbViewer.zoom = 0.9
+        }
+        thumbViewer.loadSkin(img, { model: variant === 'slim' ? 'slim' : 'default' })
+        thumbViewer.playerObject.rotation.y = 0.5   // vue de trois-quarts
+        thumbViewer.render()
+        resolve(thumbCanvas.toDataURL('image/png'))
+      } catch (e) { reject(e) }
+    }
+    img.onerror = () => reject(new Error('image invalide'))
+    img.src = dataUrl
+  }).then(url => { thumbCache.set(key, url); return url }))
+  thumbChain = job.catch(() => {})   // la file continue même si un rendu échoue
+  return job
+}
+
+// Vignette 3D d'un skin (rendu une fois en image, via le viewer offscreen partagé).
+// Repli sur l'aperçu 2D si le WebGL échoue.
+function Skin3DThumb({ dataUrl, variant, width }: { dataUrl: string; variant: 'classic' | 'slim'; width: number }) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setUrl(null); setFailed(false)
+    renderSkinThumb(dataUrl, variant)
+      .then(u => { if (alive) setUrl(u) })
+      .catch(() => { if (alive) setFailed(true) })
+    return () => { alive = false }
+  }, [dataUrl, variant])
+  const h = Math.round(width * (THUMB_H / THUMB_W))
+  if (failed) return <SkinPreview src={dataUrl} variant={variant} width={width} />
+  return (
+    <div style={{ width, height: h }} className="flex items-center justify-center">
+      {url ? (
+        <img src={url} alt="" style={{ width, height: h }} className="object-contain pointer-events-none" />
+      ) : (
+        <svg className="animate-spin text-white/30" style={{ width: 22, height: 22 }} fill="none" viewBox="0 0 24 24">
+          <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+      )}
+    </div>
+  )
+}
+
 // Aperçu 3D du personnage (skinview3d / WebGL). Statique (pas d'animation) ;
 // clic gauche = peindre directement sur le modèle (à la Novaskin), clic droit =
 // pivoter, molette = zoomer. Le clic est converti en pixel via l'UV : skinview3d
@@ -180,7 +251,10 @@ function Skin3DViewer({
   width,
   height,
   paintLayer,
+  showBase,
   showOverlay,
+  hoverColor,
+  hoverErasing,
   onModelDown,
   onModelMove,
   onModelUp
@@ -191,7 +265,10 @@ function Skin3DViewer({
   width: number
   height: number
   paintLayer: 'base' | 'overlay'
+  showBase: boolean
   showOverlay: boolean
+  hoverColor: string
+  hoverErasing: boolean
   onModelDown: (px: number, py: number) => void
   onModelMove: (px: number, py: number) => void
   onModelUp: () => void
@@ -199,7 +276,9 @@ function Skin3DViewer({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const viewerRef = useRef<SkinViewer | null>(null)
   const rafRef = useRef<number | null>(null)
+  const displayRef = useRef<HTMLCanvasElement | null>(null)   // copie work + aperçu du pixel survolé
   const [failed, setFailed] = useState(false)
+  const [hoverPixel, setHoverPixel] = useState<{ px: number; py: number } | null>(null)
   const raycaster = useRef(new Raycaster())
   const ndc = useRef(new Vector2())
   const painting = useRef(false)
@@ -220,8 +299,8 @@ function Skin3DViewer({
     }
   }
 
-  const applyOverlayVisibility = (v: boolean) => {
-    for (const p of parts()) p.outer.visible = v
+  const applyVisibility = (base: boolean, overlay: boolean) => {
+    for (const p of parts()) { p.inner.visible = base; p.outer.visible = overlay }
   }
 
   // Initialisation unique du viewer
@@ -258,23 +337,38 @@ function Skin3DViewer({
   // Redimensionnement
   useEffect(() => { viewerRef.current?.setSize(width, height) }, [width, height])
 
-  // (Re)charge la texture depuis le canvas de travail à chaque édition / variante
+  // (Re)charge la texture à chaque édition / variante / survol / visibilité.
+  // Au survol (hors peinture), on dessine sur une copie le pixel ciblé en
+  // surbrillance pour montrer exactement où il se posera avant de cliquer.
   useEffect(() => {
     const viewer = viewerRef.current
     if (!viewer || !sourceCanvas) return
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
     rafRef.current = requestAnimationFrame(() => {
       try {
-        viewer.loadSkin(sourceCanvas, { model: variant === 'slim' ? 'slim' : 'default' })
+        let tex: HTMLCanvasElement = sourceCanvas
+        if (hoverPixel && !painting.current) {
+          if (!displayRef.current) {
+            const c = document.createElement('canvas'); c.width = SKIN_PX; c.height = SKIN_PX
+            displayRef.current = c
+          }
+          const d = displayRef.current
+          const dctx = d.getContext('2d')!
+          dctx.clearRect(0, 0, SKIN_PX, SKIN_PX)
+          dctx.drawImage(sourceCanvas, 0, 0)
+          dctx.globalAlpha = 0.7
+          dctx.fillStyle = hoverErasing ? '#ff5454' : hoverColor
+          dctx.fillRect(hoverPixel.px, hoverPixel.py, 1, 1)
+          dctx.globalAlpha = 1
+          tex = d
+        }
+        viewer.loadSkin(tex, { model: variant === 'slim' ? 'slim' : 'default' })
         tagMeshes()
-        applyOverlayVisibility(showOverlay)
+        applyVisibility(showBase, showOverlay)
       } catch {}
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version, variant, sourceCanvas])
-
-  // Visibilité de la couche du dessus
-  useEffect(() => { applyOverlayVisibility(showOverlay) }, [showOverlay])
+  }, [version, variant, sourceCanvas, hoverPixel, showBase, showOverlay, hoverColor, hoverErasing])
 
   // Convertit un point écran en pixel de skin via raycast (couche sélectionnée)
   const pixelFromEvent = (clientX: number, clientY: number): { px: number; py: number } | null => {
@@ -300,6 +394,16 @@ function Skin3DViewer({
     return null
   }
 
+  // Met à jour le pixel survolé (référence stable si inchangé → pas de recharge inutile)
+  const updateHover = (clientX: number, clientY: number) => {
+    const hit = pixelFromEvent(clientX, clientY)
+    setHoverPixel(prev => {
+      if (!prev && !hit) return prev
+      if (prev && hit && prev.px === hit.px && prev.py === hit.py) return prev
+      return hit
+    })
+  }
+
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.button !== 0) return            // clic droit → laissé à la rotation
     const hit = pixelFromEvent(e.clientX, e.clientY)
@@ -307,13 +411,17 @@ function Skin3DViewer({
     e.preventDefault()
     e.currentTarget.setPointerCapture(e.pointerId)
     painting.current = true
+    setHoverPixel(null)                    // pas d'aperçu pendant qu'on peint
     onModelDown(hit.px, hit.py)
   }
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!painting.current) return
-    const hit = pixelFromEvent(e.clientX, e.clientY)
-    if (hit) onModelMove(hit.px, hit.py)
+    if (painting.current) {
+      const hit = pixelFromEvent(e.clientX, e.clientY)
+      if (hit) onModelMove(hit.px, hit.py)
+      return
+    }
+    updateHover(e.clientX, e.clientY)
   }
 
   const endStroke = () => {
@@ -321,6 +429,8 @@ function Skin3DViewer({
     painting.current = false
     onModelUp()
   }
+
+  const onPointerLeave = () => { if (!painting.current) setHoverPixel(null) }
 
   // Repli 2D si WebGL indisponible
   if (failed) {
@@ -334,12 +444,13 @@ function Skin3DViewer({
   return (
     <canvas
       ref={canvasRef}
-      className="touch-none select-none"
+      className="block touch-none select-none"
       style={{ cursor: 'crosshair' }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endStroke}
       onPointerCancel={endStroke}
+      onPointerLeave={onPointerLeave}
     />
   )
 }
@@ -491,14 +602,21 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
   const [showGuides, setShowGuides] = useState(true)
   const [previewVer, setPreviewVer] = useState(0)
   const [, setHistVer] = useState(0)
-  const [paintLayer, setPaintLayer] = useState<'base' | 'overlay'>('base')
-  const [hideOverlay, setHideOverlay] = useState(false)
+  // Calques (façon Photoshop) : visibilité indépendante + couche active (peinte).
+  const [activeLayer, setActiveLayer] = useState<'base' | 'overlay'>('base')
+  const [baseVisible, setBaseVisible] = useState(true)
+  const [overlayVisible, setOverlayVisible] = useState(true)
   const [showFlat, setShowFlat] = useState(true)
+  const [hoverCell, setHoverCell] = useState<{ x: number; y: number } | null>(null)   // survol du patron plat
   const [recentColors, setRecentColors] = useState<string[]>(
     ['#ffffff', '#c9c9c9', '#000000', '#c43c3c', '#e08a2e', '#ffcb45', '#3fa04a', '#3a6fc4']
   )
-  // la couche du dessus est forcément visible quand on l'édite
-  const overlayVisible = paintLayer === 'overlay' ? true : !hideOverlay
+  // Sélectionner une couche pour l'éditer la rend visible (sinon on peint à l'aveugle).
+  const selectLayer = (l: 'base' | 'overlay') => {
+    setActiveLayer(l)
+    if (l === 'base') setBaseVisible(true)
+    else setOverlayVisible(true)
+  }
 
   const noteColorUsed = (c: string) => {
     setRecentColors(prev => [c, ...prev.filter(x => x.toLowerCase() !== c.toLowerCase())].slice(0, 14))
@@ -546,7 +664,18 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
       g.lineWidth = 1.5
       for (const r of SKIN_GUIDES) g.strokeRect(r.x * S, r.y * S, r.w * S, r.h * S)
     }
-  }, [showGuides])
+    // Aperçu de la cellule survolée (où le pixel se posera), hors peinture
+    if (hoverCell && !painting.current) {
+      g.save()
+      g.globalAlpha = 0.55
+      g.fillStyle = tool === 'eraser' ? '#ff5454' : color
+      g.fillRect(hoverCell.x * S, hoverCell.y * S, S, S)
+      g.restore()
+      g.strokeStyle = '#ffffff'
+      g.lineWidth = 1.5
+      g.strokeRect(hoverCell.x * S + 0.75, hoverCell.y * S + 0.75, S - 1.5, S - 1.5)
+    }
+  }, [showGuides, hoverCell, color, tool])
 
   const renderAll = useCallback(() => {
     drawGrid()
@@ -659,25 +788,36 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
     e.currentTarget.setPointerCapture(e.pointerId)
     pushUndo()
     painting.current = true
+    setHoverCell(null)
     lastCell.current = cell
     applyAt(cell.x, cell.y)
     renderAll()
   }
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!painting.current) return
     const cell = cellFromEvent(e)
-    if (!cell) return
-    if (lastCell.current) paintLine(lastCell.current, cell)
-    else applyAt(cell.x, cell.y)
-    lastCell.current = cell
-    renderAll()
+    if (painting.current) {
+      if (!cell) return
+      if (lastCell.current) paintLine(lastCell.current, cell)
+      else applyAt(cell.x, cell.y)
+      lastCell.current = cell
+      renderAll()
+      return
+    }
+    // Survol (hors peinture) : référence stable si inchangé → pas de redraw inutile
+    setHoverCell(prev => {
+      if (!prev && !cell) return prev
+      if (prev && cell && prev.x === cell.x && prev.y === cell.y) return prev
+      return cell
+    })
   }
 
   const endStroke = () => {
     painting.current = false
     lastCell.current = null
   }
+
+  const onPointerLeaveGrid = () => { if (!painting.current) setHoverCell(null) }
 
   // ── Dessin direct sur le modèle 3D (pixel par pixel, sans interpolation) ──
   const model3DDown = (px: number, py: number) => {
@@ -735,25 +875,44 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
     }`
 
   const gridSize = SKIN_PX * EDIT_CELL   // résolution du patron (buffer)
-  const FLAT_DISPLAY = 168               // petit patron à plat (bas de colonne)
-  const VIEWER_W = 540                   // espace 3D agrandi
-  const VIEWER_H = 600
+  const FLAT_DISPLAY = 256               // patron à plat (panneau gauche)
+
+  // L'espace 3D occupe tout l'espace restant : on mesure son conteneur et on
+  // redimensionne le viewer WebGL en conséquence (vraiment responsive).
+  const viewerWrapRef = useRef<HTMLDivElement>(null)
+  const [viewerSize, setViewerSize] = useState({ w: 480, h: 560 })
+  useEffect(() => {
+    const el = viewerWrapRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      const w = Math.max(160, Math.floor(el.clientWidth))
+      const h = Math.max(160, Math.floor(el.clientHeight))
+      setViewerSize(s => (s.w === w && s.h === h) ? s : { w, h })
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   return (
-    <div className="flex gap-[16px] items-stretch">
-      {/* Espace 3D (principal) */}
+    // Disposition « atelier » : panneau outils à gauche, espace 3D à droite (flex).
+    <div className="flex flex-row-reverse gap-[16px] h-full min-h-0">
+      {/* Espace 3D (principal, occupe tout l'espace restant) */}
       <div
-        className="relative shrink-0 rounded-[14px] overflow-hidden border border-[rgba(255,255,255,0.08)]"
-        style={{ width: VIEWER_W, height: VIEWER_H, background: 'radial-gradient(ellipse 72% 64% at 50% 38%, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.015) 42%, rgba(10,8,16,0.6) 88%)' }}
+        ref={viewerWrapRef}
+        className="relative flex-1 min-w-0 rounded-[14px] overflow-hidden border border-[rgba(255,255,255,0.08)]"
+        style={{ background: 'radial-gradient(ellipse 72% 64% at 50% 38%, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.015) 42%, rgba(10,8,16,0.6) 88%)' }}
       >
         <Skin3DViewer
           sourceCanvas={workRef.current}
           version={previewVer}
           variant={variant}
-          width={VIEWER_W}
-          height={VIEWER_H}
-          paintLayer={paintLayer}
+          width={viewerSize.w}
+          height={viewerSize.h}
+          paintLayer={activeLayer}
+          showBase={baseVisible}
           showOverlay={overlayVisible}
+          hoverColor={color}
+          hoverErasing={tool === 'eraser'}
           onModelDown={model3DDown}
           onModelMove={model3DMove}
           onModelUp={model3DUp}
@@ -764,8 +923,8 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
         </p>
       </div>
 
-      {/* Colonne outils + couleurs */}
-      <div className="flex flex-col gap-[12px]" style={{ width: 268 }}>
+      {/* Panneau outils + couleurs (gauche, largeur fixe, défilable) */}
+      <div className="flex flex-col gap-[12px] w-[300px] shrink-0 overflow-y-auto pr-[6px] -mr-[6px]">
         {/* Modèle du personnage */}
         <div className="flex gap-[8px]">
           {(['classic', 'slim'] as const).map(v => (
@@ -784,36 +943,38 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
           ))}
         </div>
 
-        {/* Couche éditée */}
-        <div className="flex items-center gap-[8px]">
-          <div className="flex gap-[6px] flex-1">
-            {([['base', 'Base'], ['overlay', 'Dessus']] as const).map(([l, label]) => (
-              <button
-                key={l}
-                onClick={() => setPaintLayer(l)}
-                title={l === 'overlay' ? 'Le 2e calque (chapeau, veste, manches…) qui ressort en 3D' : 'Le corps du personnage'}
-                className={`flex-1 px-[10px] py-[8px] rounded-[10px] border font-ui text-[14px] font-semibold transition-colors ${
-                  paintLayer === l
-                    ? 'border-[rgba(0,255,225,0.5)] bg-[rgba(0,255,225,0.08)] text-white'
-                    : 'border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] text-white/60 hover:bg-[rgba(255,255,255,0.06)]'
-                }`}
-              >
-                {l === 'base' ? 'Couche base' : 'Couche dessus'}
-              </button>
-            ))}
+        {/* Calques (façon Photoshop : visibilité indépendante + couche peinte) */}
+        <div className="flex flex-col gap-[6px]">
+          <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px]">Calques</p>
+          <div className="rounded-[10px] border border-[rgba(255,255,255,0.1)] overflow-hidden divide-y divide-[rgba(255,255,255,0.07)]">
+            {([
+              ['overlay', 'Couche du dessus', 'chapeau, veste, manches…'],
+              ['base', 'Couche du dessous', 'le corps du personnage'],
+            ] as const).map(([l, label, sub]) => {
+              const visible = l === 'base' ? baseVisible : overlayVisible
+              const active = activeLayer === l
+              return (
+                <div key={l} className={`flex items-center gap-[10px] px-[10px] py-[9px] transition-colors ${active ? 'bg-[rgba(0,255,225,0.10)]' : ''}`}>
+                  {/* Afficher / masquer — pastille cochée (pas un œil) */}
+                  <button
+                    onClick={() => l === 'base' ? setBaseVisible(v => !v) : setOverlayVisible(v => !v)}
+                    title={visible ? 'Masquer cette couche' : 'Afficher cette couche'}
+                    className={`shrink-0 size-[20px] rounded-[6px] border flex items-center justify-center transition-colors ${
+                      visible ? 'bg-[rgba(0,255,225,0.85)] border-transparent text-[#0e0b16]' : 'border-[rgba(255,255,255,0.28)] text-transparent hover:border-white/50'
+                    }`}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.2l2.3 2.3L9.5 3.8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </button>
+                  {/* Sélectionner la couche pour la peindre */}
+                  <button onClick={() => selectLayer(l)} className="flex-1 flex flex-col items-start text-left min-w-0">
+                    <span className={`font-ui font-semibold text-[14px] truncate w-full ${active ? 'text-white' : 'text-white/70'}`}>{label}</span>
+                    <span className="font-ui text-[12px] text-white/35 truncate w-full">{sub}</span>
+                  </button>
+                  {active && <span className="shrink-0 font-ui text-[11px] font-semibold text-[rgba(0,255,225,0.9)]">éditée</span>}
+                </div>
+              )
+            })}
           </div>
-          <button
-            onClick={() => setHideOverlay(h => !h)}
-            disabled={paintLayer === 'overlay'}
-            title="Masquer la couche du dessus pour voir/éditer la base en dessous"
-            className={miniBtn(hideOverlay && paintLayer !== 'overlay')}
-          >
-            {hideOverlay && paintLayer !== 'overlay' ? (
-              <svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M2 8s2.2-4 6-4 6 4 6 4-2.2 4-6 4-6-4-6-4Z" stroke="currentColor" strokeWidth="1.2"/><path d="M2.5 2.5l11 11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
-            ) : (
-              <svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M2 8s2.2-4 6-4 6 4 6 4-2.2 4-6 4-6-4-6-4Z" stroke="currentColor" strokeWidth="1.2"/><circle cx="8" cy="8" r="1.8" stroke="currentColor" strokeWidth="1.2"/></svg>
-            )}
-          </button>
         </div>
 
         <div className="border-t border-[rgba(255,255,255,0.08)]" />
@@ -914,6 +1075,7 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
               onPointerMove={onPointerMove}
               onPointerUp={endStroke}
               onPointerCancel={endStroke}
+              onPointerLeave={onPointerLeaveGrid}
               className="block touch-none select-none"
               style={{ width: FLAT_DISPLAY, height: FLAT_DISPLAY, cursor: 'crosshair', imageRendering: 'pixelated' }}
             />
@@ -1154,6 +1316,9 @@ export default function App() {
   const [libraryItems, setLibraryItems] = useState<{ id: string; name: string; variant: 'classic' | 'slim'; createdAt: number; dataUrl: string }[]>([])
   const [libraryLoading, setLibraryLoading] = useState(false)
   const [librarySaveName, setLibrarySaveName] = useState('')
+  const [renamingId, setRenamingId] = useState<string | null>(null)   // id du skin en cours de renommage
+  const [renameValue, setRenameValue] = useState('')
+  const renameCancelRef = useRef(false)                               // Échap = annuler sans enregistrer
 
   const fetchNews = useCallback(async () => {
     const result = await window.launcher.getNews()
@@ -1602,6 +1767,16 @@ export default function App() {
   const handleDeleteFromLibrary = async (id: string) => {
     await window.launcher.libraryDelete(id)
     await refreshLibrary()
+  }
+
+  const handleCommitRename = async (id: string) => {
+    const name = renameValue.trim()
+    setRenamingId(null)
+    const item = libraryItems.find(i => i.id === id)
+    if (!name || (item && item.name === name)) return
+    const res = await window.launcher.libraryRename({ id, name })
+    if (res.success) await refreshLibrary()
+    else setSkinError(res.error ?? 'Échec du renommage.')
   }
 
   const isBusy = ['loading', 'updating', 'checking', 'installing', 'launching'].includes(phase)
@@ -2341,8 +2516,9 @@ export default function App() {
           <div
             className={`relative flex flex-col rounded-[16px] overflow-hidden border border-[rgba(255,255,255,0.16)] ${skinModalClosing ? 'modal-card-exit' : 'modal-card-enter'}`}
             style={{
-              width: 900,
-              maxHeight: '94vh',
+              width: 'calc(100vw - 48px)',
+              height: 'calc(100vh - 48px)',
+              maxWidth: 1360,
               background: 'rgba(255,255,255,0.08)',
               backdropFilter: 'blur(28px) saturate(1.4)',
               WebkitBackdropFilter: 'blur(28px) saturate(1.4)',
@@ -2385,7 +2561,7 @@ export default function App() {
             </div>
 
             {/* Corps */}
-            <div className="flex flex-col gap-[14px] p-[24px] overflow-y-auto">
+            <div className="flex flex-col gap-[14px] p-[20px] flex-1 min-h-0">
               {skinInfoLoading ? (
                 <div className="flex items-center justify-center" style={{ height: 320 }}>
                   <svg className="animate-spin text-white/40" style={{ width: 26, height: 26 }} fill="none" viewBox="0 0 24 24">
@@ -2406,27 +2582,29 @@ export default function App() {
               ) : (
                 <>
                   {/* Éditeur (toujours monté pour préserver le dessin en cours) */}
-                  <div className={skinTab === 'editor' ? 'flex flex-col gap-[14px]' : 'hidden'}>
-                    <SkinEditor
-                      ref={editorApiRef}
-                      loadSrc={editorSrc}
-                      loadKey={editorLoadKey}
-                      variant={selectedVariant}
-                      onVariantChange={setSelectedVariant}
-                    />
+                  <div className={skinTab === 'editor' ? 'flex flex-col gap-[10px] flex-1 min-h-0' : 'hidden'}>
+                    <div className="flex-1 min-h-0">
+                      <SkinEditor
+                        ref={editorApiRef}
+                        loadSrc={editorSrc}
+                        loadKey={editorLoadKey}
+                        variant={selectedVariant}
+                        onVariantChange={setSelectedVariant}
+                      />
+                    </div>
                     {skinError && (
-                      <p className="font-ui text-[14px] text-[rgba(255,120,120,0.95)] leading-snug">{skinError}</p>
+                      <p className="shrink-0 font-ui text-[14px] text-[rgba(255,120,120,0.95)] leading-snug">{skinError}</p>
                     )}
                     {skinSuccess && !skinError && (
-                      <p className="font-ui text-[14px] text-[rgba(120,255,180,0.95)] leading-snug">
+                      <p className="shrink-0 font-ui text-[14px] text-[rgba(120,255,180,0.95)] leading-snug">
                         {skinSuccess}
                       </p>
                     )}
                   </div>
 
                   {/* Bibliothèque */}
-                  <div className={skinTab === 'library' ? 'flex flex-col gap-[14px]' : 'hidden'} style={{ minHeight: 360 }}>
-                    <div className="flex items-center gap-[8px]">
+                  <div className={skinTab === 'library' ? 'flex flex-col gap-[14px] flex-1 min-h-0' : 'hidden'}>
+                    <div className="flex items-center gap-[8px] shrink-0">
                       <input
                         value={librarySaveName}
                         onChange={e => setLibrarySaveName(e.target.value)}
@@ -2448,45 +2626,76 @@ export default function App() {
                     </div>
 
                     {skinError && (
-                      <p className="font-ui text-[14px] text-[rgba(255,120,120,0.95)] leading-snug">{skinError}</p>
+                      <p className="shrink-0 font-ui text-[14px] text-[rgba(255,120,120,0.95)] leading-snug">{skinError}</p>
                     )}
                     {skinSuccess && !skinError && (
-                      <p className="font-ui text-[14px] text-[rgba(120,255,180,0.95)] leading-snug">{skinSuccess}</p>
+                      <p className="shrink-0 font-ui text-[14px] text-[rgba(120,255,180,0.95)] leading-snug">{skinSuccess}</p>
                     )}
 
-                    {libraryLoading ? (
-                      <p className="font-ui text-[14px] text-white/40 py-[48px] text-center">Chargement…</p>
-                    ) : libraryItems.length === 0 ? (
-                      <p className="font-ui text-[14px] text-white/35 py-[48px] text-center">
-                        Aucun skin enregistré pour l'instant. Dessine un skin puis enregistre-le ici pour le retrouver plus tard.
-                      </p>
-                    ) : (
-                      <div className="grid grid-cols-4 gap-[12px]" style={{ maxHeight: 440, overflowY: 'auto' }}>
-                        {libraryItems.map(item => (
-                          <div key={item.id} className="flex flex-col items-center gap-[7px] p-[10px] rounded-[12px] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.03)]">
-                            <div className="rounded-[8px] overflow-hidden" style={{ background: 'rgba(255,255,255,0.04)' }}>
-                              <SkinPreview src={item.dataUrl} variant={item.variant} width={62} />
-                            </div>
-                            <p className="font-ui text-[13px] text-white/70 text-center truncate w-full" title={item.name}>{item.name}</p>
-                            <div className="flex gap-[6px] w-full">
-                              <button
-                                onClick={() => handleLoadFromLibrary(item)}
-                                className="flex-1 py-[6px] rounded-[8px] font-ui text-[13px] font-semibold text-white bg-[rgba(0,255,225,0.14)] border border-[rgba(0,255,225,0.3)] hover:bg-[rgba(0,255,225,0.22)] transition-colors"
+                    {/* Grille des skins enregistrés — aperçus 3D, défilable, profite de l'espace */}
+                    <div className="flex-1 min-h-0 overflow-y-auto -mr-[6px] pr-[6px]">
+                      {libraryLoading ? (
+                        <p className="font-ui text-[14px] text-white/40 py-[48px] text-center">Chargement…</p>
+                      ) : libraryItems.length === 0 ? (
+                        <p className="font-ui text-[14px] text-white/35 py-[48px] text-center">
+                          Aucun skin enregistré pour l'instant. Dessine un skin puis enregistre-le ici pour le retrouver plus tard.
+                        </p>
+                      ) : (
+                        <div className="grid gap-[16px]" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
+                          {libraryItems.map(item => (
+                            <div key={item.id} className="flex flex-col items-center gap-[10px] p-[14px] rounded-[16px] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.03)]">
+                              <div
+                                className="w-full flex items-center justify-center rounded-[12px] overflow-hidden py-[6px]"
+                                style={{ background: 'radial-gradient(ellipse 70% 70% at 50% 38%, rgba(255,255,255,0.06) 0%, rgba(10,8,16,0.5) 85%)' }}
                               >
-                                Charger
-                              </button>
-                              <button
-                                onClick={() => handleDeleteFromLibrary(item.id)}
-                                title="Supprimer"
-                                className="flex items-center justify-center px-[8px] py-[6px] rounded-[8px] text-white/45 border border-[rgba(255,255,255,0.1)] hover:text-[rgba(255,120,120,0.95)] hover:bg-[rgba(255,60,60,0.12)] transition-colors"
-                              >
-                                <svg width="13" height="14" viewBox="0 0 11 12" fill="currentColor"><rect x="0.6" y="2.1" width="9.8" height="2.2" rx="1.1"/><rect x="3.6" y="0.4" width="3.8" height="2.1" rx="1"/><path d="M1.55 4.6h7.9l-.62 6.1a1.05 1.05 0 0 1-1.04.9H3.21a1.05 1.05 0 0 1-1.04-.9L1.55 4.6Z"/></svg>
-                              </button>
+                                <Skin3DThumb dataUrl={item.dataUrl} variant={item.variant} width={120} />
+                              </div>
+                              {renamingId === item.id ? (
+                                <input
+                                  autoFocus
+                                  value={renameValue}
+                                  onChange={e => setRenameValue(e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter') handleCommitRename(item.id); else if (e.key === 'Escape') { renameCancelRef.current = true; setRenamingId(null) } }}
+                                  onBlur={() => { if (renameCancelRef.current) { renameCancelRef.current = false; return } handleCommitRename(item.id) }}
+                                  maxLength={60}
+                                  className="w-full text-center bg-[rgba(255,255,255,0.06)] border border-[rgba(0,255,225,0.4)] rounded-[8px] px-[8px] py-[5px] text-white font-ui text-[14px] focus:outline-none"
+                                />
+                              ) : (
+                                <button
+                                  onClick={() => { setRenamingId(item.id); setRenameValue(item.name) }}
+                                  title="Cliquer pour renommer"
+                                  className="font-ui text-[14px] text-white/80 text-center truncate w-full hover:text-white transition-colors"
+                                >
+                                  {item.name}
+                                </button>
+                              )}
+                              <div className="flex gap-[6px] w-full">
+                                <button
+                                  onClick={() => handleLoadFromLibrary(item)}
+                                  className="flex-1 py-[7px] rounded-[9px] font-ui text-[13px] font-semibold text-white bg-[rgba(0,255,225,0.14)] border border-[rgba(0,255,225,0.3)] hover:bg-[rgba(0,255,225,0.22)] transition-colors"
+                                >
+                                  Charger
+                                </button>
+                                <button
+                                  onClick={() => { setRenamingId(item.id); setRenameValue(item.name) }}
+                                  title="Renommer"
+                                  className="flex items-center justify-center px-[9px] py-[7px] rounded-[9px] text-white/45 border border-[rgba(255,255,255,0.1)] hover:text-white hover:bg-[rgba(255,255,255,0.06)] transition-colors"
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10.8 2.4l2.8 2.8L6 12.8l-3.2.5.5-3.2 7.5-7.7Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/></svg>
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteFromLibrary(item.id)}
+                                  title="Supprimer"
+                                  className="flex items-center justify-center px-[9px] py-[7px] rounded-[9px] text-white/45 border border-[rgba(255,255,255,0.1)] hover:text-[rgba(255,120,120,0.95)] hover:bg-[rgba(255,60,60,0.12)] transition-colors"
+                                >
+                                  <svg width="13" height="14" viewBox="0 0 11 12" fill="currentColor"><rect x="0.6" y="2.1" width="9.8" height="2.2" rx="1.1"/><rect x="3.6" y="0.4" width="3.8" height="2.1" rx="1"/><path d="M1.55 4.6h7.9l-.62 6.1a1.05 1.05 0 0 1-1.04.9H3.21a1.05 1.05 0 0 1-1.04-.9L1.55 4.6Z"/></svg>
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </>
               )}
