@@ -30,6 +30,13 @@
       "setLines": {
         "hide_icons": "hide_icons=true"
       }
+    },
+    {
+      "path": "config/inventoryhud-client.toml",
+      "setLines": {
+        "byDefault": "byDefault = false",
+        "ArmorDamage": "ArmorDamage = false"
+      }
     }
   ],
   "shaders": [
