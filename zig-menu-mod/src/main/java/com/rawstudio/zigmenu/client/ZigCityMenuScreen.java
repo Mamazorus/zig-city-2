@@ -128,7 +128,7 @@ public class ZigCityMenuScreen extends Screen {
 
         this.addRenderableWidget(new ZigButton(leftX, zigY, bw, bh,
                 Component.literal("ZIG CITY !"),
-                this::joinServer));
+                this::joinServer, true));   // bouton principal -> lisere dore (assorti au logo)
 
         int halfW = (bw - splitGap) / 2;
         this.addRenderableWidget(new ZigButton(leftX, optY, halfW, bh,
