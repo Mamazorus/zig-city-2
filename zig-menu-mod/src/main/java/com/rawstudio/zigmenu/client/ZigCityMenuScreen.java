@@ -8,6 +8,7 @@ import net.minecraft.Util;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.ConnectScreen;
+import net.minecraft.client.gui.screens.LanguageSelectScreen;
 import net.minecraft.client.gui.screens.options.OptionsScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.worldselection.SelectWorldScreen;
@@ -44,6 +45,9 @@ public class ZigCityMenuScreen extends Screen {
     private static final float LOGO_ASPECT = (float) LOGO_BW / (float) LOGO_BH; // ~2.949
 
     private static final String SERVER = "109.239.153.124:25965";
+
+    // Phrase d'ambiance affichee en bas a gauche (facon "version" du menu vanilla).
+    private static final String FOOTER = "Bienvenue dans la ville des Zigs !";
 
     // Layout calcule dans init().
     private int logoX, logoY, logoW, logoH;
@@ -84,7 +88,7 @@ public class ZigCityMenuScreen extends Screen {
 
         int cx = this.width / 2;
         int bw = Mth.clamp((int) (this.width * 0.46f), 220, 340);
-        int bh = Mth.clamp((int) (bw * 0.11f), 22, 30);
+        int bh = Mth.clamp((int) (bw * 0.078f), 18, 22);   // boutons plus fins (moins de vide haut/bas)
         int gap = Mth.clamp((int) (this.height * 0.03f), 8, 16);
 
         this.headSize = Mth.clamp((int) (bh * 0.72f), 14, 22);
@@ -130,11 +134,15 @@ public class ZigCityMenuScreen extends Screen {
                 Component.literal("ZIG CITY !"),
                 this::joinServer, true));   // bouton principal -> lisere dore (assorti au logo)
 
-        int halfW = (bw - splitGap) / 2;
-        this.addRenderableWidget(new ZigButton(leftX, optY, halfW, bh,
+        // Ligne du bas : Options | Langue | Quitter (trois colonnes egales).
+        int third = (bw - 2 * splitGap) / 3;
+        this.addRenderableWidget(new ZigButton(leftX, optY, third, bh,
                 Component.literal("Options"),
                 () -> this.minecraft.setScreen(new OptionsScreen(this, this.minecraft.options))));
-        this.addRenderableWidget(new ZigButton(leftX + halfW + splitGap, optY, bw - halfW - splitGap, bh,
+        this.addRenderableWidget(new ZigButton(leftX + third + splitGap, optY, third, bh,
+                Component.literal("Langue"),
+                () -> this.minecraft.setScreen(new LanguageSelectScreen(this, this.minecraft.options, this.minecraft.getLanguageManager()))));
+        this.addRenderableWidget(new ZigButton(leftX + 2 * (third + splitGap), optY, bw - 2 * (third + splitGap), bh,
                 Component.literal("Quitter"),
                 () -> this.minecraft.stop()));
     }
@@ -156,8 +164,14 @@ public class ZigCityMenuScreen extends Screen {
         renderLogo(g);
         renderSplash(g);
         renderHeads(g, mouseX, mouseY);
+        renderFooter(g);
         // Les widgets (boutons) sont rendus par-dessus -> ils masquent le centre des tetes.
         super.render(g, mouseX, mouseY, partialTick);
+    }
+
+    // Phrase d'ambiance en bas a gauche (facon "version" du menu vanilla) : texte + ombre.
+    private void renderFooter(GuiGraphics g) {
+        g.drawString(this.font, Component.literal(FOOTER), 6, this.height - this.font.lineHeight - 4, 0xFFFFFFFF, true);
     }
 
     private void renderSceneBackground(GuiGraphics g) {
