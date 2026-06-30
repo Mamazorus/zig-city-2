@@ -676,6 +676,20 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
     else setOverlayVisible(true)
   }
 
+  // Afficher/masquer une couche. Masquer celle qu'on édite n'a pas de sens (on
+  // peindrait sans la voir) → on bascule l'édition sur l'autre couche, rendue visible.
+  const toggleLayerVisibility = (l: 'base' | 'overlay') => {
+    const next = l === 'base' ? !baseVisible : !overlayVisible
+    if (l === 'base') setBaseVisible(next)
+    else setOverlayVisible(next)
+    if (!next && activeLayer === l) {
+      const other = l === 'base' ? 'overlay' : 'base'
+      setActiveLayer(other)
+      if (other === 'base') setBaseVisible(true)
+      else setOverlayVisible(true)
+    }
+  }
+
   const noteColorUsed = (c: string) => {
     setRecentColors(prev => [c, ...prev.filter(x => x.toLowerCase() !== c.toLowerCase())].slice(0, 14))
   }
@@ -1082,7 +1096,7 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
                 <div key={l} className={`flex items-center gap-[10px] px-[10px] py-[9px] transition-colors ${active ? 'bg-[rgba(0,255,225,0.10)]' : ''}`}>
                   {/* Afficher / masquer — pastille cochée (pas un œil) */}
                   <button
-                    onClick={() => l === 'base' ? setBaseVisible(v => !v) : setOverlayVisible(v => !v)}
+                    onClick={() => toggleLayerVisibility(l)}
                     title={visible ? 'Masquer cette couche' : 'Afficher cette couche'}
                     className={`shrink-0 size-[20px] rounded-[6px] border flex items-center justify-center transition-colors ${
                       visible ? 'bg-[rgba(0,255,225,0.85)] border-transparent text-[#0e0b16]' : 'border-[rgba(255,255,255,0.28)] text-transparent hover:border-white/50'
