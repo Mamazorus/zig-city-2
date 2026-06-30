@@ -154,6 +154,7 @@ declare global {
       login: () => Promise<{ success: boolean; username?: string; uuid?: string; error?: string }>
       logout: () => Promise<{ success: boolean }>
       getSkinInfo: () => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; skinDataUrl?: string | null; name?: string; uuid?: string; error?: string; expired?: boolean; loggedOut?: boolean }>
+      fetchPlayerSkin: (name: string) => Promise<string | null>
       pickSkinFile: () => Promise<{ canceled: boolean; path?: string; name?: string; dataUrl?: string; width?: number; height?: number; error?: string }>
       uploadSkin: (payload: { variant: 'classic' | 'slim'; path?: string; dataUrl?: string }) => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; error?: string; expired?: boolean; loggedOut?: boolean }>
       resetSkin: () => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; skinDataUrl?: string | null; error?: string; expired?: boolean; loggedOut?: boolean }>

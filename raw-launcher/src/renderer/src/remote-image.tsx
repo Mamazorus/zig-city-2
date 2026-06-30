@@ -77,24 +77,61 @@ export function renderHeadFromSkin(skinSrc: string, size = 64): Promise<string> 
   })
 }
 
-// Tête de joueur avec repli sur l'avatar Steve bundlé.
-// `srcOverride` (data URL) court-circuite le réseau : utilisé pour la tête du joueur
-// courant, rendue localement depuis son skin (cf. renderHeadFromSkin) → toujours à jour.
-// Sinon on interroge minotar.net en priorité : contrairement à mc-heads.net (qui sert un
-// Steve par défaut en HTTP 200 pour certains comptes premium pourtant valides — cache
-// périmé côté service), minotar résout ces têtes correctement et renvoie un vrai 404
-// pour les pseudos inconnus (→ repli propre sur le Steve bundlé via rejet HTTP). mc-heads
-// reste en filet de secours si minotar ne répond pas. /helm = tête + couche chapeau.
+// Tick partagé : re-vérifie périodiquement les têtes distantes (un AUTRE joueur a pu
+// changer de skin pendant qu'on regarde le launcher). Timer lancé à la 1re tête montée.
+let headTick = 0
+const headTickSubs = new Set<() => void>()
+let headTimer: ReturnType<typeof setInterval> | null = null
+function ensureHeadTimer() {
+  if (headTimer) return
+  headTimer = setInterval(() => { headTick++; headTickSubs.forEach((fn) => fn()) }, 5 * 60 * 1000)
+}
+function useHeadTick(): number {
+  const [, force] = useState(0)
+  useEffect(() => {
+    ensureHeadTimer()
+    const fn = () => force((n) => n + 1)
+    headTickSubs.add(fn)
+    return () => { headTickSubs.delete(fn) }
+  }, [])
+  return headTick
+}
+
+// Tête d'un joueur composée depuis son VRAI skin (Mojang, via le main) → toujours à jour
+// (l'URL de texture Mojang change au changement de skin, contrairement à minotar/mc-heads
+// qui cachent une tête périmée côté serveur). Re-vérifiée au tick partagé.
+function usePlayerHead(name: string | null | undefined): string | null {
+  const tick = useHeadTick()
+  const [head, setHead] = useState<string | null>(null)
+  useEffect(() => {
+    if (!name) { setHead(null); return }
+    let alive = true
+    window.launcher.fetchPlayerSkin(name)
+      .then((skin) => { if (alive && skin) return renderHeadFromSkin(skin).then((h) => { if (alive) setHead(h) }) })
+      .catch(() => { /* repli minotar/Steve */ })
+    return () => { alive = false }
+  }, [name, tick])
+  return head
+}
+
+// Tête de joueur. Ordre de priorité :
+//   1. srcOverride (data URL) — joueur courant, rendu localement depuis son skin (instantané) ;
+//   2. tête Mojang (usePlayerHead) — autres joueurs, toujours à jour ;
+//   3. minotar.net puis mc-heads.net — repli rapide/secours le temps que Mojang réponde ;
+//   4. Steve bundlé.
+// minotar avant mc-heads : ce dernier sert un Steve en HTTP 200 pour certains comptes
+// valides (cache périmé) alors que minotar renvoie un vrai 404 (repli propre). /helm = tête + chapeau.
 export function Avatar({ name, version, srcOverride, className }: { name?: string | null; version?: number; srcOverride?: string | null; className?: string }) {
   const v = version ? `?v=${version}` : ''
-  const urls = (!srcOverride && name)
+  const mojangHead = usePlayerHead(srcOverride ? null : name)
+  const urls = (!srcOverride && !mojangHead && name)
     ? [
         `https://minotar.net/helm/${encodeURIComponent(name)}/64${v}`,
         `https://mc-heads.net/avatar/${encodeURIComponent(name)}/64${v}`,
       ]
     : []
   const remote = useFirstRemoteImage(urls, playerImage)
-  const src = srcOverride || remote
+  const src = srcOverride || mojangHead || remote
   return (
     <img
       alt=""

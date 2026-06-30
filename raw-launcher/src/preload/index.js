@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('launcher', {
   logout:         () => ipcRenderer.invoke('logout'),
 
   getSkinInfo:    () => ipcRenderer.invoke('get-skin-info'),
+  fetchPlayerSkin: (name) => ipcRenderer.invoke('fetch-player-skin', name),
   pickSkinFile:   () => ipcRenderer.invoke('pick-skin-file'),
   uploadSkin:     (payload) => ipcRenderer.invoke('upload-skin', payload),
   resetSkin:      () => ipcRenderer.invoke('reset-skin'),

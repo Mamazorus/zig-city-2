@@ -883,6 +883,63 @@ ipcMain.handle('get-skin-info', async () => {
   }
 })
 
+// ── Têtes des autres joueurs, TOUJOURS à jour (sans minotar/mc-heads) ──────────
+// minotar/mc-heads cachent les têtes côté serveur (périmées des heures après un
+// changement de skin). On résout donc le skin directement via l'API publique Mojang :
+// pseudo → UUID → URL de texture (content-addressed : change à chaque nouveau skin).
+// Cache + TTL (re-vérifie le profil régulièrement) + limite de concurrence (pas de
+// rafale qui ferait rate-limiter Mojang). Le renderer compose la tête depuis ce skin.
+const playerSkinCache = new Map()              // nameLower -> { uuid, skinUrl, dataUrl, checkedAt }
+const PLAYER_SKIN_TTL = 5 * 60 * 1000          // re-vérifie le profil toutes les 5 min
+let mojangActive = 0
+const mojangQueue = []
+async function withMojangLimit(fn) {
+  if (mojangActive >= 6) await new Promise((r) => mojangQueue.push(r))
+  mojangActive++
+  try { return await fn() }
+  finally { mojangActive--; const next = mojangQueue.shift(); if (next) next() }
+}
+
+async function resolvePlayerSkinDataUrl(name) {
+  const key = (name || '').toLowerCase()
+  if (!/^[a-z0-9_]{1,16}$/.test(key)) return null
+  const cached = playerSkinCache.get(key)
+  if (cached && Date.now() - cached.checkedAt < PLAYER_SKIN_TTL) return cached.dataUrl
+  return withMojangLimit(async () => {
+    try {
+      let uuid = cached?.uuid
+      if (!uuid) {
+        const idRes = await httpsGet(`https://api.mojang.com/users/profiles/minecraft/${encodeURIComponent(name)}`)
+        uuid = idRes && idRes.id ? idRes.id : null
+        if (!uuid) return cached?.dataUrl ?? null            // pseudo inconnu / rate-limit → repli
+      }
+      const profile = await httpsGet(`https://sessionserver.mojang.com/session/minecraft/profile/${uuid}`)
+      const prop = (profile?.properties || []).find((p) => p.name === 'textures')
+      let skinUrl = null
+      if (prop?.value) {
+        try {
+          const decoded = JSON.parse(Buffer.from(prop.value, 'base64').toString('utf8'))
+          skinUrl = decoded?.textures?.SKIN?.url ?? null
+        } catch { /* base64/JSON invalide → repli */ }
+      }
+      if (!skinUrl) return cached?.dataUrl ?? null
+      let dataUrl = cached?.dataUrl ?? null
+      if (skinUrl !== cached?.skinUrl || !dataUrl) {
+        dataUrl = await fetchSkinDataUrl(skinUrl)            // skin changé (URL ≠) → re-télécharge
+      }
+      if (dataUrl) playerSkinCache.set(key, { uuid, skinUrl, dataUrl, checkedAt: Date.now() })
+      return dataUrl
+    } catch {
+      return cached?.dataUrl ?? null                          // réseau KO → on garde l'ancien
+    }
+  })
+}
+
+// Renvoie le PNG de skin (data URL) d'un joueur quelconque, pour rendre sa tête à jour.
+ipcMain.handle('fetch-player-skin', async (_e, name) => {
+  try { return await resolvePlayerSkinDataUrl(name) } catch { return null }
+})
+
 ipcMain.handle('pick-skin-file', async () => {
   const result = await dialog.showOpenDialog(win, {
     title: 'Choisir un skin Minecraft',
