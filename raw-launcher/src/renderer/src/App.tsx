@@ -7,7 +7,7 @@ import StatsPage from './Stats'
 import SettingsPage from './Settings'
 import ChatPanel from './ChatPanel'
 import { resolveCategory, CategoryBadge, NewsFallback, NEWS_BANNER_RATIO, type NewsCategory } from './news'
-import { Avatar, RemoteNewsImage, useRemoteImage } from './remote-image'
+import { Avatar, RemoteNewsImage, useRemoteImage, renderHeadFromSkin } from './remote-image'
 import { useItemIconSrc } from './item-icon'
 import type { ItemIconDesc } from './block-renderer'
 
@@ -1490,7 +1490,8 @@ export default function App() {
   const [skinBusy, setSkinBusy] = useState(false)
   const [skinError, setSkinError] = useState<string | null>(null)
   const [skinSuccess, setSkinSuccess] = useState<string | null>(null)
-  const [skinVersion, setSkinVersion] = useState(0)                 // cache-buster avatar
+  const [skinVersion, setSkinVersion] = useState(0)                 // cache-buster avatar (têtes distantes)
+  const [myHead, setMyHead] = useState<string | null>(null)         // tête du joueur courant, rendue localement depuis son skin
   const skinRequestRef = useRef(false)                              // garde anti double-soumission
   const editorApiRef = useRef<SkinEditorHandle>(null)
   const [skinTab, setSkinTab] = useState<'editor' | 'library'>('editor')
@@ -1504,6 +1505,16 @@ export default function App() {
   const fetchNews = useCallback(async () => {
     const result = await window.launcher.getNews()
     if (result.success && result.news.length > 0) setDynamicNews(result.news)
+  }, [])
+
+  // Tête du joueur courant rendue localement depuis son vrai skin (Mojang, via le main)
+  // → toujours à jour, contrairement à minotar/mc-heads qui cachent côté serveur.
+  const refreshMyHead = useCallback(async () => {
+    try {
+      const info = await window.launcher.getSkinInfo()
+      const src = info.success ? (info.skinDataUrl ?? null) : null
+      if (src) setMyHead(await renderHeadFromSkin(src))
+    } catch { /* tête distante en repli */ }
   }, [])
 
   // Shop du jour : lecture publique des offres de la date courante (bascule à
@@ -1540,6 +1551,11 @@ export default function App() {
 
   // Charge / rafraîchit le shop du jour à chaque arrivée sur l'accueil.
   useEffect(() => { if (activeTab === 'home') fetchShop() }, [activeTab, fetchShop])
+
+  // Tête du joueur : rendue depuis son vrai skin dès qu'on connaît le pseudo (init).
+  // Après apply/reset, on la met à jour directement depuis le skin appliqué (handlers)
+  // — pas via getSkinInfo, qui pourrait renvoyer brièvement l'ancien skin (propagation).
+  useEffect(() => { if (username) refreshMyHead() }, [username, refreshMyHead])
 
   const checkAndInstall = useCallback(async () => {
     setPhase('checking')
@@ -1879,6 +1895,7 @@ export default function App() {
       if (res.success) {
         setSkinSuccess('Skin appliqué sur ton compte ! En jeu, il peut mettre quelques secondes à apparaître.')
         setSkinVersion(v => v + 1)
+        renderHeadFromSkin(dataUrl).then(setMyHead).catch(() => {})   // tête à jour partout, sans minotar
       } else {
         setSkinError(res.expired || res.loggedOut ? sessionMessage : (res.error ?? 'Échec du changement de skin.'))
       }
@@ -1901,6 +1918,7 @@ export default function App() {
         setEditorSrc(res.skinDataUrl ?? res.skinUrl ?? null)
         setEditorLoadKey(k => k + 1)
         setSkinVersion(v => v + 1)
+        if (res.skinDataUrl) renderHeadFromSkin(res.skinDataUrl).then(setMyHead).catch(() => {})
         setSkinSuccess('Skin réinitialisé au skin Minecraft par défaut.')
       } else {
         setSkinError(res.expired || res.loggedOut ? sessionMessage : (res.error ?? 'Échec de la réinitialisation.'))
@@ -2020,7 +2038,7 @@ export default function App() {
                 onClick={() => username && setProfileMenuOpen(v => !v)}
               >
                 <div className="size-[25px] rounded-[4px] overflow-hidden shrink-0">
-                  <Avatar name={username} version={skinVersion} className="w-full h-full object-cover pointer-events-none" />
+                  <Avatar name={username} version={skinVersion} srcOverride={myHead} className="w-full h-full object-cover pointer-events-none" />
                 </div>
                 <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px] whitespace-nowrap">
                   {username || 'Joueur'}
@@ -2037,7 +2055,7 @@ export default function App() {
                   {/* En-tête profil */}
                   <div className="flex items-center gap-[10px] px-[14px] py-[12px]">
                     <div className="size-[32px] relative rounded shrink-0">
-                      <Avatar name={username} version={skinVersion} className="absolute inset-0 max-w-none object-cover pointer-events-none rounded size-full" />
+                      <Avatar name={username} version={skinVersion} srcOverride={myHead} className="absolute inset-0 max-w-none object-cover pointer-events-none rounded size-full" />
                     </div>
                     <div>
                       <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.56px]">{username}</p>
@@ -2488,7 +2506,7 @@ export default function App() {
                             onMouseEnter={name ? (e) => handleHeadEnter(name, e.currentTarget) : undefined}
                             onMouseLeave={name ? handleHeadLeave : undefined}
                           >
-                            <Avatar name={name} version={name && username && name.toLowerCase() === username.toLowerCase() ? skinVersion : undefined} className="size-full object-cover" />
+                            <Avatar name={name} version={name && username && name.toLowerCase() === username.toLowerCase() ? skinVersion : undefined} srcOverride={name && username && name.toLowerCase() === username.toLowerCase() ? myHead : undefined} className="size-full object-cover" />
                           </div>
                         ))}
                       </div>
@@ -2573,7 +2591,7 @@ export default function App() {
                     className={`flex gap-[8px] items-center p-[8px] rounded-[8px] w-full ${i % 2 === 0 ? 'bg-[rgba(255,255,255,0.1)]' : ''}`}
                   >
                     <div className="relative rounded-[8px] shrink-0 size-[48px]">
-                      <Avatar name={player.name} version={username && player.name.toLowerCase() === username.toLowerCase() ? skinVersion : undefined} className="absolute inset-0 max-w-none object-cover pointer-events-none rounded-[8px] size-full" />
+                      <Avatar name={player.name} version={username && player.name.toLowerCase() === username.toLowerCase() ? skinVersion : undefined} srcOverride={username && player.name.toLowerCase() === username.toLowerCase() ? myHead : undefined} className="absolute inset-0 max-w-none object-cover pointer-events-none rounded-[8px] size-full" />
                     </div>
                     <div className="flex flex-col items-start">
                       <p className="font-mono font-semibold text-[16px] text-white tracking-[-0.64px]">{player.name}</p>

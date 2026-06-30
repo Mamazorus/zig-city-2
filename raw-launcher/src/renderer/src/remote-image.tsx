@@ -47,21 +47,54 @@ function useFirstRemoteImage(urls: (string | null | undefined)[], fallback: stri
   return resolved ?? fallback
 }
 
+// Compose la tête (face + calque chapeau) depuis un PNG de skin 64×64, en data URL.
+// Sert à afficher la tête du joueur courant SANS passer par minotar/mc-heads : ces
+// services cachent côté serveur et peuvent servir une tête périmée plusieurs heures
+// après un changement de skin (même un cache-buster d'URL ne les force pas). Le skin
+// du joueur, lui, vient de Mojang (via le main, `getSkinInfo`) → toujours à jour.
+// ⚠️ skinSrc doit être un data: URL (un PNG distant « taint » le canvas → toDataURL échoue).
+const headCache = new Map<string, string>()
+export function renderHeadFromSkin(skinSrc: string, size = 64): Promise<string> {
+  const cached = headCache.get(skinSrc)
+  if (cached) return Promise.resolve(cached)
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas')
+        c.width = size; c.height = size
+        const ctx = c.getContext('2d')!
+        ctx.imageSmoothingEnabled = false
+        ctx.drawImage(img, 8, 8, 8, 8, 0, 0, size, size)    // face (tête, couche de base)
+        ctx.drawImage(img, 40, 8, 8, 8, 0, 0, size, size)   // chapeau (couche du dessus)
+        const url = c.toDataURL('image/png')
+        headCache.set(skinSrc, url)
+        resolve(url)
+      } catch (e) { reject(e) }
+    }
+    img.onerror = () => reject(new Error('skin invalide'))
+    img.src = skinSrc
+  })
+}
+
 // Tête de joueur avec repli sur l'avatar Steve bundlé.
-// On interroge minotar.net en priorité : contrairement à mc-heads.net (qui sert un
+// `srcOverride` (data URL) court-circuite le réseau : utilisé pour la tête du joueur
+// courant, rendue localement depuis son skin (cf. renderHeadFromSkin) → toujours à jour.
+// Sinon on interroge minotar.net en priorité : contrairement à mc-heads.net (qui sert un
 // Steve par défaut en HTTP 200 pour certains comptes premium pourtant valides — cache
 // périmé côté service), minotar résout ces têtes correctement et renvoie un vrai 404
 // pour les pseudos inconnus (→ repli propre sur le Steve bundlé via rejet HTTP). mc-heads
 // reste en filet de secours si minotar ne répond pas. /helm = tête + couche chapeau.
-export function Avatar({ name, version, className }: { name?: string | null; version?: number; className?: string }) {
+export function Avatar({ name, version, srcOverride, className }: { name?: string | null; version?: number; srcOverride?: string | null; className?: string }) {
   const v = version ? `?v=${version}` : ''
-  const urls = name
+  const urls = (!srcOverride && name)
     ? [
         `https://minotar.net/helm/${encodeURIComponent(name)}/64${v}`,
         `https://mc-heads.net/avatar/${encodeURIComponent(name)}/64${v}`,
       ]
     : []
-  const src = useFirstRemoteImage(urls, playerImage)
+  const remote = useFirstRemoteImage(urls, playerImage)
+  const src = srcOverride || remote
   return (
     <img
       alt=""
