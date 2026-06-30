@@ -13,7 +13,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
@@ -33,7 +32,12 @@ import net.minecraft.resources.ResourceLocation;
  * sont telechargees depuis {@code minotar.net/helm} et enregistrees en
  * {@link DynamicTexture}.
  *
- * <p>Entierement defensif : tout echec reseau laisse simplement le carrousel vide,
+ * <p>Le chargement est <b>rechargeable</b> (pas une seule fois par session) : on
+ * rafraichit a l'ouverture du menu et periodiquement tant qu'il est affiche, avec un
+ * cache-buster sur l'URL, pour que les changements de skin (et la liste des joueurs)
+ * se refletent sans relancer le jeu.
+ *
+ * <p>Entierement defensif : tout echec reseau laisse simplement le carrousel inchange,
  * jamais d'exception cote rendu.
  */
 public final class PlayerHeads {
@@ -42,61 +46,87 @@ public final class PlayerHeads {
             "https://zig-base-default-rtdb.europe-west1.firebasedatabase.app";
     private static final int MAX_PLAYERS = 24;
     private static final Pattern VALID_NAME = Pattern.compile("^[A-Za-z0-9_]{1,16}$");
+    // Intervalle minimal entre deux rechargements (le menu appelle refresh() en boucle).
+    private static final long RELOAD_THROTTLE_MS = 30_000L;
 
-    private static final AtomicBoolean started = new AtomicBoolean(false);
-    private static final List<ResourceLocation> heads = new CopyOnWriteArrayList<>();
+    private static final AtomicBoolean loading = new AtomicBoolean(false);
+    private static volatile long lastLoadMs = 0L;
+    // Reference echangee d'un coup (jamais de liste partielle vue par le rendu).
+    private static volatile List<ResourceLocation> heads = List.of();
 
     private PlayerHeads() {}
 
-    /** Tetes deja chargees (thread-safe, lue par le thread de rendu). */
+    /** Tetes deja chargees (instantane immuable, lu par le thread de rendu). */
     public static List<ResourceLocation> getHeads() {
         return heads;
     }
 
-    /** Lance le chargement en arriere-plan, une seule fois par session de jeu. */
-    public static void ensureLoaded() {
-        if (!started.compareAndSet(false, true)) {
+    /**
+     * (Re)charge les tetes en arriere-plan si le dernier chargement date de plus de
+     * {@link #RELOAD_THROTTLE_MS}. Appelable a chaque frame/tick sans surcout (throttle).
+     */
+    public static void refresh() {
+        long now = System.currentTimeMillis();
+        if (now - lastLoadMs < RELOAD_THROTTLE_MS) {
             return;
         }
-        Thread t = new Thread(PlayerHeads::load, "zigmenu-heads");
+        if (!loading.compareAndSet(false, true)) {
+            return;   // un chargement est deja en cours
+        }
+        lastLoadMs = now;
+        Thread t = new Thread(() -> load(now), "zigmenu-heads");
         t.setDaemon(true);
         t.start();
     }
 
-    private static void load() {
+    private static void load(long stamp) {
         try {
             HttpClient http = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(8))
                     .build();
 
+            // Cache-buster : force un re-telechargement frais (defait un eventuel cache
+            // CDN de minotar) pour refleter le skin courant apres un changement.
+            String bust = "?t=" + (stamp / 1000L);
+            List<NameImage> loaded = new ArrayList<>();
             for (String name : fetchPlayerNames(http)) {
                 try {
-                    byte[] png = httpBytes(http, "https://minotar.net/helm/" + name + "/64.png");
+                    byte[] png = httpBytes(http, "https://minotar.net/helm/" + name + "/64.png" + bust);
                     if (png == null || png.length < 16) {
                         continue;
                     }
-                    NativeImage img = NativeImage.read(new ByteArrayInputStream(png));
-                    Minecraft.getInstance().execute(() -> registerHead(name, img));
+                    loaded.add(new NameImage(name, NativeImage.read(new ByteArrayInputStream(png))));
                 } catch (Exception ignore) {
                     // tete individuelle ratee -> on continue
                 }
             }
+            Minecraft.getInstance().execute(() -> registerAll(loaded));
         } catch (Throwable t) {
             ZigMenu.LOGGER.warn("[ZigMenu] Carrousel indisponible : {}", t.toString());
+        } finally {
+            loading.set(false);
         }
     }
 
     /** Doit s'executer sur le thread de rendu (via Minecraft.execute). */
-    private static void registerHead(String name, NativeImage img) {
-        try {
-            DynamicTexture tex = new DynamicTexture(img);
-            ResourceLocation id = ResourceLocation.fromNamespaceAndPath(
-                    "zigmenu", "heads/" + name.toLowerCase(Locale.ROOT));
-            Minecraft.getInstance().getTextureManager().register(id, tex);
-            heads.add(id);
-        } catch (Exception e) {
-            img.close();
+    private static void registerAll(List<NameImage> loaded) {
+        List<ResourceLocation> next = new ArrayList<>(loaded.size());
+        var tm = Minecraft.getInstance().getTextureManager();
+        for (NameImage ni : loaded) {
+            try {
+                DynamicTexture tex = new DynamicTexture(ni.img());
+                ResourceLocation id = ResourceLocation.fromNamespaceAndPath(
+                        "zigmenu", "heads/" + ni.name().toLowerCase(Locale.ROOT));
+                tm.register(id, tex);   // remplace la texture existante au meme id (ferme l'ancienne)
+                next.add(id);
+            } catch (Exception e) {
+                ni.img().close();
+            }
         }
+        if (next.isEmpty()) {
+            return;   // rechargement rate (reseau) -> on garde les tetes precedentes
+        }
+        heads = List.copyOf(next);   // echange atomique
     }
 
     private static List<String> fetchPlayerNames(HttpClient http) {
@@ -165,4 +195,7 @@ public final class PlayerHeads {
         }
         return resp.body();
     }
+
+    /** Couple (pseudo, image) telecharge sur le thread de fond, enregistre sur le thread de rendu. */
+    private record NameImage(String name, NativeImage img) {}
 }

@@ -74,8 +74,8 @@ public class ZigCityMenuScreen extends Screen {
 
     @Override
     protected void init() {
-        // Lance (une seule fois) le chargement asynchrone des tetes du carrousel.
-        PlayerHeads.ensureLoaded();
+        // (Re)charge les tetes du carrousel (throttle interne) a chaque ouverture/resize.
+        PlayerHeads.refresh();
 
         // Filtrage lineaire du logo : la texture haute resolution est reduite a l'ecran ;
         // sans ce lissage, les aretes 3D des lettres sont crenelees ("contours" en jeu).
@@ -145,6 +145,13 @@ public class ZigCityMenuScreen extends Screen {
         this.addRenderableWidget(new ZigButton(leftX + 2 * (third + splitGap), optY, bw - 2 * (third + splitGap), bh,
                 Component.literal("Quitter"),
                 () -> this.minecraft.stop()));
+    }
+
+    @Override
+    public void tick() {
+        // Tant que le menu est affiche, rafraichit periodiquement les tetes (throttle
+        // cote PlayerHeads) : un changement de skin se reflete sans relancer le jeu.
+        PlayerHeads.refresh();
     }
 
     private void joinServer() {
