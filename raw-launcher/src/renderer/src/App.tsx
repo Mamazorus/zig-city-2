@@ -2164,8 +2164,10 @@ export default function App() {
                       style={{ ['--cat' as string]: cat.rgb }}
                       onClick={() => openNews(item)}
                     >
-                      {/* Visuel */}
-                      <div className="news-card-media relative overflow-hidden shrink-0" style={{ height: 128 }}>
+                      {/* Visuel — même ratio (2:1) que la bannière et que l'éditeur de
+                          recadrage : l'aperçu est plus haut et l'image cadrée s'affiche
+                          entière, sans rognage supplémentaire. */}
+                      <div className="news-card-media relative overflow-hidden shrink-0 w-full" style={{ aspectRatio: NEWS_BANNER_RATIO }}>
                         <RemoteNewsImage
                           src={imgSrc}
                           className="news-card-img absolute inset-0 max-w-none object-cover pointer-events-none size-full"
