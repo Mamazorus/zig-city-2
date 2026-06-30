@@ -6,7 +6,7 @@ import AdminDashboard from './AdminDashboard'
 import StatsPage from './Stats'
 import SettingsPage from './Settings'
 import ChatPanel from './ChatPanel'
-import { resolveCategory, CategoryBadge, NewsFallback, type NewsCategory } from './news'
+import { resolveCategory, CategoryBadge, NewsFallback, NEWS_BANNER_RATIO, type NewsCategory } from './news'
 import { Avatar, RemoteNewsImage, useRemoteImage } from './remote-image'
 import { useItemIconSrc } from './item-icon'
 import type { ItemIconDesc } from './block-renderer'
@@ -2288,8 +2288,10 @@ export default function App() {
                 <span className="font-ui font-semibold text-[14px] text-white tracking-[-0.4px]">Retour</span>
               </button>
 
-              {/* Bannière — image nette (ou aplat sobre), séparée du contenu par un hairline */}
-              <div className="relative shrink-0 overflow-hidden" style={{ height: modalImg ? 200 : 150 }}>
+              {/* Bannière — image nette (ou aplat sobre), séparée du contenu par un hairline.
+                  Hauteur = largeur modale (740) / ratio bannière → l'image cadrée en 2:1 dans
+                  l'éditeur admin s'affiche entière, sans rognage supplémentaire. */}
+              <div className="relative shrink-0 overflow-hidden" style={{ height: modalImg ? 740 / NEWS_BANNER_RATIO : 150 }}>
                 <RemoteNewsImage
                   src={modalImg}
                   className="absolute inset-0 max-w-none object-cover size-full"
@@ -2297,8 +2299,9 @@ export default function App() {
                 />
               </div>
 
-              {/* Contenu — sur le verre clair */}
-              <div className="flex flex-col overflow-y-auto" style={{ padding: '24px 30px 30px' }}>
+              {/* Contenu — sur le verre clair. flex-1 min-h-0 : avec la bannière plus haute,
+                  le texte scrolle dans l'espace restant au lieu d'être rogné par la carte. */}
+              <div className="flex flex-col overflow-y-auto flex-1 min-h-0" style={{ padding: '24px 30px 30px' }}>
                 {/* En-tête éditorial : catégorie + méta */}
                 <div className="flex items-center justify-between gap-[12px] mb-[14px]">
                   <CategoryBadge category={modalCat.key} size="md" />

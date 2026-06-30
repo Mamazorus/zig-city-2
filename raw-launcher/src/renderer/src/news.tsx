@@ -1,5 +1,10 @@
 // ── Catégories d'actualités — source unique partagée (cartes, modale, dashboard) ──
 
+// Ratio largeur/hauteur de la bannière d'image des news. Partagé entre l'éditeur de
+// recadrage (admin) et l'affichage (modale) pour que ce qui est cadré = ce qui est
+// montré, sans rognage à l'arrivée. 2 = 2:1 → modale 740 de large = bannière 370 de haut.
+export const NEWS_BANNER_RATIO = 2
+
 export type NewsCategory = 'update' | 'event' | 'shop' | 'infra' | 'info'
 
 export interface CategoryMeta {

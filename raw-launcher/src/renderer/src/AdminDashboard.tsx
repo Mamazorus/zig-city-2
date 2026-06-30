@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { NEWS_CATEGORIES, CATEGORY_ORDER, resolveCategory, CategoryBadge, NewsFallback, type NewsCategory } from './news'
+import { NEWS_CATEGORIES, CATEGORY_ORDER, resolveCategory, CategoryBadge, NewsFallback, NEWS_BANNER_RATIO, type NewsCategory } from './news'
 import { Avatar, RemoteNewsImage } from './remote-image'
 import { ItemIcon } from './item-icon'
 import { type ItemIconDesc } from './block-renderer'
+import { ImageCropper } from './image-cropper'
 
 type AdminTab = 'news' | 'admins' | 'players' | 'channels' | 'shop' | 'quests' | 'backgrounds'
 
@@ -291,6 +292,8 @@ export default function AdminDashboard({
   const [imageError, setImageError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Image en attente de recadrage (data: URL + mime source). Non-null = éditeur ouvert.
+  const [cropState, setCropState] = useState<{ src: string; mime: string } | null>(null)
   const [newAdminName, setNewAdminName] = useState('')
   const [addingAdmin, setAddingAdmin] = useState(false)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
@@ -450,26 +453,58 @@ export default function AdminDashboard({
     setImageError(null)
   }
 
-  // Réhéberge une image (sélecteur, glisser-déposer ou presse-papier) sur Firebase
-  // Storage et renseigne l'URL permanente dans le formulaire. Remplace les liens
-  // Discord qui expirent (~24 h). Le main revalide tout (magic bytes, 4 Mo, admin).
+  // Réhéberge un dataURL (image DÉJÀ recadrée par l'éditeur) sur Firebase Storage et
+  // renseigne l'URL permanente dans le formulaire. Remplace les liens Discord qui
+  // expirent (~24 h). Le main revalide tout (magic bytes, 4 Mo, garde admin).
+  const uploadDataUrl = useCallback(async (dataUrl: string, mime: string, name: string) => {
+    setImageError(null)
+    setUploadingImage(true)
+    try {
+      const up = await window.launcher.uploadNewsImage({ dataUrl, mime, name })
+      if (!up.success || !up.url) { setImageError(up.error || "Échec de l'envoi."); return }
+      setForm(f => ({ ...f, imageUrl: up.url! }))
+    } catch {
+      setImageError("Échec de l'envoi.")
+    } finally {
+      setUploadingImage(false)
+    }
+  }, [])
+
+  // Sélecteur / glisser-déposer / presse-papier : on lit le fichier puis on ouvre
+  // l'éditeur de recadrage. L'upload n'a lieu qu'après validation du cadrage, sur une
+  // image déjà au format de la bannière (donc plus aucun rognage à l'affichage).
   const uploadFile = useCallback(async (file: File | null | undefined) => {
     setImageError(null)
     if (!file) return
     if (!file.type.startsWith('image/')) { setImageError('Choisis une image (PNG, JPEG, GIF, WebP).'); return }
     if (file.size > 4 * 1024 * 1024) { setImageError('Image trop lourde (max 4 Mo).'); return }
-    setUploadingImage(true)
     try {
       const dataUrl = await blobToDataUrl(file)
-      const up = await window.launcher.uploadNewsImage({ dataUrl, mime: file.type, name: file.name || 'image' })
-      if (!up.success || !up.url) { setImageError(up.error || "Échec de l'envoi."); return }
-      setForm(f => ({ ...f, imageUrl: up.url! }))
+      setCropState({ src: dataUrl, mime: file.type })
     } catch {
       setImageError('Image illisible.')
-    } finally {
-      setUploadingImage(false)
     }
   }, [])
+
+  // Re-recadrer l'image déjà attachée. Une URL distante est d'abord rapatriée en data:
+  // URL via le proxy main : sinon le canvas de l'éditeur serait « taché » (cross-origin)
+  // et son export échouerait.
+  const recropCurrent = useCallback(async () => {
+    setImageError(null)
+    const url = form.imageUrl
+    if (!url) return
+    try {
+      let dataUrl = url
+      if (/^https?:\/\//i.test(url)) {
+        const d = await window.launcher.fetchImage(url)
+        if (!d) { setImageError("Impossible de charger l'image à recadrer."); return }
+        dataUrl = d
+      }
+      setCropState({ src: dataUrl, mime: /^data:image\/jpeg/i.test(dataUrl) ? 'image/jpeg' : 'image/png' })
+    } catch {
+      setImageError("Impossible de charger l'image à recadrer.")
+    }
+  }, [form.imageUrl])
 
   // Coller (Ctrl+V) une image n'importe où tant que le formulaire est ouvert. On
   // n'intercepte que les images : coller du texte dans les champs reste normal.
@@ -1035,6 +1070,14 @@ export default function AdminDashboard({
                       <div className="absolute inset-0 flex items-center justify-center gap-[8px] bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
                           type="button"
+                          onClick={recropCurrent}
+                          disabled={uploadingImage}
+                          className="font-ui text-[13px] tracking-[-0.3px] text-white px-[12px] h-[32px] rounded-[8px] border border-[rgba(255,255,255,0.3)] bg-[rgba(0,0,0,0.4)] hover:bg-[rgba(0,0,0,0.6)] disabled:opacity-40 transition-colors"
+                        >
+                          Recadrer
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => fileInputRef.current?.click()}
                           disabled={uploadingImage}
                           className="font-ui text-[13px] tracking-[-0.3px] text-white px-[12px] h-[32px] rounded-[8px] border border-[rgba(255,255,255,0.3)] bg-[rgba(0,0,0,0.4)] hover:bg-[rgba(0,0,0,0.6)] disabled:opacity-40 transition-colors"
@@ -1091,6 +1134,18 @@ export default function AdminDashboard({
                     className="hidden"
                     onChange={e => { uploadFile(e.target.files?.[0]); e.currentTarget.value = '' }}
                   />
+
+                  {cropState && (
+                    <ImageCropper
+                      src={cropState.src}
+                      aspect={NEWS_BANNER_RATIO}
+                      onCancel={() => setCropState(null)}
+                      onConfirm={(dataUrl, mime) => {
+                        setCropState(null)
+                        uploadDataUrl(dataUrl, mime, mime === 'image/png' ? 'news.png' : 'news.jpg')
+                      }}
+                    />
+                  )}
 
                   {imageError && (
                     <p className="font-ui text-[13px] text-[rgba(255,120,120,0.9)] mt-[6px]">{imageError}</p>
