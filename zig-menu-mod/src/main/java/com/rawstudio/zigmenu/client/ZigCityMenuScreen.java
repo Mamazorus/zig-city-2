@@ -88,7 +88,7 @@ public class ZigCityMenuScreen extends Screen {
 
         int cx = this.width / 2;
         int bw = Mth.clamp((int) (this.width * 0.46f), 220, 340);
-        int bh = Mth.clamp((int) (bw * 0.078f), 18, 22);   // boutons plus fins (moins de vide haut/bas)
+        int bh = Mth.clamp((int) (bw * 0.092f), 21, 25);   // un peu d'air haut/bas (compromis vide/serre)
         int gap = Mth.clamp((int) (this.height * 0.03f), 8, 16);
 
         this.headSize = Mth.clamp((int) (bh * 0.72f), 14, 22);
