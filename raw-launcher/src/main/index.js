@@ -315,15 +315,27 @@ ipcMain.handle('get-players-seen', async () => {
   if (!isFirebaseConfigured()) return Object.keys(local)
   try {
     const [remote, hidden] = await Promise.all([fetchSharedPlayersSeen(), fetchHiddenPlayers()])
-    // Migre vers le partagé les joueurs vus uniquement en local (hors masqués)
-    const localOnly = Object.keys(local).filter(n => !(n in remote) && !(n in hidden))
+    // Les pseudos Minecraft ont une identité INSENSIBLE à la casse. On compare,
+    // déduplique et masque toujours en minuscules — sinon « WoxDfor » et « Woxdfor »
+    // comptent comme 2 joueurs, et masquer « LYenBrrr » ne bloque pas « Lyenbrrr ».
+    const hiddenLower = new Set(Object.keys(hidden).map(n => n.toLowerCase()))
+    const remoteLower = new Set(Object.keys(remote).map(n => n.toLowerCase()))
+    // Migre vers le partagé les joueurs vus uniquement en local (hors masqués / déjà connus)
+    const localOnly = Object.keys(local).filter(n => !remoteLower.has(n.toLowerCase()) && !hiddenLower.has(n.toLowerCase()))
     if (localOnly.length) pushPlayersSeen(localOnly).catch(() => {})
-    // Fusionne (partagé ∪ local), retire les joueurs masqués (suppression admin
-    // durable : purge aussi le cache local), rafraîchit le cache hors-ligne
-    const merged = { ...remote, ...local }
-    for (const n of Object.keys(hidden)) delete merged[n]
+    // Fusionne (partagé ∪ local), retire les masqués, déduplique par casse : une seule
+    // entrée par joueur (1re casse rencontrée, le partagé primant sur le local).
+    const byLower = new Map()
+    for (const n of [...Object.keys(remote), ...Object.keys(local)]) {
+      const key = n.toLowerCase()
+      if (hiddenLower.has(key) || byLower.has(key)) continue
+      byLower.set(key, n)
+    }
+    const names = [...byLower.values()]
+    const merged = {}
+    for (const n of names) merged[n] = remote[n] ?? local[n] ?? Date.now()
     savePlayersSeen(merged)
-    return Object.keys(merged)
+    return names
   } catch {
     // Hors-ligne : on retombe sur le cache local
     return Object.keys(local)
@@ -1848,11 +1860,18 @@ async function pushPlayersSeen(rawNames) {
   try { [remote, hidden] = await Promise.all([fetchSharedPlayersSeen(), fetchHiddenPlayers()]) }
   catch { remote = {}; hidden = {} }
 
+  // Comparaison insensible à la casse (identité Minecraft) : ne pas créer « Woxdfor »
+  // à côté de « WoxDfor », ni ré-ajouter un pseudo masqué sous une autre casse.
+  const remoteLower = new Set(Object.keys(remote).map(s => s.toLowerCase()))
+  const hiddenLower = new Set(Object.keys(hidden).map(s => s.toLowerCase()))
   const now = Date.now()
   const patch = {}
   const added = []
   for (const n of names) {
-    if (!(n in remote) && !(n in hidden)) { patch[n] = now; added.push(n) }
+    const key = n.toLowerCase()
+    if (!remoteLower.has(key) && !hiddenLower.has(key)) {
+      patch[n] = now; added.push(n); remoteLower.add(key)
+    }
   }
 
   if (added.length) {
@@ -2068,11 +2087,14 @@ ipcMain.handle('add-players-seen', async (_, names) => {
     const rawTokens = (Array.isArray(names) ? names : String(names ?? '').split(/[\s,;]+/))
       .map(s => String(s ?? '').trim()).filter(Boolean)
     const invalid = rawTokens.filter(t => !valid.includes(t)).length
-    // Un ajout admin explicite lève un éventuel masquage (annule le tombstone)
+    // Un ajout admin explicite lève un éventuel masquage (annule le tombstone), quelle
+    // que soit la casse sous laquelle il a été posé (comparaison insensible à la casse).
     if (valid.length) {
+      const hidden = await fetchHiddenPlayers().catch(() => ({}))
+      const validLower = new Set(valid.map(s => s.toLowerCase()))
       const unhide = {}
-      for (const n of valid) unhide[n] = null
-      await firebaseRequest('PATCH', '/playersHidden', unhide, true)
+      for (const k of Object.keys(hidden)) if (validLower.has(k.toLowerCase())) unhide[k] = null
+      if (Object.keys(unhide).length) await firebaseRequest('PATCH', '/playersHidden', unhide, true)
     }
     const res = await pushPlayersSeen(valid)
     return { success: true, added: res.added, skipped: res.skipped, invalid }
@@ -2085,14 +2107,22 @@ ipcMain.handle('remove-player-seen', async (_, name) => {
   if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
   const n = String(name ?? '').trim()
   if (!n) return { success: false, error: 'Nom vide' }
+  const key = n.toLowerCase()
   try {
-    // Tombstone : marque le pseudo comme masqué AVANT de le retirer, pour que
-    // pushPlayersSeen et la lecture ne le ré-injectent pas (cache local des
-    // autres launchers, joueur encore en ligne…). Suppression durable.
-    await firebaseRequest('PUT', `/playersHidden/${encodeURIComponent(n)}`, true, true)
-    await firebaseRequest('DELETE', `/playersSeen/${encodeURIComponent(n)}`, null, true)
+    // Tombstone sous la casse canonique (minuscule) : la lecture et le push comparent
+    // en minuscule, donc « woxdfor » masque toutes les variantes de casse. Empêche un
+    // pseudo supprimé de revenir via une autre casse (cache local, joueur en ligne…).
+    await firebaseRequest('PUT', `/playersHidden/${encodeURIComponent(key)}`, true, true)
+    // Supprime TOUTES les variantes de casse du pseudo dans le partagé (ex. WoxDfor + Woxdfor).
+    const remote = await fetchSharedPlayersSeen().catch(() => ({}))
+    const variants = Object.keys(remote).filter(k => k.toLowerCase() === key)
+    for (const v of (variants.length ? variants : [n])) {
+      await firebaseRequest('DELETE', `/playersSeen/${encodeURIComponent(v)}`, null, true)
+    }
     const local = loadPlayersSeen()
-    if (n in local) { delete local[n]; savePlayersSeen(local) }
+    let changed = false
+    for (const k of Object.keys(local)) if (k.toLowerCase() === key) { delete local[k]; changed = true }
+    if (changed) savePlayersSeen(local)
     return { success: true }
   } catch (e) {
     return { success: false, error: e.message }

@@ -214,11 +214,6 @@ public class ZigCityMenuScreen extends Screen {
         if (heads.isEmpty()) {
             return;
         }
-        int n = Math.min(this.headCount, heads.size());
-        if (n <= 0) {
-            return;
-        }
-
         // Animation : les rangees s'ecartent quand la souris survole le bouton ZIG CITY
         // (haut vers le haut, bas vers le bas) pour reveler davantage les tetes.
         long now = Util.getMillis();
@@ -236,15 +231,25 @@ public class ZigCityMenuScreen extends Screen {
         float eased = this.headSpread * this.headSpread * (3f - 2f * this.headSpread); // smoothstep
         int shift = Math.round(eased * this.headMaxShift);
 
-        int stripW = n * this.headSize;
-        int startX = this.width / 2 - stripW / 2;
+        // Deux rangees de joueurs DIFFERENTS (plus un reflet) : on repartit les tetes en
+        // deux moities -> jusqu'a 2x plus de monde affiche, sans doublon haut/bas.
+        int total = Math.min(heads.size(), this.headCount * 2);
+        int topCount = (total + 1) / 2;
         int topRowY = this.zigBtnY - this.headPeek - shift;                    // depasse en haut (monte au survol)
         int botRowY = this.zigBtnY + this.zigBtnH - this.headOverlap + shift;  // depasse en bas (descend au survol)
-        for (int i = 0; i < n; i++) {
-            int hx = startX + i * this.headSize;
-            drawHead(g, heads.get(i % heads.size()), hx, topRowY, false);
-            // Rangee du bas = reflet par symetrie centrale (rotation 180deg), comme le Figma.
-            drawHead(g, heads.get((n - 1 - i) % heads.size()), hx, botRowY, true);
+        drawHeadRow(g, heads, 0, topCount, topRowY);
+        drawHeadRow(g, heads, topCount, total - topCount, botRowY);
+    }
+
+    /** Dessine {@code count} tetes consecutives (a partir de {@code from}), centrees horizontalement. */
+    private void drawHeadRow(GuiGraphics g, List<ResourceLocation> heads, int from, int count, int y) {
+        if (count <= 0) {
+            return;
+        }
+        int stripW = count * this.headSize;
+        int startX = this.width / 2 - stripW / 2;
+        for (int i = 0; i < count; i++) {
+            drawHead(g, heads.get(from + i), startX + i * this.headSize, y, false);
         }
     }
 

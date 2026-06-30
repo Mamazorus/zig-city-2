@@ -8,6 +8,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -101,16 +102,24 @@ public final class PlayerHeads {
     private static List<String> fetchPlayerNames(HttpClient http) {
         List<String> result = new ArrayList<>();
         try {
+            // Identite Minecraft INSENSIBLE a la casse : on masque et deduplique en
+            // minuscules. Sinon un masquage « LYenBrrr » ne bloque pas « Lyenbrrr », et
+            // « WoxDfor » + « Woxdfor » s'affichent comme deux tetes distinctes.
             Set<String> hidden = jsonKeys(http, FIREBASE + "/playersHidden.json");
+            Set<String> hiddenLower = new HashSet<>();
+            for (String h : hidden) hiddenLower.add(h.toLowerCase(Locale.ROOT));
             List<String> seen = new ArrayList<>(jsonKeys(http, FIREBASE + "/playersSeen.json"));
-            seen.removeAll(hidden);
             seen.sort(String.CASE_INSENSITIVE_ORDER);
+            Set<String> usedLower = new HashSet<>();
             for (String n : seen) {
+                String key = n.toLowerCase(Locale.ROOT);
+                if (hiddenLower.contains(key)) continue;   // masque (insensible a la casse)
+                if (!usedLower.add(key)) continue;         // doublon de casse -> ignore
                 if (VALID_NAME.matcher(n).matches()) {
                     result.add(n);
-                }
-                if (result.size() >= MAX_PLAYERS) {
-                    break;
+                    if (result.size() >= MAX_PLAYERS) {
+                        break;
+                    }
                 }
             }
         } catch (Exception e) {
