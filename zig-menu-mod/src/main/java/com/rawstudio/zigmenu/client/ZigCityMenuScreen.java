@@ -167,7 +167,7 @@ public class ZigCityMenuScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        renderSceneBackground(g);
+        renderSceneBackground(g, this.width, this.height);
         renderLogo(g);
         renderSplash(g);
         renderHeads(g, mouseX, mouseY);
@@ -181,17 +181,20 @@ public class ZigCityMenuScreen extends Screen {
         g.drawString(this.font, Component.literal(FOOTER), 6, this.height - this.font.lineHeight - 4, 0xFFFFFFFF, true);
     }
 
-    private void renderSceneBackground(GuiGraphics g) {
+    // Fond Zig City (screenshot anime + assombrissement + vignette). STATIQUE et reutilise
+    // par ZigMenuClient pour peindre le MEME fond derriere les ecrans vanilla (Options,
+    // Langue, selection de monde...) qui afficheraient sinon le fond "dirt/panorama" vanilla.
+    static void renderSceneBackground(GuiGraphics g, int width, int height) {
         // "Cover" + leger zoom pour menager une marge horizontale, puis panoramique lent
         // gauche <-> droite (ping-pong, ralenti aux bords) facon ecran-titre anime.
-        float scale = Math.max((float) this.width / BG_W, (float) this.height / BG_H) * BG_ZOOM;
+        float scale = Math.max((float) width / BG_W, (float) height / BG_H) * BG_ZOOM;
         float dw = BG_W * scale;
         float dh = BG_H * scale;
-        float slackX = Math.max(0f, dw - this.width);                       // marge horizontale a parcourir
+        float slackX = Math.max(0f, dw - width);                            // marge horizontale a parcourir
         float phase = (Util.getMillis() % BG_PAN_PERIOD_MS) / (float) BG_PAN_PERIOD_MS;
         float t = 0.5f - 0.5f * Mth.cos(phase * (float) Math.PI * 2f);      // 0 -> 1 -> 0, sans a-coup
         float dx = -slackX * t;                                             // du bord gauche au bord droit
-        float dy = (this.height - dh) / 2f;                                 // centre verticalement
+        float dy = (height - dh) / 2f;                                      // centre verticalement
         g.pose().pushPose();
         g.pose().translate(dx, dy, 0);
         g.pose().scale(scale, scale, 1f);
@@ -199,10 +202,10 @@ public class ZigCityMenuScreen extends Screen {
         g.pose().popPose();
 
         // Assombrissement global pour la lisibilite.
-        g.fill(0, 0, this.width, this.height, 0x40000000);
+        g.fill(0, 0, width, height, 0x40000000);
         // Vignette haut (legere) et bas (plus marquee, sous les boutons).
-        g.fillGradient(0, 0, this.width, (int) (this.height * 0.28f), 0x99000000, 0x00000000);
-        g.fillGradient(0, (int) (this.height * 0.55f), this.width, this.height, 0x00000000, 0xCC000000);
+        g.fillGradient(0, 0, width, (int) (height * 0.28f), 0x99000000, 0x00000000);
+        g.fillGradient(0, (int) (height * 0.55f), width, height, 0x00000000, 0xCC000000);
     }
 
     private void renderLogo(GuiGraphics g) {
