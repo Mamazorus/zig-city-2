@@ -7,6 +7,7 @@ import com.mojang.math.Axis;
 import net.minecraft.Util;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.options.LanguageSelectScreen;
 import net.minecraft.client.gui.screens.options.OptionsScreen;
@@ -277,17 +278,9 @@ public class ZigCityMenuScreen extends Screen {
         }
     }
 
-    private void drawHead(GuiGraphics g, ResourceLocation tex, int x, int y, boolean flip) {
-        g.pose().pushPose();
-        g.pose().translate(x, y, 0);
-        g.pose().scale(this.headSize / 64f, this.headSize / 64f, 1f);
-        if (flip) {
-            // Rotation 180deg autour du centre de la tete (boite 64x64).
-            g.pose().translate(32f, 32f, 0);
-            g.pose().mulPose(Axis.ZP.rotationDegrees(180f));
-            g.pose().translate(-32f, -32f, 0);
-        }
-        g.blit(tex, 0, 0, 0f, 0f, 64, 64, 64, 64);
-        g.pose().popPose();
+    // `skin` est désormais la texture de SKIN du joueur (téléchargée depuis Mojang, fraîche) ;
+    // PlayerFaceRenderer compose la tête = face (8,8) + couche chapeau (40,8). drawHat=true.
+    private void drawHead(GuiGraphics g, ResourceLocation skin, int x, int y, boolean flip) {
+        PlayerFaceRenderer.draw(g, skin, x, y, this.headSize, true, flip);
     }
 }
