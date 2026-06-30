@@ -1150,7 +1150,7 @@ ipcMain.handle('install-modpack', async () => {
       })
 
       if (!fs.existsSync(NEOFORGE_INSTALLER_PATH)) {
-        await downloadFile(NEOFORGE_INSTALLER_URL, NEOFORGE_INSTALLER_PATH)
+        await downloadWithRetry(NEOFORGE_INSTALLER_URL, NEOFORGE_INSTALLER_PATH)
       }
 
       const profilesPath = path.join(GAME_DIR, 'launcher_profiles.json')
@@ -1213,17 +1213,22 @@ ipcMain.handle('install-modpack', async () => {
       !fs.existsSync(path.join(modsDir, mod.name))
     )
 
-    for (let i = 0; i < missing.length; i++) {
-      const mod = missing[i]
+    // Parallélisé (pool borné à 8). La plupart des mods sont sur Google Drive, qui bride
+    // par fichier et peut renvoyer 429 si on l'inonde — 8 est un bon compromis (les
+    // navigateurs ouvrent ~6 connexions/hôte), la robustesse venant de downloadWithRetry.
+    // La progression compte les téléchargements TERMINÉS (ordre non garanti en parallèle).
+    let done = 0
+    await runPool(missing, 8, async (mod) => {
+      await downloadWithRetry(mod.url, path.join(modsDir, mod.name))
+      done++
       win?.webContents.send('install-progress', {
         step: 'mods',
-        current: i + 1,
+        current: done,
         total: missing.length,
         name: mod.name,
-        percent: Math.round((i / missing.length) * 100)
+        percent: Math.round((done / missing.length) * 100)
       })
-      await downloadFile(mod.url, path.join(modsDir, mod.name))
-    }
+    })
 
     // Shaderpacks (Iris) : déposés après les mods, disponibles dès le 1er lancement.
     await deployShaders()
@@ -1293,11 +1298,14 @@ async function ensureJava21() {
   const allEntries = Object.entries(manifest.files)
   const files = allEntries.filter(([_, f]) => f.type === 'file')
 
+  // Le JRE Mojang = des centaines de petits fichiers : c'est la latence par requête qui
+  // domine, pas le débit. Un pool large (16) + keep-alive masque cette latence et réduit
+  // drastiquement la durée de cette phase.
   let done = 0
-  for (const [relPath, info] of files) {
+  await runPool(files, 16, async ([relPath, info]) => {
     const dest = path.join(JAVA_DIR, relPath)
     fs.mkdirSync(path.dirname(dest), { recursive: true })
-    await downloadFile(info.downloads.raw.url, dest)
+    await downloadWithRetry(info.downloads.raw.url, dest)
     // macOS/Linux : rétablir le bit exécutable, sinon `spawn ... EACCES` au lancement.
     if (info.executable && process.platform !== 'win32') {
       try { fs.chmodSync(dest, 0o755) } catch { /* best-effort */ }
@@ -1310,7 +1318,7 @@ async function ensureJava21() {
         percent: 2 + Math.round((done / files.length) * 28)
       })
     }
-  }
+  })
 
   // macOS : recréer les liens symboliques du bundle JRE (≈200 liens, indispensables
   // au démarrage de Java). Le code ne les téléchargeait pas → bundle cassé sur Mac.
@@ -1591,17 +1599,18 @@ function missingShaderList() {
 async function deployShaders() {
   const missing = missingShaderList()
   if (!missing.length) return
-  for (let i = 0; i < missing.length; i++) {
-    const s = missing[i]
+  let done = 0
+  await runPool(missing, 4, async (s) => {
+    await downloadWithRetry(s.url, path.join(SHADERPACKS_DIR, s.name))
+    done++
     win?.webContents.send('install-progress', {
       step: 'shaders',
-      current: i + 1,
+      current: done,
       total: missing.length,
       name: s.name,
-      percent: Math.round((i / missing.length) * 100)
+      percent: Math.round((done / missing.length) * 100)
     })
-    await downloadFile(s.url, path.join(SHADERPACKS_DIR, s.name))
-  }
+  })
 }
 
 // ─── IPC : RÉGLAGES ──────────────────────────────────────────────────────────
@@ -3450,6 +3459,14 @@ ipcMain.handle('chat-unsubscribe', (_, channelId) => {
 })
 
 // ─── DOWNLOAD ────────────────────────────────────────────────────────────────
+// Agents keep-alive partagés : sans eux, Node rouvre une connexion TCP + un handshake
+// TLS complet pour CHAQUE fichier (222 mods + des centaines de fichiers Java au 1er
+// lancement). Réutiliser les sockets supprime cet overhead, qui domine le temps perdu
+// sur les petits fichiers. maxSockets borne la charge ; le vrai parallélisme est piloté
+// par runPool() ci-dessous.
+const keepAliveHttps = new https.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 16 })
+const keepAliveHttp  = new http.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 16 })
+
 function downloadFile(url, dest, redirects = 0) {
   if (redirects > 10) return Promise.reject(new Error('Trop de redirections'))
 
@@ -3459,26 +3476,34 @@ function downloadFile(url, dest, redirects = 0) {
     const options = {
       hostname: urlObj.hostname,
       path:     urlObj.pathname + urlObj.search,
-      headers:  { 'User-Agent': 'Mozilla/5.0' }
+      headers:  { 'User-Agent': 'Mozilla/5.0' },
+      agent:    proto === https ? keepAliveHttps : keepAliveHttp
     }
     const file = fs.createWriteStream(dest)
+    let settled = false
+    const fail = (err) => {
+      if (settled) return
+      settled = true
+      file.close()
+      // unlink best-effort : sur Windows le fd peut être encore en fermeture (EBUSY).
+      if (fs.existsSync(dest)) { try { fs.unlinkSync(dest) } catch { /* rien */ } }
+      reject(err)
+    }
 
-    proto.get(options, (res) => {
+    const req = proto.get(options, (res) => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+        if (settled) return
+        settled = true
         file.close()
-        if (fs.existsSync(dest)) fs.unlinkSync(dest)
+        if (fs.existsSync(dest)) { try { fs.unlinkSync(dest) } catch { /* rien */ } }
         return downloadFile(res.headers.location, dest, redirects + 1).then(resolve).catch(reject)
       }
       if (res.statusCode !== 200) {
-        file.close()
-        if (fs.existsSync(dest)) fs.unlinkSync(dest)
-        return reject(new Error(`HTTP ${res.statusCode} — ${url}`))
+        return fail(new Error(`HTTP ${res.statusCode} — ${url}`))
       }
       const ct = res.headers['content-type'] || ''
       if (ct.includes('text/html')) {
-        file.close()
-        if (fs.existsSync(dest)) fs.unlinkSync(dest)
-        return reject(new Error(`Réponse HTML inattendue pour ${path.basename(dest)} — lien Drive expiré ?`))
+        return fail(new Error(`Réponse HTML inattendue pour ${path.basename(dest)} — lien Drive expiré ?`))
       }
       const expected = parseInt(res.headers['content-length'] || '0', 10)
       let received = 0
@@ -3486,21 +3511,63 @@ function downloadFile(url, dest, redirects = 0) {
       res.pipe(file)
       file.on('finish', () => {
         file.close(() => {
+          if (settled) return
           // Téléchargement tronqué (coupure réseau) : sans ce contrôle, un .jar
           // partiel est conservé, passe ensuite pour « corrompu » (installeur) ou
           // crashe au chargement (mod), et n'est JAMAIS re-téléchargé car le fichier
           // existe déjà. On le supprime pour que la prochaine tentative recommence.
           if (expected && received < expected) {
-            if (fs.existsSync(dest)) fs.unlinkSync(dest)
-            return reject(new Error(`Téléchargement incomplet (${received}/${expected} octets) — ${path.basename(dest)}`))
+            return fail(new Error(`Téléchargement incomplet (${received}/${expected} octets) — ${path.basename(dest)}`))
           }
+          settled = true
           resolve()
         })
       })
-    }).on('error', (err) => {
-      file.close()
-      if (fs.existsSync(dest)) fs.unlinkSync(dest)
-      reject(err)
     })
+
+    req.on('error', fail)
+    file.on('error', fail)
+    // Garde-temps d'INACTIVITÉ (pas une durée maximale) : il se réarme tant que des
+    // octets arrivent, et ne saute donc que si la connexion se fige — fréquent avec
+    // Google Drive, qui peut « pendre » une socket. En séquentiel, un seul mod figé
+    // bloquait tout le launcher sans fin ; ici on coupe, et downloadWithRetry réessaie.
+    req.setTimeout(30000, () => req.destroy(new Error(`Délai dépassé (30 s sans données) — ${path.basename(dest)}`)))
   })
+}
+
+// Pool de concurrence borné : applique worker(item, i) à `items` avec au plus
+// `concurrency` tâches simultanées. Remplace les boucles « for … await » (un fichier à
+// la fois) du 1er lancement. Une tâche qui échoue (après reprises) stoppe l'enfournement
+// et l'erreur est propagée une fois les tâches en vol terminées — un modpack incomplet
+// crashe en jeu, donc on ne masque jamais l'échec.
+async function runPool(items, concurrency, worker) {
+  const results = new Array(items.length)
+  let next = 0
+  let firstErr = null
+  async function runner() {
+    while (next < items.length && !firstErr) {
+      const i = next++
+      try { results[i] = await worker(items[i], i) }
+      catch (e) { if (!firstErr) firstErr = e }
+    }
+  }
+  const n = Math.max(1, Math.min(concurrency, items.length))
+  await Promise.all(Array.from({ length: n }, () => runner()))
+  if (firstErr) throw firstErr
+  return results
+}
+
+// downloadFile + reprises : un échec ponctuel (socket keep-alive fermée par le serveur,
+// 429/throttle Google Drive, micro-coupure) est réessayé avec un délai croissant plutôt
+// que de faire échouer toute l'installation.
+async function downloadWithRetry(url, dest, attempts = 3) {
+  let lastErr
+  for (let a = 1; a <= attempts; a++) {
+    try { return await downloadFile(url, dest) }
+    catch (e) {
+      lastErr = e
+      if (a < attempts) await new Promise(r => setTimeout(r, 600 * a * a))
+    }
+  }
+  throw lastErr
 }
