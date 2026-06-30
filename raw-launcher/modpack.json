@@ -220,6 +220,22 @@
       "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/create_optical-0.4.2.jar"
     },
     {
+      "name": "silent-lib-1.21.1-neoforge-10.6.0.jar",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/silent-lib-1.21.1-neoforge-10.6.0.jar"
+    },
+    {
+      "name": "silent-gear-1.21.1-neoforge-4.2.1.1.jar",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/silent-gear-1.21.1-neoforge-4.2.1.1.jar"
+    },
+    {
+      "name": "productivemetalworks-1.21.1-1.13.0.jar",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/productivemetalworks-1.21.1-1.13.0.jar"
+    },
+    {
+      "name": "sgearmetalworks-1.21.1-1.4.6.jar",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/sgearmetalworks-1.21.1-1.4.6.jar"
+    },
+    {
       "name": "create-aeronautics-bundled-1.21.1-1.2.1.jar",
       "url": "https://drive.usercontent.google.com/download?id=1qkpSYeemDOnPHeNWwHJyIe5_uuDA9-MS&export=download&confirm=t"
     },
