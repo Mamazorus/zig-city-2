@@ -545,11 +545,14 @@ function hexToRgb(hex: string): [number, number, number] {
 const rgbToHex = (r: number, g: number, b: number) =>
   '#' + [r, g, b].map(n => Math.round(Math.min(255, Math.max(0, n))).toString(16).padStart(2, '0')).join('')
 
-// Couleur courante avec une légère variation aléatoire de luminosité/saturation
-// (outil « Nuances » : casse l'aplat uni, donne du relief).
-function jitterShade(hex: string): string {
+// Couleur courante avec une variation aléatoire de luminosité/saturation, dosée
+// par `intensity` (0 = aucune variation, 1 = forte). Outil « Nuances » : casse
+// l'aplat uni, donne du relief.
+function jitterShade(hex: string, intensity: number): string {
   const { h, s, v } = hexToHsv(hex)
-  return hsvToHex(h, clamp01(s + (Math.random() * 2 - 1) * 0.06), clamp01(v + (Math.random() * 2 - 1) * 0.14))
+  const dv = (Math.random() * 2 - 1) * 0.22 * intensity
+  const ds = (Math.random() * 2 - 1) * 0.10 * intensity
+  return hsvToHex(h, clamp01(s + ds), clamp01(v + dv))
 }
 // Éclaircit (dir +1) ou assombrit (dir -1) une couleur RGB d'un cran.
 function shiftValue(r: number, g: number, b: number, dir: number): [number, number, number] {
@@ -652,6 +655,7 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
   const gridRef = useRef<HTMLCanvasElement>(null)          // grille zoomée visible
   const [tool, setTool] = useState<EditorTool>('brush')
   const [color, setColor] = useState('#c43c3c')
+  const [shadeIntensity, setShadeIntensity] = useState(0.4)   // dosage de l'outil Nuances (0–1)
   const [showGuides, setShowGuides] = useState(true)
   const [previewVer, setPreviewVer] = useState(0)
   const [, setHistVer] = useState(0)
@@ -682,8 +686,10 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
   const lastCell = useRef<{ x: number; y: number } | null>(null)
   const toolRef = useRef(tool)
   const colorRef = useRef(color)
+  const shadeRef = useRef(shadeIntensity)
   useEffect(() => { toolRef.current = tool }, [tool])
   useEffect(() => { colorRef.current = color }, [color])
+  useEffect(() => { shadeRef.current = shadeIntensity }, [shadeIntensity])
 
   const workCtx = () => workRef.current!.getContext('2d', { willReadFrequently: true })!
 
@@ -788,7 +794,7 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
     if (t === 'eraser') {
       ctx.clearRect(x, y, 1, 1)
     } else if (t === 'shade') {
-      ctx.fillStyle = jitterShade(colorRef.current)   // couleur + légère variation
+      ctx.fillStyle = jitterShade(colorRef.current, shadeRef.current)   // couleur + variation dosée
       ctx.fillRect(x, y, 1, 1)
     } else if (t === 'lighten' || t === 'darken') {
       let d: Uint8ClampedArray
@@ -993,6 +999,24 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
     return () => ro.disconnect()
   }, [])
 
+  // Schéma des membres : une boîte cliquable par partie (clic = masquer/afficher)
+  const partLabel = (k: SkinPart) => SKIN_PARTS.find(p => p.key === k)!.label
+  const partBox = (k: SkinPart, w: number, h: number) => {
+    const vis = partVisible[k] !== false
+    return (
+      <button
+        onClick={() => setPartVisible(p => ({ ...p, [k]: !(p[k] !== false) }))}
+        title={vis ? `Masquer ${partLabel(k)} (pour peindre la face cachée)` : `Afficher ${partLabel(k)}`}
+        style={{ width: w, height: h }}
+        className={`rounded-[4px] border transition-colors ${
+          vis
+            ? 'border-[rgba(0,255,225,0.45)] bg-[rgba(0,255,225,0.16)] hover:bg-[rgba(0,255,225,0.28)]'
+            : 'border-dashed border-[rgba(255,255,255,0.22)] bg-[rgba(255,255,255,0.02)] hover:border-[rgba(255,255,255,0.45)]'
+        }`}
+      />
+    )
+  }
+
   return (
     // Disposition « atelier » : panneau outils à gauche, espace 3D à droite (flex).
     <div className="flex flex-row-reverse gap-[16px] h-full min-h-0">
@@ -1078,27 +1102,20 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
           </div>
         </div>
 
-        {/* Membres — masquer un membre pour peindre les faces autrement cachées */}
+        {/* Membres — schéma cliquable du personnage : clic = masquer (pour peindre derrière) */}
         <div className="flex flex-col gap-[6px]">
-          <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px]">Membres</p>
-          <div className="grid grid-cols-3 gap-[6px]">
-            {SKIN_PARTS.map(({ key, label }) => {
-              const vis = partVisible[key] !== false
-              return (
-                <button
-                  key={key}
-                  onClick={() => setPartVisible(p => ({ ...p, [key]: !(p[key] !== false) }))}
-                  title={vis ? `Masquer ${label} (pour peindre derrière)` : `Afficher ${label}`}
-                  className={`px-[6px] py-[7px] rounded-[8px] border font-ui text-[12px] font-semibold transition-colors ${
-                    vis
-                      ? 'border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.05)] text-white/80 hover:bg-[rgba(255,255,255,0.08)]'
-                      : 'border-[rgba(255,255,255,0.07)] bg-transparent text-white/30 line-through hover:text-white/50'
-                  }`}
-                >
-                  {label}
-                </button>
-              )
-            })}
+          <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px]">Membres <span className="text-white/25">— clic pour masquer</span></p>
+          <div className="self-center flex flex-col items-center gap-[3px] py-[4px]">
+            {partBox('head', 34, 30)}
+            <div className="flex gap-[3px] items-start">
+              {partBox('rightArm', 14, 44)}
+              {partBox('body', 34, 44)}
+              {partBox('leftArm', 14, 44)}
+            </div>
+            <div className="flex gap-[3px]">
+              {partBox('rightLeg', 16, 40)}
+              {partBox('leftLeg', 16, 40)}
+            </div>
           </div>
         </div>
 
@@ -1127,7 +1144,7 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M7 21 3.3 17.3a1.8 1.8 0 0 1 0-2.5l9-9a1.8 1.8 0 0 1 2.5 0l4.4 4.4a1.8 1.8 0 0 1 0 2.5L13 21"/><path d="M21 21H8"/><path d="m6 12 6 6"/></svg>
             ))}
             {toolBtn('eyedropper', 'Pipette', (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m2 22 1.5-.5 9-9"/><path d="M12.5 12.5 8 8"/><path d="m15 6 3-3a2.1 2.1 0 0 1 3 3l-3 3 .5.5a2 2 0 0 1-2.8 2.8l-4-4A2 2 0 0 1 12 8.5l.5.5Z"/></svg>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="8.5" y="2.5" width="7" height="4.5" rx="2"/><path d="M10 7v8.5l2 4.5 2-4.5V7"/><path d="M10.2 11.3h3.6"/></svg>
             ))}
           </div>
           <div className="flex gap-[8px]">
@@ -1138,6 +1155,24 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
               <svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M10 4l3 3-3 3M13 7H6.5A3.5 3.5 0 0 0 3 10.5v0A3.5 3.5 0 0 0 6.5 14H10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
           </div>
+          {/* Intensité des nuances (visible quand l'outil Nuances est actif) */}
+          {tool === 'shade' && (
+            <div className="flex flex-col gap-[5px] pt-[2px]">
+              <div className="flex items-center justify-between">
+                <p className="font-ui text-[12px] text-white/45 tracking-[-0.2px]">Intensité des nuances</p>
+                <span className="font-ui text-[12px] text-white/65 tabular-nums">{Math.round(shadeIntensity * 100)} %</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(shadeIntensity * 100)}
+                onChange={e => setShadeIntensity(Number(e.target.value) / 100)}
+                className="w-full cursor-pointer"
+                style={{ accentColor: 'rgb(0,255,225)' }}
+              />
+            </div>
+          )}
         </div>
 
         {/* Repères de zones */}
