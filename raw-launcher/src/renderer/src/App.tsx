@@ -744,7 +744,7 @@ const SkinEditor = forwardRef<SkinEditorHandle, {
       {/* Espace 3D (principal) */}
       <div
         className="relative shrink-0 rounded-[14px] overflow-hidden border border-[rgba(255,255,255,0.08)]"
-        style={{ width: VIEWER_W, height: VIEWER_H, background: 'radial-gradient(ellipse 65% 60% at 50% 42%, rgba(0,255,225,0.10) 0%, rgba(14,11,22,0.30) 80%)' }}
+        style={{ width: VIEWER_W, height: VIEWER_H, background: 'radial-gradient(ellipse 72% 64% at 50% 38%, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.015) 42%, rgba(10,8,16,0.6) 88%)' }}
       >
         <Skin3DViewer
           sourceCanvas={workRef.current}
@@ -1057,7 +1057,14 @@ export default function App() {
   // ordre, sans mélange aléatoire ni doublon. On plafonne (chaque tête = une
   // requête mc-heads) sans toucher à l'historique complet.
   const carouselNames = useMemo(() => {
-    return Array.from(new Set(playersSeen))
+    // Déduplication insensible à la casse (un pseudo Minecraft = une identité quelle que
+    // soit la casse) : évite « WoxDfor » + « Woxdfor » affichés comme deux têtes.
+    const byLower = new Map<string, string>()
+    for (const n of playersSeen) {
+      const k = n.toLowerCase()
+      if (!byLower.has(k)) byLower.set(k, n)
+    }
+    return [...byLower.values()]
       .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }))
       .slice(0, 48)
   }, [playersSeen])
@@ -1139,7 +1146,7 @@ export default function App() {
   const [editorLoadKey, setEditorLoadKey] = useState(0)             // bump → (re)charge l'éditeur
   const [skinBusy, setSkinBusy] = useState(false)
   const [skinError, setSkinError] = useState<string | null>(null)
-  const [skinSuccess, setSkinSuccess] = useState(false)
+  const [skinSuccess, setSkinSuccess] = useState<string | null>(null)
   const [skinVersion, setSkinVersion] = useState(0)                 // cache-buster avatar
   const skinRequestRef = useRef(false)                              // garde anti double-soumission
   const editorApiRef = useRef<SkinEditorHandle>(null)
@@ -1473,7 +1480,7 @@ export default function App() {
     setSkinModalClosing(false)
     setSkinTab('editor')
     setSkinError(null)
-    setSkinSuccess(false)
+    setSkinSuccess(null)
     setEditorSrc(null)
     setSkinInfoLoading(true)
     refreshLibrary()
@@ -1495,13 +1502,13 @@ export default function App() {
       setSkinModalClosing(false)
       setEditorSrc(null)   // libère le dataUrl base64
       setSkinError(null)
-      setSkinSuccess(false)
+      setSkinSuccess(null)
     }, 250)
   }
 
   const handlePickSkin = async () => {
     setSkinError(null)
-    setSkinSuccess(false)
+    setSkinSuccess(null)
     const res = await window.launcher.pickSkinFile()
     if (res.canceled) return
     if (res.error || !res.dataUrl) {
@@ -1520,11 +1527,11 @@ export default function App() {
     skinRequestRef.current = true
     setSkinBusy(true)
     setSkinError(null)
-    setSkinSuccess(false)
+    setSkinSuccess(null)
     try {
       const res = await window.launcher.uploadSkin({ variant: selectedVariant, dataUrl })
       if (res.success) {
-        setSkinSuccess(true)
+        setSkinSuccess('Skin appliqué sur ton compte ! En jeu, il peut mettre quelques secondes à apparaître.')
         setSkinVersion(v => v + 1)
       } else {
         setSkinError(res.expired || res.loggedOut ? sessionMessage : (res.error ?? 'Échec du changement de skin.'))
@@ -1540,7 +1547,7 @@ export default function App() {
     skinRequestRef.current = true
     setSkinBusy(true)
     setSkinError(null)
-    setSkinSuccess(false)
+    setSkinSuccess(null)
     try {
       const res = await window.launcher.resetSkin()
       if (res.success) {
@@ -1548,7 +1555,7 @@ export default function App() {
         setEditorSrc(res.skinDataUrl ?? res.skinUrl ?? null)
         setEditorLoadKey(k => k + 1)
         setSkinVersion(v => v + 1)
-        setSkinSuccess(true)
+        setSkinSuccess('Skin réinitialisé au skin Minecraft par défaut.')
       } else {
         setSkinError(res.expired || res.loggedOut ? sessionMessage : (res.error ?? 'Échec de la réinitialisation.'))
       }
@@ -1564,7 +1571,7 @@ export default function App() {
     setSkinError(null)
     const name = (librarySaveName.trim() || 'mon-skin')
     const res = await window.launcher.exportSkin({ dataUrl, name })
-    if (res.success) { setSkinSuccess(true) }
+    if (res.success) { setSkinSuccess('Skin exporté en fichier PNG.') }
     else if (!res.canceled) setSkinError(res.error ?? "Échec de l'export.")
   }
 
@@ -1576,7 +1583,7 @@ export default function App() {
     const res = await window.launcher.librarySave({ name, dataUrl, variant: selectedVariant })
     if (res.success) {
       setLibrarySaveName('')
-      setSkinSuccess(true)
+      setSkinSuccess(`« ${name} » enregistré dans ta bibliothèque.`)
       await refreshLibrary()
     } else {
       setSkinError(res.error ?? "Échec de l'enregistrement.")
@@ -1589,7 +1596,7 @@ export default function App() {
     setEditorLoadKey(k => k + 1)
     setSkinTab('editor')
     setSkinError(null)
-    setSkinSuccess(false)
+    setSkinSuccess(null)
   }
 
   const handleDeleteFromLibrary = async (id: string) => {
@@ -2412,7 +2419,7 @@ export default function App() {
                     )}
                     {skinSuccess && !skinError && (
                       <p className="font-ui text-[14px] text-[rgba(120,255,180,0.95)] leading-snug">
-                        Skin enregistré / appliqué ! En jeu, il peut mettre quelques secondes à apparaître.
+                        {skinSuccess}
                       </p>
                     )}
                   </div>
@@ -2430,11 +2437,22 @@ export default function App() {
                       />
                       <button
                         onClick={handleSaveToLibrary}
-                        className="px-[16px] py-[9px] rounded-[10px] font-ui font-bold text-[14px] text-[#0e0b16] bg-[rgba(0,255,225,0.9)] hover:bg-[rgba(0,255,225,1)] transition-colors whitespace-nowrap"
+                        className="flex items-center gap-[7px] px-[16px] py-[9px] rounded-[10px] font-ui font-semibold text-[14px] text-white border border-[rgba(0,255,225,0.45)] bg-[rgba(0,255,225,0.12)] hover:bg-[rgba(0,255,225,0.2)] transition-colors whitespace-nowrap"
                       >
+                        <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+                          <path d="M10 3.5 3.5 7l6.5 3.5L16.5 7 10 3.5Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+                          <path d="M3.5 11.5 10 15l6.5-3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
                         Enregistrer le skin actuel
                       </button>
                     </div>
+
+                    {skinError && (
+                      <p className="font-ui text-[14px] text-[rgba(255,120,120,0.95)] leading-snug">{skinError}</p>
+                    )}
+                    {skinSuccess && !skinError && (
+                      <p className="font-ui text-[14px] text-[rgba(120,255,180,0.95)] leading-snug">{skinSuccess}</p>
+                    )}
 
                     {libraryLoading ? (
                       <p className="font-ui text-[14px] text-white/40 py-[48px] text-center">Chargement…</p>
@@ -2446,7 +2464,7 @@ export default function App() {
                       <div className="grid grid-cols-4 gap-[12px]" style={{ maxHeight: 440, overflowY: 'auto' }}>
                         {libraryItems.map(item => (
                           <div key={item.id} className="flex flex-col items-center gap-[7px] p-[10px] rounded-[12px] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.03)]">
-                            <div className="rounded-[8px] overflow-hidden" style={{ background: 'rgba(0,255,225,0.05)' }}>
+                            <div className="rounded-[8px] overflow-hidden" style={{ background: 'rgba(255,255,255,0.04)' }}>
                               <SkinPreview src={item.dataUrl} variant={item.variant} width={62} />
                             </div>
                             <p className="font-ui text-[13px] text-white/70 text-center truncate w-full" title={item.name}>{item.name}</p>
@@ -2476,45 +2494,65 @@ export default function App() {
 
             {/* Pied : actions (onglet Éditeur) */}
             {!skinInfoLoading && !(skinError && !editorSrc) && skinTab === 'editor' && (
-              <div className="flex items-center gap-[8px] px-[24px] py-[14px] shrink-0 border-t border-[rgba(255,255,255,0.08)]">
+              <div className="flex items-center gap-[10px] px-[24px] py-[14px] shrink-0 border-t border-[rgba(255,255,255,0.08)]">
+                {/* Utilitaires fichier (icônes, cohérent avec la barre d'outils) */}
                 <button
                   onClick={handlePickSkin}
                   disabled={skinBusy}
-                  className="flex items-center gap-[7px] px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[14px] text-white/75 border border-[rgba(255,255,255,0.14)] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors disabled:opacity-40"
+                  title="Importer un fichier PNG comme base"
+                  className="flex items-center justify-center size-[44px] rounded-[11px] text-white/70 border border-[rgba(255,255,255,0.14)] hover:bg-[rgba(255,255,255,0.07)] hover:text-white transition-colors disabled:opacity-40"
                 >
-                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
-                    <path d="M10 13V4M10 4L6.5 7.5M10 4l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M3.5 13v2A1.5 1.5 0 005 16.5h10a1.5 1.5 0 001.5-1.5v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  <svg width="19" height="19" viewBox="0 0 20 20" fill="none">
+                    <path d="M2.5 5.8A1.5 1.5 0 0 1 4 4.3h3l1.5 1.8H16a1.5 1.5 0 0 1 1.5 1.5v6.1A1.5 1.5 0 0 1 16 15.2H4a1.5 1.5 0 0 1-1.5-1.5V5.8Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
                   </svg>
-                  Importer
                 </button>
 
                 <button
                   onClick={handleExportSkin}
                   disabled={skinBusy}
                   title="Exporter le skin en fichier PNG"
-                  className="flex items-center gap-[7px] px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[14px] text-white/75 border border-[rgba(255,255,255,0.14)] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors disabled:opacity-40"
+                  className="flex items-center justify-center size-[44px] rounded-[11px] text-white/70 border border-[rgba(255,255,255,0.14)] hover:bg-[rgba(255,255,255,0.07)] hover:text-white transition-colors disabled:opacity-40"
                 >
-                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+                  <svg width="19" height="19" viewBox="0 0 20 20" fill="none">
                     <path d="M10 4v9M10 13l-3.5-3.5M10 13l3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                     <path d="M3.5 13v2A1.5 1.5 0 005 16.5h10a1.5 1.5 0 001.5-1.5v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                   </svg>
-                  Exporter
                 </button>
 
                 <button
                   onClick={handleResetSkin}
                   disabled={skinBusy}
-                  title="Revenir au skin par défaut Minecraft"
-                  className="px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[14px] text-white/55 border border-[rgba(255,255,255,0.12)] hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors disabled:opacity-40"
+                  title="Revenir au skin Minecraft par défaut"
+                  className="flex items-center justify-center size-[44px] rounded-[11px] text-white/55 border border-[rgba(255,255,255,0.12)] hover:bg-[rgba(255,255,255,0.07)] hover:text-white transition-colors disabled:opacity-40"
                 >
-                  Défaut
+                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                    <path d="M15.5 10a5.5 5.5 0 1 1-1.6-3.9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                    <path d="M15.5 3.5V6.5H12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
                 </button>
 
+                <div className="flex-1" />
+
+                {/* Enregistrer dans la bibliothèque (secondaire, accent cyan) */}
+                <button
+                  onClick={handleSaveToLibrary}
+                  disabled={skinBusy}
+                  title="Sauvegarder ce skin dans ta bibliothèque pour le réutiliser plus tard"
+                  className="flex items-center gap-[8px] px-[16px] py-[11px] rounded-[10px] font-ui font-semibold text-[14px] text-white border border-[rgba(0,255,225,0.45)] bg-[rgba(0,255,225,0.12)] hover:bg-[rgba(0,255,225,0.2)] transition-colors disabled:opacity-40 whitespace-nowrap"
+                >
+                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+                    <path d="M10 3.5 3.5 7l6.5 3.5L16.5 7 10 3.5Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+                    <path d="M3.5 11.5 10 15l6.5-3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  Enregistrer dans la bibliothèque
+                </button>
+
+                {/* Appliquer sur le compte (action principale, blanc plein) */}
                 <button
                   onClick={handleApplySkin}
                   disabled={skinBusy}
-                  className="flex items-center justify-center gap-[8px] flex-1 py-[11px] rounded-[10px] font-ui font-bold text-[14px] text-[#0e0b16] bg-[rgba(0,255,225,0.9)] hover:bg-[rgba(0,255,225,1)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Appliquer ce skin sur ton compte Minecraft"
+                  className="flex items-center justify-center gap-[8px] px-[26px] py-[11px] rounded-[10px] font-ui font-bold text-[14px] text-[#0e0b16] bg-white hover:bg-white/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
                 >
                   {skinBusy && (
                     <svg className="animate-spin" style={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24">
