@@ -950,6 +950,17 @@ async function withMojangLimit(fn) {
   finally { mojangActive--; const next = mojangQueue.shift(); if (next) next() }
 }
 
+// Skin custom d'un compte hors-ligne (cracké), publié par le launcher dans
+// Firebase /skins/{pseudo}. Renvoie le PNG en data URL, ou null si aucun.
+async function resolveCustomSkinDataUrl(name) {
+  if (!isFirebaseConfigured()) return null
+  try {
+    const rec = await firebaseRequest('GET', `/skins/${name}`, null, false)
+    if (rec && rec.url) return await fetchSkinDataUrl(rec.url)
+  } catch { /* pas de skin custom / lecture impossible */ }
+  return null
+}
+
 async function resolvePlayerSkinDataUrl(name) {
   const key = (name || '').toLowerCase()
   if (!/^[a-z0-9_]{1,16}$/.test(key)) return null
@@ -961,7 +972,12 @@ async function resolvePlayerSkinDataUrl(name) {
       if (!uuid) {
         const idRes = await httpsGet(`https://api.mojang.com/users/profiles/minecraft/${encodeURIComponent(name)}`)
         uuid = idRes && idRes.id ? idRes.id : null
-        if (!uuid) return cached?.dataUrl ?? null            // pseudo inconnu / rate-limit → repli
+        if (!uuid) {
+          // Pas de compte Mojang (compte cracké) → skin custom Firebase /skins/{pseudo}.
+          const custom = await resolveCustomSkinDataUrl(name)
+          if (custom) { playerSkinCache.set(key, { uuid: null, skinUrl: 'custom', dataUrl: custom, checkedAt: Date.now() }); return custom }
+          return cached?.dataUrl ?? null                      // ni Mojang ni custom → repli (Steve distant)
+        }
       }
       const profile = await httpsGet(`https://sessionserver.mojang.com/session/minecraft/profile/${uuid}`)
       const prop = (profile?.properties || []).find((p) => p.name === 'textures')
@@ -3374,6 +3390,7 @@ async function uploadOfflineSkin(name, variant, buf) {
     const up = await uploadImageToStorage(objectPath, buf, 'image/png')
     if (!up.success) return { success: false, error: up.error || 'Envoi du skin échoué.' }
     await firebaseRequest('PUT', `/skins/${name}`, { url: up.url, variant, updatedAt: Date.now() }, true)
+    recordPlayerSeen(name)   // mettre un skin → apparaître dans le carrousel partagé (si pas masqué)
     return { success: true, variant, skinUrl: up.url, skinDataUrl: `data:image/png;base64,${buf.toString('base64')}`, offline: true }
   } catch (e) {
     return { success: false, error: String(e.message || e) }
