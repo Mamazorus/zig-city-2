@@ -1523,8 +1523,11 @@ export default function App() {
     try {
       const info = await window.launcher.getSkinInfo()
       const src = info.success ? (info.skinDataUrl ?? null) : null
-      if (src) setMyHead(await renderHeadFromSkin(src))
-    } catch { /* tête distante en repli */ }
+      // null quand pas de skin custom (ex. compte cracké sans skin) → l'Avatar retombe
+      // sur la tête par défaut (skin du pseudo s'il est premium, sinon Steve) au lieu de
+      // garder l'ancienne tête du compte précédent.
+      setMyHead(src ? await renderHeadFromSkin(src) : null)
+    } catch { setMyHead(null) }
   }, [])
 
   // Shop du jour : lecture publique des offres de la date courante (bascule à
@@ -1835,6 +1838,7 @@ export default function App() {
     await window.launcher.logout()
     setUsername('')
     setUuid(null)
+    setMyHead(null)          // ne pas garder la tête du compte précédent
     setIsAdmin(false)
     setIsOffline(false)
     setOfflineFormOpen(false)
