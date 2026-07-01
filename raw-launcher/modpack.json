@@ -811,8 +811,12 @@
       "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/waterframes-NEOFORGE-mc1.21.1-v2.1.14.jar"
     },
     {
-      "name": "watermedia-2.1.24.jar",
-      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/watermedia-2.1.24.jar"
+      "name": "watermedia-2.1.37.jar",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/watermedia-2.1.37.jar"
+    },
+    {
+      "name": "watermedia_youtube_plugin-2.1.2.jar",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/watermedia_youtube_plugin-2.1.2.jar"
     },
     {
       "name": "worldedit-mod-7.3.8.jar",
