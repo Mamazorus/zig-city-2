@@ -24,3 +24,13 @@ ${mod_description}
     versionRange="${minecraft_version_range}"
     ordering="NONE"
     side="BOTH"
+
+# SkinRestorer (cote serveur) : applique les skins custom des comptes hors-ligne.
+# Optionnel : si absent, zigshop n'applique simplement pas de skin (pas de crash).
+# ordering=AFTER pour que SkinRestorer soit pret quand on l'appelle au join.
+[[dependencies.${mod_id}]]
+    modId="skinrestorer"
+    type="optional"
+    versionRange="[2.3.1,)"
+    ordering="AFTER"
+    side="SERVER"

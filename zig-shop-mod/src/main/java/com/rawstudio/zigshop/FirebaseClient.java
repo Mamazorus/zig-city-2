@@ -101,6 +101,32 @@ public final class FirebaseClient {
         });
     }
 
+    // ─── SKINS (comptes hors-ligne) ───────────────────────────────────────────
+    /**
+     * Skin custom d'un joueur choisi depuis le launcher, publié sous {@code /skins/{pseudo}} :
+     * {@code url} (image PNG hébergée), {@code variant} (classic|slim), {@code updatedAt} (ms).
+     */
+    public record PlayerSkin(String url, String variant, long updatedAt) {}
+
+    /** Lit le skin custom d'un joueur ({@code /skins/{pseudo}}). {@code null} si aucun défini. */
+    public static CompletableFuture<PlayerSkin> fetchPlayerSkin(String player) {
+        return getJson("/skins/" + player).thenApply(FirebaseClient::parsePlayerSkin);
+    }
+
+    private static PlayerSkin parsePlayerSkin(String body) {
+        if (body == null || body.isBlank()) return null;                 // "null" => aucun skin
+        JsonElement root = JsonParser.parseString(body);
+        if (root == null || !root.isJsonObject()) return null;
+        JsonObject o = root.getAsJsonObject();
+        String url = str(o, "url");
+        if (url.isBlank()) return null;
+        long updatedAt = 0L;
+        try {
+            if (o.has("updatedAt") && !o.get("updatedAt").isJsonNull()) updatedAt = o.get("updatedAt").getAsLong();
+        } catch (RuntimeException ignored) { /* garde updatedAt=0 */ }
+        return new PlayerSkin(url, str(o, "variant"), updatedAt);
+    }
+
     /** GET public sur un chemin de la base (sans auth). Le corps brut est renvoyé. */
     private static CompletableFuture<String> getJson(String path) {
         HttpRequest req = HttpRequest.newBuilder(URI.create(BASE + path + ".json"))
