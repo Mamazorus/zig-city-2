@@ -104,11 +104,9 @@ public final class PlayerHeads {
                         continue;
                     }
                     String uuid = uuidCache.computeIfAbsent(key, k -> fetchUuid(http, name));
-                    if (uuid == null) {                                  // pseudo inconnu / rate-limit
-                        if (e != null && e.tex() != null) items.add(new Item(name, e.skinUrl(), e.checkedAt(), e.tex(), null));
-                        continue;
-                    }
-                    String skinUrl = fetchSkinUrl(http, uuid);
+                    // uuid==null => pas de compte Mojang (compte cracke) : on tente le skin
+                    // custom publie par le launcher dans Firebase /skins/{pseudo}.
+                    String skinUrl = (uuid != null) ? fetchSkinUrl(http, uuid) : fetchCustomSkinUrl(http, name);
                     if (skinUrl == null) {
                         if (e != null && e.tex() != null) items.add(new Item(name, e.skinUrl(), e.checkedAt(), e.tex(), null));
                         continue;
@@ -192,6 +190,20 @@ public final class PlayerHeads {
                 return url == null ? null : url.replaceFirst("^http://", "https://");   // force https
             }
             return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // Skin custom d'un compte cracke (hors-ligne) : URL PNG hebergee, publiee par le
+    // launcher dans Firebase /skins/{pseudo}. Repli quand le pseudo n'a pas de compte
+    // Mojang. httpBytes telecharge ensuite ce PNG comme n'importe quel skin (64x64).
+    private static String fetchCustomSkinUrl(HttpClient http, String name) {
+        try {
+            String body = httpString(http, FIREBASE + "/skins/" + name + ".json");
+            if (body == null || body.isEmpty() || body.equals("null")) return null;
+            JsonObject obj = JsonParser.parseString(body).getAsJsonObject();
+            return obj.has("url") && !obj.get("url").isJsonNull() ? obj.get("url").getAsString() : null;
         } catch (Exception e) {
             return null;
         }
