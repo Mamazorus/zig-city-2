@@ -572,6 +572,62 @@ ipcMain.handle('quit-and-install', () => {
   autoUpdater.quitAndInstall(true, true)
 })
 
+// ─── DISCORD RICH PRESENCE ────────────────────────────────────────────────────
+// Affiche « Joue à Zig City 2 » sur le profil Discord du joueur tant que le
+// launcher est ouvert (fenêtre masquée pendant la partie, mais process vivant).
+// 100 % best-effort et cosmétique : si le client Discord de bureau n'est pas
+// installé/lancé, tout est silencieusement ignoré et ne peut JAMAIS empêcher le
+// jeu de démarrer. L'Application ID est public — ce n'est pas un secret.
+const DISCORD_CLIENT_ID = '1521958704705179980'
+const DISCORD_LARGE_IMAGE = 'logo'   // nom EXACT de l'art asset uploadé sur le portail Discord
+
+let discordRpc = null            // instance discord-rpc (Client IPC)
+let discordReady = false         // connecté + prêt (entre le login résolu et le 'close')
+let discordLoggingIn = false     // garde anti-login() concurrents
+let discordWanted = null         // dernière présence souhaitée, (ré)appliquée dès que prêt
+
+function discordApply() {
+  if (!discordReady || !discordRpc) return
+  try {
+    const p = discordWanted ? discordRpc.setActivity(discordWanted) : discordRpc.clearActivity()
+    p?.catch?.(() => {})   // ex. Discord fermé entre-temps : on ignore
+  } catch { /* best-effort */ }
+}
+
+function discordConnect() {
+  if (!DISCORD_CLIENT_ID || discordReady || discordLoggingIn) return
+  let RPC
+  try { RPC = require('discord-rpc') } catch { return }   // dépendance absente → no-op
+  discordLoggingIn = true
+  try { discordRpc = new RPC.Client({ transport: 'ipc' }) }
+  catch { discordLoggingIn = false; discordRpc = null; return }
+  // Discord fermé / socket perdu : on repartira d'un login propre au prochain besoin.
+  const onGone = () => { discordReady = false; discordLoggingIn = false; discordRpc = null }
+  discordRpc.transport?.on?.('close', onGone)
+  discordRpc.login({ clientId: DISCORD_CLIENT_ID })
+    .then(() => { discordReady = true; discordLoggingIn = false; discordApply() })
+    .catch(onGone)   // Discord pas installé / pas lancé → abandon silencieux
+}
+
+// Fixe la présence voulue puis (re)connecte au besoin. Jamais bloquant, jamais throw.
+function setDiscordPresence(activity) {
+  discordWanted = activity
+    ? { largeImageKey: DISCORD_LARGE_IMAGE, largeImageText: 'Zig City 2', instance: false, ...activity }
+    : null
+  if (discordReady) discordApply()
+  else discordConnect()
+}
+
+function discordMenu() {
+  const name = currentToken?.name
+  setDiscordPresence({ details: 'Dans le launcher', ...(name ? { state: `Connecté : ${name}` } : {}) })
+}
+
+function discordInGame() {
+  const name = currentToken?.name
+  setDiscordPresence({ details: 'En jeu', ...(name ? { state: name } : {}), startTimestamp: Date.now() })
+}
+
 app.whenReady().then(() => {
   // Identité d'app Windows : indispensable pour que la barre des tâches affiche
   // l'icône/nom du launcher (sinon Windows regroupe sous « Electron »). No-op ailleurs.
@@ -583,6 +639,7 @@ app.whenReady().then(() => {
   initializeShop()
   if (process.platform !== 'darwin') setupAutoUpdater()  // Mac : check maison via API GitHub
   createWindow()
+  discordMenu()   // présence Discord « dans le launcher » (best-effort, no-op si Discord absent)
 
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })
@@ -624,6 +681,7 @@ ipcMain.handle('login', async () => {
     currentToken = token
     saveSession(token)
     recordPlayerSeen(token.name)   // sa tête apparaît dans le carrousel partagé
+    discordMenu()                  // rafraîchit la présence Discord avec le pseudo
     return { success: true, username: token.name, uuid: token.uuid }
   } catch (e) {
     return { success: false, error: String(e.message || e) }
@@ -678,6 +736,7 @@ ipcMain.handle('login-offline', async (_, rawName) => {
     currentToken = token
     saveSession(token)
     recordPlayerSeen(name)                 // sa tête apparaît dans le carrousel partagé
+    discordMenu()                          // rafraîchit la présence Discord avec le pseudo
     return { success: true, username: name, uuid: token.uuid }
   } catch (e) {
     return { success: false, error: String(e.message || e) }
@@ -1872,6 +1931,7 @@ ipcMain.handle('launch', async () => {
   launcher.on('debug', (e) => { pushLog('[MCLC] ' + e); console.log('[MCLC debug]', e) })
   launcher.on('close', (code) => {
     win?.show()
+    discordMenu()   // partie terminée : la présence Discord repasse sur « dans le launcher »
     const log = logBuffer.join('\n')
     if (code && code !== 0) {                       // crash : on persiste le log sur disque
       try {
@@ -1887,6 +1947,7 @@ ipcMain.handle('launch', async () => {
     const proc = await launcher.launch(opts)
     if (!proc || !proc.pid) return { success: false, error: 'Minecraft n\'a pas démarré (pas de PID)' }
     win?.hide()
+    discordInGame()   // présence Discord « En jeu » + chrono tant que la partie tourne
     return { success: true }
   } catch (e) {
     return { success: false, error: e.message }

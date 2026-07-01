@@ -1,6 +1,6 @@
 {
   "name": "raw-launcher",
-  "version": "0.1.90-beta",
+  "version": "0.1.91-beta",
   "description": "Launcher Minecraft custom Zig City 2",
   "author": "Maël Auzenet",
   "main": "out/main/index.js",
@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "adm-zip": "^0.4.16",
+    "discord-rpc": "^4.0.1",
     "electron-updater": "^6.8.9",
     "minecraft-launcher-core": "^3.17.1",
     "msmc": "^3.1.5",
