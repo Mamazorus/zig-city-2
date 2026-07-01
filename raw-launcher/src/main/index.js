@@ -614,7 +614,7 @@ function clearSession() {
 ipcMain.handle('get-session', () => {
   const username = loadSession()
   if (!username) return { logged: false }
-  return { logged: true, username, uuid: currentToken?.uuid ?? null }
+  return { logged: true, username, uuid: currentToken?.uuid ?? null, offline: currentToken?.offline ?? false }
 })
 
 ipcMain.handle('login', async () => {
@@ -625,6 +625,45 @@ ipcMain.handle('login', async () => {
     saveSession(token)
     recordPlayerSeen(token.name)   // sa tête apparaît dans le carrousel partagé
     return { success: true, username: token.name, uuid: token.uuid }
+  } catch (e) {
+    return { success: false, error: String(e.message || e) }
+  }
+})
+
+// ─── CONNEXION HORS-LIGNE (compte « cracké ») ─────────────────────────────────
+// Le serveur tourne en online-mode=false : il accepte les comptes non-premium.
+// On construit ici un profil local, sans passer par Microsoft. L'UUID est
+// déterministe et IDENTIQUE à celui que le serveur calcule lui-même en offline
+// (UUID v3 / MD5 de « OfflinePlayer:<pseudo> ») : le même pseudo retrouve donc
+// toujours le même joueur (inventaire, position, permissions…).
+const OFFLINE_NAME_RE = /^[A-Za-z0-9_]{3,16}$/
+
+function offlineUuid(name) {
+  const hash = crypto.createHash('md5').update(`OfflinePlayer:${name}`, 'utf8').digest()
+  hash[6] = (hash[6] & 0x0f) | 0x30   // version 3 (name-based, MD5)
+  hash[8] = (hash[8] & 0x3f) | 0x80   // variant RFC 4122
+  const hex = hash.toString('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
+}
+
+ipcMain.handle('login-offline', (_, rawName) => {
+  try {
+    const name = String(rawName ?? '').trim()
+    if (!OFFLINE_NAME_RE.test(name)) {
+      return { success: false, error: 'Pseudo invalide : 3 à 16 caractères (lettres, chiffres, _).' }
+    }
+    const token = {
+      access_token:    '0',                // jeton factice : ignoré par un serveur en online-mode=false
+      client_token:    crypto.randomUUID(),
+      uuid:            offlineUuid(name),
+      name,
+      user_properties: '{}',
+      offline:         true
+    }
+    currentToken = token
+    saveSession(token)
+    recordPlayerSeen(name)                 // sa tête apparaît dans le carrousel partagé
+    return { success: true, username: name, uuid: token.uuid }
   } catch (e) {
     return { success: false, error: String(e.message || e) }
   }
@@ -864,6 +903,9 @@ function fetchSkinDataUrl(skinUrl) {
 }
 
 ipcMain.handle('get-skin-info', async () => {
+  // Compte hors-ligne : aucun skin distant (pas de compte Mojang) → repli sur la
+  // tête distante côté renderer, sans appel réseau inutile qui échouerait.
+  if (currentToken?.offline) return { success: false, offline: true }
   if (!currentToken?.access_token) return { success: false, error: 'Non connecté', loggedOut: true }
   try {
     const res = await mcAuthorizedRequest('GET', MC_PROFILE_URL, { token: currentToken.access_token })
@@ -973,6 +1015,7 @@ ipcMain.handle('pick-skin-file', async () => {
 })
 
 ipcMain.handle('upload-skin', async (_, { variant, path: filePath, dataUrl } = {}) => {
+  if (currentToken?.offline) return { success: false, error: 'Le changement de skin nécessite un compte Microsoft. En hors-ligne, le skin est géré côté serveur.', offline: true }
   if (!currentToken?.access_token) return { success: false, error: 'Non connecté', loggedOut: true }
   const v = normalizeVariant(variant)
 
@@ -1016,6 +1059,7 @@ ipcMain.handle('upload-skin', async (_, { variant, path: filePath, dataUrl } = {
 })
 
 ipcMain.handle('reset-skin', async () => {
+  if (currentToken?.offline) return { success: false, error: 'Indisponible avec un compte hors-ligne.', offline: true }
   if (!currentToken?.access_token) return { success: false, error: 'Non connecté', loggedOut: true }
   try {
     const res = await mcAuthorizedRequest('DELETE', `${MC_SKINS_URL}/active`, { token: currentToken.access_token })
@@ -1976,6 +2020,9 @@ ipcMain.handle('get-firebase-status', () => ({ configured: isFirebaseConfigured(
 
 ipcMain.handle('check-admin', async () => {
   if (!isFirebaseConfigured()) return { isAdmin: false }
+  // Un compte hors-ligne (cracké) ne peut jamais être admin : le pseudo n'est pas
+  // vérifié par Mojang, donc n'importe qui pourrait usurper celui d'un admin.
+  if (currentToken?.offline) return { isAdmin: false }
   const username = loadSession()
   if (!username) return { isAdmin: false }
   try {

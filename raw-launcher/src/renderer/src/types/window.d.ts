@@ -154,8 +154,10 @@ interface ItemCatalogEntry {
 declare global {
   interface Window {
     launcher: {
-      getSession: () => Promise<{ logged: boolean; username?: string; uuid?: string }>
+      getSession: () => Promise<{ logged: boolean; username?: string; uuid?: string; offline?: boolean }>
       login: () => Promise<{ success: boolean; username?: string; uuid?: string; error?: string }>
+      // Connexion hors-ligne (compte non-premium) : le serveur est en online-mode=false.
+      loginOffline: (username: string) => Promise<{ success: boolean; username?: string; uuid?: string; error?: string }>
       logout: () => Promise<{ success: boolean }>
       getSkinInfo: () => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; skinDataUrl?: string | null; name?: string; uuid?: string; error?: string; expired?: boolean; loggedOut?: boolean }>
       fetchPlayerSkin: (name: string) => Promise<string | null>

@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('launcher', {
   getSession:     () => ipcRenderer.invoke('get-session'),
   login:          () => ipcRenderer.invoke('login'),
+  loginOffline:   (username) => ipcRenderer.invoke('login-offline', username),
   logout:         () => ipcRenderer.invoke('logout'),
 
   getSkinInfo:    () => ipcRenderer.invoke('get-skin-info'),

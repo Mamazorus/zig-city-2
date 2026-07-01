@@ -1382,6 +1382,12 @@ export default function App() {
   const [crashLog, setCrashLog] = useState('')
   const [activeTab, setActiveTab] = useState<MainTab>('home')
   const [uuid, setUuid] = useState<string | null>(null)
+  // Compte hors-ligne (« cracké ») : connecté sans compte Microsoft. Le serveur
+  // est en online-mode=false. Désactive les fonctions liées au compte Mojang (skin).
+  const [isOffline, setIsOffline] = useState(false)
+  const [offlineFormOpen, setOfflineFormOpen] = useState(false)
+  const [offlineName, setOfflineName] = useState('')
+  const [offlineError, setOfflineError] = useState<string | null>(null)
   const [serverStatus, setServerStatus] = useState<ServerStatus>({ online: 0, max: 0, players: [], loading: true })
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [playerStatus, setPlayerStatus] = useState<'online' | 'dnd'>('online')
@@ -1716,6 +1722,7 @@ export default function App() {
       if (session.logged && session.username) {
         setUsername(session.username)
         if (session.uuid) setUuid(session.uuid)
+        setIsOffline(!!session.offline)
         const [adminResult] = await Promise.all([
           window.launcher.checkAdmin(),
           fetchNews(),
@@ -1783,6 +1790,7 @@ export default function App() {
     if (result.success && result.username) {
       setUsername(result.username)
       if (result.uuid) setUuid(result.uuid)
+      setIsOffline(false)
       const [adminResult] = await Promise.all([
         window.launcher.checkAdmin(),
         fetchNews(),
@@ -1796,11 +1804,42 @@ export default function App() {
     }
   }
 
+  // Connexion sans compte Microsoft (compte non-premium/« cracké »). Le pseudo est
+  // libre : le serveur, en online-mode=false, l'accepte tel quel. Aucun droit admin
+  // (le pseudo n'est pas vérifié par Mojang → usurpation possible).
+  const handleLoginOffline = async (rawName: string) => {
+    const name = rawName.trim()
+    if (!/^[A-Za-z0-9_]{3,16}$/.test(name)) {
+      setOfflineError('Pseudo invalide : 3 à 16 caractères (lettres, chiffres, _).')
+      return
+    }
+    setOfflineError(null)
+    setPhase('checking')
+    setStatus('Connexion hors-ligne...')
+    const result = await window.launcher.loginOffline(name)
+    if (result.success && result.username) {
+      setUsername(result.username)
+      if (result.uuid) setUuid(result.uuid)
+      setIsOffline(true)
+      setIsAdmin(false)                 // un compte hors-ligne n'est jamais admin
+      setOfflineFormOpen(false)
+      await Promise.all([fetchNews(), refreshPlayersSeen()])
+      await checkAndInstall()
+    } else {
+      setPhase('logged-out')
+      setOfflineError(result.error ?? 'Connexion impossible.')
+    }
+  }
+
   const handleLogout = async () => {
     await window.launcher.logout()
     setUsername('')
     setUuid(null)
     setIsAdmin(false)
+    setIsOffline(false)
+    setOfflineFormOpen(false)
+    setOfflineName('')
+    setOfflineError(null)
     setDynamicNews([])
     setActiveTab('home')
     setPhase('logged-out')
@@ -2063,7 +2102,7 @@ export default function App() {
                     </div>
                     <div>
                       <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.56px]">{username}</p>
-                      <p className="font-ui text-[14px] text-white/40">Compte Minecraft</p>
+                      <p className="font-ui text-[14px] text-white/40">{isOffline ? 'Compte hors-ligne' : 'Compte Minecraft'}</p>
                     </div>
                   </div>
 
@@ -2097,6 +2136,8 @@ export default function App() {
 
                   {/* Actions */}
                   <div className="px-[8px] py-[8px] flex flex-col gap-[2px]">
+                    {/* Changer de skin : nécessite un compte Microsoft (API Mojang) → masqué en hors-ligne */}
+                    {!isOffline && (
                     <button
                       className="flex items-center gap-[10px] w-full px-[10px] py-[8px] rounded-[8px] text-left hover:bg-[rgba(255,255,255,0.09)] transition-colors"
                       onClick={openSkinModal}
@@ -2107,6 +2148,7 @@ export default function App() {
                       </svg>
                       <p className="font-ui text-[14px] text-white">Changer de skin</p>
                     </button>
+                    )}
 
                     <button
                       className="flex items-center gap-[10px] w-full px-[10px] py-[8px] rounded-[8px] text-left hover:bg-[rgba(255,40,40,0.15)] transition-colors"
@@ -2344,6 +2386,45 @@ export default function App() {
                   >
                     Se connecter avec Microsoft
                   </button>
+
+                  {/* Connexion sans compte Microsoft (compte non-premium ; serveur en online-mode=false) */}
+                  {!offlineFormOpen ? (
+                    <button
+                      className="relative z-10 mt-[4px] font-ui text-[14px] text-white/45 underline underline-offset-4 hover:text-white/70 transition-colors"
+                      onClick={(e) => { e.stopPropagation(); setOfflineError(null); setOfflineFormOpen(true) }}
+                    >
+                      Jouer sans compte Microsoft
+                    </button>
+                  ) : (
+                    <div className="relative z-10 flex flex-col items-center gap-[10px] mt-[4px]" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-[8px]">
+                        <input
+                          autoFocus
+                          value={offlineName}
+                          onChange={(e) => { setOfflineError(null); setOfflineName(e.target.value.replace(/[^A-Za-z0-9_]/g, '').slice(0, 16)) }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleLoginOffline(offlineName) }}
+                          placeholder="Ton pseudo"
+                          className="h-[44px] w-[220px] px-[14px] rounded-[12px] bg-[rgba(255,255,255,0.08)] border border-[rgba(255,255,255,0.18)] text-white font-ui text-[15px] placeholder:text-white/35 outline-none focus:border-[rgba(255,255,255,0.4)]"
+                        />
+                        <button
+                          disabled={!/^[A-Za-z0-9_]{3,16}$/.test(offlineName)}
+                          className="h-[44px] bg-white text-[#0e0b16] font-ui font-bold text-[15px] px-[24px] rounded-[12px] hover:bg-white/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                          onClick={() => handleLoginOffline(offlineName)}
+                        >
+                          Jouer
+                        </button>
+                      </div>
+                      {offlineError && (
+                        <p className="font-ui text-[13px] text-[rgba(255,140,140,0.9)] max-w-[300px] text-center">{offlineError}</p>
+                      )}
+                      <button
+                        className="font-ui text-[13px] text-white/40 hover:text-white/70 transition-colors"
+                        onClick={() => { setOfflineFormOpen(false); setOfflineName(''); setOfflineError(null) }}
+                      >
+                        ← Utiliser un compte Microsoft
+                      </button>
+                    </div>
+                  )}
                 </>
               )}
 
