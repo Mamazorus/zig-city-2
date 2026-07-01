@@ -1992,7 +1992,16 @@ ipcMain.handle('get-news', async () => {
     const data = await firebaseRequest('GET', '/news', null, false)
     if (!data || data === 'null') return { success: true, news: [] }
     const news = Object.entries(data).map(([id, item]) => ({ id, ...item }))
-    news.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    // Ordre manuel prioritaire (champ `order`, croissant = du haut vers le bas) ;
+    // les actus jamais réordonnées (sans `order`) retombent sur le chronologique
+    // inverse (la plus récente d'abord). Renvoie tout, y compris les masquées :
+    // le dashboard admin les gère, le launcher filtre `hidden` à l'affichage.
+    news.sort((a, b) => {
+      const ao = typeof a.order === 'number' ? a.order : Infinity
+      const bo = typeof b.order === 'number' ? b.order : Infinity
+      if (ao !== bo) return ao - bo
+      return (b.createdAt || 0) - (a.createdAt || 0)
+    })
     return { success: true, news }
   } catch (e) {
     return { success: false, news: [], error: e.message }

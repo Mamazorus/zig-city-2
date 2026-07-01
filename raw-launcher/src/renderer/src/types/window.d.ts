@@ -42,6 +42,10 @@ interface NewsItem {
   imageUrl?: string
   author?: string
   createdAt?: number
+  /** Masquée aux joueurs (brouillon préparé à l'avance), visible seulement au dashboard. */
+  hidden?: boolean
+  /** Rang d'affichage manuel (croissant) ; absent = tri chronologique par défaut. */
+  order?: number
 }
 
 type NewsFormData = Omit<NewsItem, 'id' | 'createdAt'>

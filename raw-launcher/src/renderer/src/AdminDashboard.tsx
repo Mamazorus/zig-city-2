@@ -34,6 +34,8 @@ interface NewsItem {
   author?: string
   category?: NewsCategory
   createdAt?: number
+  hidden?: boolean
+  order?: number
 }
 
 interface NewsForm {
@@ -641,6 +643,40 @@ export default function AdminDashboard({
     }
   }
 
+  // Réordonne une actu (monter/descendre) : on recalcule le rang de chacune
+  // (order = position) et on ne PATCH que celles dont le rang change réellement.
+  const moveNews = async (index: number, dir: -1 | 1) => {
+    const target = index + dir
+    if (target < 0 || target >= news.length || saving) return
+    const reordered = [...news]
+    const [moved] = reordered.splice(index, 1)
+    reordered.splice(target, 0, moved)
+    setSaving(true)
+    try {
+      await Promise.all(
+        reordered
+          .map((it, i) => (it.order === i ? null : window.launcher.updateNews({ id: it.id, order: i })))
+          .filter(Boolean) as Promise<unknown>[]
+      )
+      await fetchAll()
+      onNewsUpdated()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Masque / affiche une actu (brouillon préparé à l'avance).
+  const toggleHiddenNews = async (item: NewsItem) => {
+    setSaving(true)
+    try {
+      await window.launcher.updateNews({ id: item.id, hidden: !item.hidden })
+      await fetchAll()
+      onNewsUpdated()
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const doAddAdmin = async () => {
     const name = newAdminName.trim()
     if (!name) return
@@ -1202,12 +1238,12 @@ export default function AdminDashboard({
               </div>
             ) : (
               <div className="flex flex-col gap-[8px]">
-                {news.map(item => {
+                {news.map((item, index) => {
                   const cat = resolveCategory(item)
                   return (
                   <div
                     key={item.id}
-                    className="flex items-center gap-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[8px] p-[8px] group hover:bg-[rgba(255,255,255,0.06)] hover:border-[rgba(255,255,255,0.12)] transition-colors"
+                    className={`flex items-center gap-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[8px] p-[8px] group hover:bg-[rgba(255,255,255,0.06)] hover:border-[rgba(255,255,255,0.12)] transition-colors ${item.hidden ? 'opacity-50' : ''}`}
                   >
                     {/* Miniature */}
                     <div className="relative size-[48px] rounded-[8px] overflow-hidden shrink-0 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)]">
@@ -1219,6 +1255,11 @@ export default function AdminDashboard({
                       <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px] truncate">{item.title}</p>
                       <div className="flex items-center gap-[8px] mt-[4px]">
                         <CategoryBadge category={cat.key} />
+                        {item.hidden && (
+                          <span className="inline-flex shrink-0 items-center rounded-full px-[8px] py-[2px] text-[11px] font-ui font-semibold uppercase tracking-[0.6px] text-white/45 bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.12)]">
+                            Masqué
+                          </span>
+                        )}
                         <p className="font-ui text-[14px] text-white/40 truncate tracking-[-0.3px]">{item.date}{item.author ? ` · ${item.author}` : ''}</p>
                       </div>
                     </div>
@@ -1242,6 +1283,34 @@ export default function AdminDashboard({
                       </div>
                     ) : (
                       <div className="flex gap-[6px] opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <button
+                          className="flex items-center justify-center size-[38px] rounded-[10px] text-white/40 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-white/40"
+                          onClick={() => moveNews(index, -1)}
+                          disabled={index === 0 || saving}
+                          title="Monter"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 12 12" fill="none"><path d="M2.75 7.25 6 4l3.25 3.25" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                        </button>
+                        <button
+                          className="flex items-center justify-center size-[38px] rounded-[10px] text-white/40 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-white/40"
+                          onClick={() => moveNews(index, 1)}
+                          disabled={index === news.length - 1 || saving}
+                          title="Descendre"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 12 12" fill="none"><path d="M2.75 4.75 6 8l3.25-3.25" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                        </button>
+                        <button
+                          className="flex items-center justify-center size-[38px] rounded-[10px] text-white/40 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors"
+                          onClick={() => toggleHiddenNews(item)}
+                          disabled={saving}
+                          title={item.hidden ? 'Afficher aux joueurs' : 'Masquer (brouillon)'}
+                        >
+                          {item.hidden ? (
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8s2.4-4 6-4 6 4 6 4-2.4 4-6 4-6-4-6-4Z" stroke="currentColor" strokeWidth="1.3" /><circle cx="8" cy="8" r="1.7" fill="currentColor" /><path d="M3 13 13 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+                          ) : (
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8s2.4-4 6-4 6 4 6 4-2.4 4-6 4-6-4-6-4Z" stroke="currentColor" strokeWidth="1.3" /><circle cx="8" cy="8" r="1.7" fill="currentColor" /></svg>
+                          )}
+                        </button>
                         <button
                           className="flex items-center justify-center size-[38px] rounded-[10px] text-white/40 hover:text-white hover:bg-[rgba(255,255,255,0.08)] transition-colors"
                           onClick={() => openEdit(item)}

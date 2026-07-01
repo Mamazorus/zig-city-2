@@ -40,9 +40,11 @@ interface DynamicNewsItem {
   author?: string
   category?: NewsCategory
   createdAt?: number
+  hidden?: boolean
+  order?: number
 }
 
-type AnyNewsItem = { img?: string; title: string; date: string; body: string; imageUrl?: string; id?: string; author?: string; category?: NewsCategory }
+type AnyNewsItem = { img?: string; title: string; date: string; body: string; imageUrl?: string; id?: string; author?: string; category?: NewsCategory; hidden?: boolean; order?: number }
 
 // Offre (troc) du shop du jour, renvoyée par le main (lecture de /shop/days/{aujourd'hui}).
 type ShopOfferView = { id: string; input: string; inputQty: number; output: string; outputQty: number; maxUses?: number; used?: number; inputIcon?: ItemIconDesc | null; outputIcon?: ItemIconDesc | null }
@@ -1504,7 +1506,9 @@ export default function App() {
 
   const fetchNews = useCallback(async () => {
     const result = await window.launcher.getNews()
-    if (result.success && result.news.length > 0) setDynamicNews(result.news)
+    // On n'affiche aux joueurs que les actus visibles ; les masquées (brouillons
+    // préparés à l'avance côté dashboard) sont filtrées ici.
+    if (result.success) setDynamicNews(result.news.filter((n) => !n.hidden))
   }, [])
 
   // Tête du joueur courant rendue localement depuis son vrai skin (Mojang, via le main)
@@ -2545,11 +2549,11 @@ export default function App() {
                       style={{ ['--cat' as string]: cat.rgb }}
                       onClick={() => openNews(item)}
                     >
-                      {/* Visuel — hauteur fixe 165px (compromis entre l'origine 128 et le
-                          2:1 plein à 195, jugé trop haut). L'image est cadrée en 2:1 par
-                          l'éditeur ; ici elle est juste un peu rognée en haut/bas. La
-                          bannière (après clic) reste, elle, en 2:1 complet. */}
-                      <div className="news-card-media relative overflow-hidden shrink-0 w-full" style={{ height: 165 }}>
+                      {/* Visuel — ratio 2:1 (NEWS_BANNER_RATIO) : la hauteur suit la largeur
+                          de la carte, donc l'image grandit proprement en grand écran / plein
+                          écran et reste lisible (avant : hauteur fixe 165px → image écrasée
+                          quand la fenêtre s'agrandissait). Même cadrage que la bannière modale. */}
+                      <div className="news-card-media relative overflow-hidden shrink-0 w-full" style={{ aspectRatio: String(NEWS_BANNER_RATIO) }}>
                         <RemoteNewsImage
                           src={imgSrc}
                           className="news-card-img absolute inset-0 max-w-none object-cover pointer-events-none size-full"
