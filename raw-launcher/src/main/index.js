@@ -2686,16 +2686,31 @@ ipcMain.handle('delete-shop-library-offer', async (_, id) => {
 // Définition d'une quête (/quests/{id}) : titre, description, cible (id d'entité,
 // ex. minecraft:pig), quantité à tuer, récompense (item + qté). La progression et
 // l'état par joueur sont tenus côté serveur de jeu (mod), pas dans le launcher.
+// Types d'objectif (verbe) et modes de répétition d'une quête. La cible `target` est
+// un id d'entité (kill/breed), de bloc (break/place) ou d'item (craft/smelt/fish) — ou
+// vide = n'importe laquelle. `maxClaims` ne sert qu'au mode `limited`.
+const QUEST_TYPES = new Set(['kill', 'break', 'place', 'craft', 'smelt', 'fish', 'breed'])
+const QUEST_MODES = new Set(['once', 'limited', 'daily', 'unique'])
 function sanitizeQuest(input) {
   const o = (input && typeof input === 'object') ? input : {}
   const num = (v, max) => Number.isFinite(+v) && +v > 0 ? Math.min(Math.floor(+v), max) : 1
+  const type = QUEST_TYPES.has(o.type) ? o.type : 'kill'
+  const mode = QUEST_MODES.has(o.mode) ? o.mode : 'once'
+  let target = String(o.target ?? '').trim().slice(0, 120)
+  if (target === '*') target = '' // joker normalisé en chaîne vide (= n'importe quelle cible)
   return {
     title: String(o.title ?? '').trim().slice(0, 80),
     description: String(o.description ?? '').trim().slice(0, 300),
-    target: String(o.target ?? '').trim().slice(0, 120),
+    type,
+    target,
     amount: num(o.amount, 9999),
     rewardItem: String(o.rewardItem ?? '').trim().slice(0, 120),
     rewardQty: num(o.rewardQty, 9999),
+    mode,
+    // maxClaims uniquement en mode limited ; sinon null → Firebase efface la clé au PATCH (merge).
+    maxClaims: mode === 'limited'
+      ? (Number.isFinite(+o.maxClaims) && +o.maxClaims >= 1 ? Math.min(Math.floor(+o.maxClaims), 9999) : 1)
+      : null,
   }
 }
 function normalizeQuestRow([id, o]) {
@@ -2703,10 +2718,13 @@ function normalizeQuestRow([id, o]) {
     id,
     title: String(o.title ?? ''),
     description: String(o.description ?? ''),
+    type: QUEST_TYPES.has(o.type) ? o.type : 'kill',
     target: String(o.target ?? ''),
     amount: Number(o.amount) > 0 ? Math.floor(Number(o.amount)) : 1,
     rewardItem: String(o.rewardItem ?? ''),
     rewardQty: Number(o.rewardQty) > 0 ? Math.floor(Number(o.rewardQty)) : 1,
+    mode: QUEST_MODES.has(o.mode) ? o.mode : 'once',
+    maxClaims: Number(o.maxClaims) >= 1 ? Math.floor(Number(o.maxClaims)) : undefined,
     createdAt: o.createdAt || 0,
   }
 }
@@ -2725,10 +2743,31 @@ async function attachQuestIcons(quests) {
   return quests.map(q => ({ ...q, rewardIcon: icons[q.rewardItem] || null }))
 }
 
+// Gagnants des quêtes « unique » (/questWinners/{id} = { player, uuid, ts }), écrits par
+// le mod côté serveur. Lecture publique. Map vide si aucun gagnant.
+async function fetchQuestWinners() {
+  try {
+    const map = normalizeFbMap(await firebaseRequest('GET', '/questWinners', null, false))
+    return (map && typeof map === 'object') ? map : {}
+  } catch { return {} }
+}
+
 ipcMain.handle('get-quests', async () => {
   if (!isFirebaseConfigured()) return { success: false, quests: [] }
   try {
-    return { success: true, quests: await attachQuestIcons(await fetchQuests()) }
+    const [quests, winners] = await Promise.all([fetchQuests(), fetchQuestWinners()])
+    const withIcons = await attachQuestIcons(quests)
+    const out = withIcons.map(q => {
+      if (q.mode !== 'unique') return q
+      const w = winners[q.id]
+      return {
+        ...q,
+        winner: (w && typeof w === 'object' && w.player)
+          ? { player: String(w.player), uuid: w.uuid ? String(w.uuid) : undefined, ts: Number(w.ts) || 0 }
+          : null,
+      }
+    })
+    return { success: true, quests: out }
   } catch (e) {
     return { success: false, quests: [], error: e.message }
   }
@@ -2739,7 +2778,7 @@ ipcMain.handle('create-quest', async (_, data = {}) => {
   const gate = await requireAdminSession()
   if (!gate.ok) return { success: false, error: gate.error }
   const quest = sanitizeQuest(data)
-  if (!quest.title || !quest.target || !quest.rewardItem) return { success: false, error: 'Titre, cible et récompense requis.' }
+  if (!quest.title || !quest.rewardItem) return { success: false, error: 'Titre et récompense requis.' }
   try {
     const result = await firebaseRequest('POST', '/quests', { ...quest, createdAt: Date.now() }, true)
     return { success: true, id: result?.name }
@@ -2891,6 +2930,123 @@ ipcMain.handle('get-item-catalog', async () => {
     return { success: true, items: (await getItemCatalog()).items }
   } catch (e) {
     return { success: false, items: [], error: e.message }
+  }
+})
+
+// ─── CATALOGUES D'ENTITÉS + DE BLOCS (sélecteur de cible des quêtes) ───────────
+// Même mécanique/cache que le catalogue d'items, mais on lit d'autres clés de lang :
+//   • entités : `entity.<ns>.<nom>` (3 segments EXACTEMENT → écarte les variantes comme
+//     entity.minecraft.villager.farmer) → cibles kill/breed, vanilla ET mods (requins…).
+//     L'icône est celle de l'œuf d'apparition `<ns>:<nom>_spawn_egg` s'il existe.
+//   • blocs   : `block.<ns>.<nom>` → cibles break/place. On garde TOUS les blocs (≠ catalogue
+//     d'items qui écarte les blocs non donnables). Le rendu 3D vient de getItemIcons.
+const ENTITY_KEY_RE = /^entity\.([a-z0-9_]+)\.([a-z0-9_]+)$/
+const BLOCK_KEY_RE = /^block\.([a-z0-9_]+)\.([a-z0-9_]+)$/
+const ENTITY_CATALOG_CACHE = path.join(GAME_DIR, '.entity-catalog.json')
+const BLOCK_CATALOG_CACHE = path.join(GAME_DIR, '.block-catalog.json')
+const ENTITY_CATALOG_V = 1
+const BLOCK_CATALOG_V = 1
+let entityCatalogMem = null // { sig, entities }
+let blockCatalogMem = null  // { sig, blocks }
+
+// Scan d'un jar : collecte les paires { id, name } dont la clé de lang correspond à
+// `keyRe` (groupe 1 = namespace, groupe 2 = nom). Silencieux si le jar est illisible.
+function scanJarForLangKeys(jarPath, keyRe, into) {
+  let zip
+  try { zip = new AdmZip(jarPath) } catch { return }
+  for (const entry of zip.getEntries()) {
+    const lm = ITEM_LANG_RE.exec(entry.entryName)
+    if (!lm) continue
+    let json
+    try { json = JSON.parse(entry.getData().toString('utf8')) } catch { continue }
+    for (const key of Object.keys(json)) {
+      const m = keyRe.exec(key)
+      if (!m) continue
+      const id = `${m[1]}:${m[2]}`
+      if (!into.has(id)) into.set(id, String(json[key]).slice(0, 80))
+    }
+  }
+}
+
+// Scan client vanilla + tous les mods pour une famille de clés (cède la main tous les 8 jars).
+async function scanAllJarsForLangKeys(keyRe) {
+  const map = new Map()
+  try { scanJarForLangKeys(itemClientJar(), keyRe, map) } catch { /* */ }
+  try {
+    const jars = fs.readdirSync(itemModsDir()).filter(f => f.endsWith('.jar'))
+    for (let i = 0; i < jars.length; i++) {
+      scanJarForLangKeys(path.join(itemModsDir(), jars[i]), keyRe, map)
+      if (i % 8 === 7) await new Promise(r => setImmediate(r))
+    }
+  } catch { /* dossier mods absent */ }
+  return map
+}
+
+async function buildEntityCatalog() {
+  const map = await scanAllJarsForLangKeys(ENTITY_KEY_RE)
+  let itemIds
+  try { itemIds = new Set((await getItemCatalog()).items.map(it => it.id)) } catch { itemIds = new Set() }
+  const list = [...map.entries()].map(([id, name]) => {
+    const sep = id.indexOf(':')
+    const egg = `${id.slice(0, sep)}:${id.slice(sep + 1)}_spawn_egg`
+    return itemIds.has(egg) ? { id, name, iconId: egg } : { id, name }
+  }).sort((a, b) => a.name.localeCompare(b.name, 'en') || a.id.localeCompare(b.id))
+  return { entities: list }
+}
+
+async function buildBlockCatalog() {
+  const map = await scanAllJarsForLangKeys(BLOCK_KEY_RE)
+  const list = [...map.entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'en') || a.id.localeCompare(b.id))
+  return { blocks: list }
+}
+
+async function getEntityCatalog() {
+  const sig = itemCatalogSignature()
+  if (entityCatalogMem && entityCatalogMem.sig === sig) return entityCatalogMem
+  try {
+    const cached = JSON.parse(fs.readFileSync(ENTITY_CATALOG_CACHE, 'utf8'))
+    if (cached && cached.v === ENTITY_CATALOG_V && cached.sig === sig && Array.isArray(cached.entities)) {
+      entityCatalogMem = { sig, entities: cached.entities }
+      return entityCatalogMem
+    }
+  } catch { /* pas de cache valide */ }
+  const { entities } = await buildEntityCatalog()
+  entityCatalogMem = { sig, entities }
+  try { fs.writeFileSync(ENTITY_CATALOG_CACHE, JSON.stringify({ v: ENTITY_CATALOG_V, sig, entities })) } catch { /* best-effort */ }
+  return entityCatalogMem
+}
+
+async function getBlockCatalog() {
+  const sig = itemCatalogSignature()
+  if (blockCatalogMem && blockCatalogMem.sig === sig) return blockCatalogMem
+  try {
+    const cached = JSON.parse(fs.readFileSync(BLOCK_CATALOG_CACHE, 'utf8'))
+    if (cached && cached.v === BLOCK_CATALOG_V && cached.sig === sig && Array.isArray(cached.blocks)) {
+      blockCatalogMem = { sig, blocks: cached.blocks }
+      return blockCatalogMem
+    }
+  } catch { /* pas de cache valide */ }
+  const { blocks } = await buildBlockCatalog()
+  blockCatalogMem = { sig, blocks }
+  try { fs.writeFileSync(BLOCK_CATALOG_CACHE, JSON.stringify({ v: BLOCK_CATALOG_V, sig, blocks })) } catch { /* best-effort */ }
+  return blockCatalogMem
+}
+
+ipcMain.handle('get-entity-catalog', async () => {
+  try {
+    return { success: true, entities: (await getEntityCatalog()).entities }
+  } catch (e) {
+    return { success: false, entities: [], error: e.message }
+  }
+})
+
+ipcMain.handle('get-block-catalog', async () => {
+  try {
+    return { success: true, blocks: (await getBlockCatalog()).blocks }
+  } catch (e) {
+    return { success: false, blocks: [], error: e.message }
   }
 })
 

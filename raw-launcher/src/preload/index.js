@@ -90,6 +90,8 @@ contextBridge.exposeInMainWorld('launcher', {
   updateQuest:  (data) => ipcRenderer.invoke('update-quest', data),
   deleteQuest:  (id) => ipcRenderer.invoke('delete-quest', id),
   getItemCatalog:    () => ipcRenderer.invoke('get-item-catalog'),
+  getEntityCatalog:  () => ipcRenderer.invoke('get-entity-catalog'),
+  getBlockCatalog:   () => ipcRenderer.invoke('get-block-catalog'),
   getItemIcons:      (ids) => ipcRenderer.invoke('get-item-icons', ids),
 
   // ── Chat (salons type Discord) ──

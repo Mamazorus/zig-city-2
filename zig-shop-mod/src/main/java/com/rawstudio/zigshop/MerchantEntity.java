@@ -128,9 +128,10 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
         return false;
     }
 
-    /** Définit la source ("daily" ou "store"). Appelé à la création via la commande. */
+    /** Définit le type de PNJ (daily/store/race/quest/questspecial). Appelé à la création via la commande. */
     public void setShopKind(String kind) {
-        this.shopKind = ("store".equals(kind) || "race".equals(kind) || "quest".equals(kind)) ? kind : "daily";
+        this.shopKind = ("store".equals(kind) || "race".equals(kind) || "quest".equals(kind)
+                || "questspecial".equals(kind)) ? kind : "daily";
     }
 
     /** Skin embarqué de ce PNJ ("" = défaut). Voir {@link MerchantSkins}. */
@@ -219,8 +220,10 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
         if (server == null) {
             return InteractionResult.CONSUME;
         }
-        // PNJ de quêtes : ouvre l'écran de quêtes (pas le menu marchand).
-        if ("quest".equals(this.shopKind)) {
+        // PNJ de quêtes : ouvre l'écran de quêtes (pas le menu marchand). Le PNJ "questspecial"
+        // n'affiche que les quêtes UNIQUE (1 gagnant / serveur) ; le PNJ "quest" affiche les autres.
+        if ("quest".equals(this.shopKind) || "questspecial".equals(this.shopKind)) {
+            boolean uniqueOnly = "questspecial".equals(this.shopKind);
             if (player instanceof net.minecraft.server.level.ServerPlayer sp) {
                 FirebaseClient.fetchQuests().whenComplete((list, err) -> server.execute(() -> {
                     if (this.isRemoved() || !sp.isAlive()) {
@@ -230,7 +233,7 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
                         sp.sendSystemMessage(Component.literal("§c[Zig Shop] Lecture des quetes impossible."));
                         return;
                     }
-                    QuestServerHandler.openFor(sp, list);
+                    QuestServerHandler.openFor(sp, list, uniqueOnly);
                 }));
             }
             return InteractionResult.CONSUME;

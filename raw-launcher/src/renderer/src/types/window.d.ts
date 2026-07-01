@@ -130,23 +130,61 @@ type ShopOfferForm = {
   maxUses: number // limite d'échanges par joueur (0 = illimité)
 }
 
-// Quête (PNJ de quêtes) : tuer `amount` de `target` (id d'entité) → recevoir rewardQty×rewardItem.
+// Type d'objectif d'une quête (verbe) et mode de répétition.
+type QuestType = 'kill' | 'break' | 'place' | 'craft' | 'smelt' | 'fish' | 'breed'
+type QuestMode = 'once' | 'limited' | 'daily' | 'unique'
+// Gagnant d'une quête « unique » (1 seul sur tout le serveur), écrit par le mod.
+interface QuestWinner {
+  player: string
+  uuid?: string
+  ts?: number
+}
+
+// Quête (PNJ de quêtes) : réaliser `amount` fois l'action `type` sur `target` (id d'entité,
+// de bloc ou d'item selon le type ; vide = n'importe laquelle) → recevoir rewardQty×rewardItem.
+// `mode` pilote la répétabilité ; `maxClaims` ne sert qu'au mode « limited ».
 interface QuestDef {
   id: string
   title: string
   description: string
+  type: QuestType
   target: string
   amount: number
+  mode: QuestMode
+  maxClaims?: number
   rewardItem: string
   rewardQty: number
   createdAt?: number
   rewardIcon?: import('../block-renderer').ItemIconDesc | null
+  winner?: QuestWinner | null
 }
-type QuestForm = { title: string; description: string; target: string; amount: number; rewardItem: string; rewardQty: number }
+type QuestForm = {
+  title: string
+  description: string
+  type: QuestType
+  target: string
+  amount: number
+  mode: QuestMode
+  maxClaims: number
+  rewardItem: string
+  rewardQty: number
+}
 
 // Entrée du catalogue d'items (extrait des jars du modpack installé) pour
 // l'autocomplétion de l'identifiant d'item côté admin.
 interface ItemCatalogEntry {
+  id: string
+  name: string
+}
+
+// Catalogue d'entités (cibles kill/breed) : `iconId` = id de l'œuf d'apparition pour l'icône.
+interface EntityCatalogEntry {
+  id: string
+  name: string
+  iconId?: string
+}
+// Catalogue de blocs (cibles break/place).
+interface BlockCatalogEntry {
   id: string
   name: string
 }
@@ -241,6 +279,8 @@ declare global {
       updateQuest: (data: { id: string } & Partial<QuestForm>) => Promise<{ success: boolean; error?: string }>
       deleteQuest: (id: string) => Promise<{ success: boolean; error?: string }>
       getItemCatalog: () => Promise<{ success: boolean; items: ItemCatalogEntry[]; error?: string }>
+      getEntityCatalog: () => Promise<{ success: boolean; entities: EntityCatalogEntry[]; error?: string }>
+      getBlockCatalog: () => Promise<{ success: boolean; blocks: BlockCatalogEntry[]; error?: string }>
       // Descripteurs d'icône pour un lot d'ids : sprite plat (item-objet) ou modèle
       // de bloc rendu en 3D isométrique côté renderer. Clés absentes = pas d'icône.
       getItemIcons: (ids: string[]) => Promise<{ success: boolean; icons: Record<string, import('../block-renderer').ItemIconDesc>; error?: string }>

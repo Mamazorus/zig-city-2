@@ -64,21 +64,28 @@ interface ShopOfferRow {
 interface OfferForm { input: string; inputQty: number; output: string; outputQty: number; maxUses: number }
 const EMPTY_OFFER: OfferForm = { input: '', inputQty: 1, output: '', outputQty: 1, maxUses: 0 }
 
-// ── Quêtes (PNJ de quêtes : tuer N mobs → récompense) ──
+// ── Quêtes (PNJ de quêtes : objectif varié → récompense) ──
 // Types locaux (miroirs de window.d.ts, qui les déclare hors `declare global`).
+type QuestType = 'kill' | 'break' | 'place' | 'craft' | 'smelt' | 'fish' | 'breed'
+type QuestMode = 'once' | 'limited' | 'daily' | 'unique'
+interface QuestWinner { player: string; uuid?: string; ts?: number }
 interface QuestDef {
   id: string
   title: string
   description: string
+  type: QuestType
   target: string
   amount: number
+  mode: QuestMode
+  maxClaims?: number
   rewardItem: string
   rewardQty: number
   createdAt?: number
   rewardIcon?: ItemIconDesc | null
+  winner?: QuestWinner | null
 }
-type QuestForm = { title: string; description: string; target: string; amount: number; rewardItem: string; rewardQty: number }
-const EMPTY_QUEST: QuestForm = { title: '', description: '', target: '', amount: 1, rewardItem: '', rewardQty: 1 }
+type QuestForm = { title: string; description: string; type: QuestType; target: string; amount: number; mode: QuestMode; maxClaims: number; rewardItem: string; rewardQty: number }
+const EMPTY_QUEST: QuestForm = { title: '', description: '', type: 'kill', target: '', amount: 1, mode: 'once', maxClaims: 10, rewardItem: '', rewardQty: 1 }
 
 interface ShopConfigState { currencyName: string; currencyItem: string; currencyIcon: string }
 
@@ -97,6 +104,30 @@ function dayLabel(offset: number): string {
 
 // Entrée du catalogue d'items (id + nom anglais) renvoyée par get-item-catalog.
 interface ItemCatalogEntry { id: string; name: string }
+// Catalogue d'entités (kill/breed) : iconId = œuf d'apparition pour l'icône. Blocs = ItemCatalogEntry.
+interface EntityCatalogEntry { id: string; name: string; iconId?: string }
+
+// Configuration des 7 types d'objectif : verbe, quelle famille de cible (entité/bloc/item),
+// et libellés du formulaire. Source unique pour le sélecteur, la cible adaptative et l'aide.
+const QUEST_TYPES: { key: QuestType; label: string; kind: 'entity' | 'block' | 'item'; targetLabel: string; amountLabel: string; verb: string }[] = [
+  { key: 'kill',  label: 'Tuer',      kind: 'entity', targetLabel: 'Entité à tuer',    amountLabel: 'Nombre à tuer',      verb: 'Tuer' },
+  { key: 'break', label: 'Miner',     kind: 'block',  targetLabel: 'Bloc à casser',    amountLabel: 'Nombre à casser',    verb: 'Casser' },
+  { key: 'place', label: 'Poser',     kind: 'block',  targetLabel: 'Bloc à poser',     amountLabel: 'Nombre à poser',     verb: 'Poser' },
+  { key: 'craft', label: 'Fabriquer', kind: 'item',   targetLabel: 'Objet à fabriquer', amountLabel: 'Nombre à fabriquer', verb: 'Fabriquer' },
+  { key: 'smelt', label: 'Cuire',     kind: 'item',   targetLabel: 'Objet à cuire',    amountLabel: 'Nombre à cuire',     verb: 'Cuire' },
+  { key: 'fish',  label: 'Pêcher',    kind: 'item',   targetLabel: 'Objet à pêcher',   amountLabel: 'Nombre à pêcher',    verb: 'Pêcher' },
+  { key: 'breed', label: 'Élever',    kind: 'entity', targetLabel: 'Animal à élever',  amountLabel: "Nombre d'élevages",  verb: 'Élever' },
+]
+const questTypeCfg = (t: QuestType) => QUEST_TYPES.find(x => x.key === t) ?? QUEST_TYPES[0]
+
+// Modes de répétition : libellé + aide affichée sous le sélecteur.
+const QUEST_MODES: { key: QuestMode; label: string; hint: string }[] = [
+  { key: 'once',    label: 'Une fois',       hint: 'réalisable une seule fois par joueur' },
+  { key: 'limited', label: 'Limitée',        hint: 'réalisable un nombre limité de fois par joueur' },
+  { key: 'daily',   label: 'Quotidienne',    hint: 'refaisable une fois toutes les 24 h' },
+  { key: 'unique',  label: 'Unique serveur', hint: 'un seul gagnant sur tout le serveur (PNJ dédié)' },
+]
+const questModeCfg = (m: QuestMode) => QUEST_MODES.find(x => x.key === m) ?? QUEST_MODES[0]
 
 const inputCls =
   'w-full bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[8px] px-[12px] py-[8px] text-white font-ui text-[14px] tracking-[-0.3px] focus:outline-none focus:border-[rgba(0,255,225,0.4)] placeholder:text-white/25 transition-colors'
@@ -136,13 +167,16 @@ function QtyInput({ value, onChange, min = 1, max = 9999 }: { value: number; onC
 // nom anglais, priorise les correspondances en début de chaîne, navigation au
 // clavier (↑/↓/Entrée/Échap). La saisie libre reste toujours possible.
 function ItemAutocomplete({
-  value, onChange, catalog, loading, placeholder,
+  value, onChange, catalog, loading, placeholder, iconIdFor,
 }: {
   value: string
   onChange: (v: string) => void
   catalog: ItemCatalogEntry[]
   loading?: boolean
   placeholder?: string
+  // Transforme un id de catalogue en id d'ITEM à rendre pour l'icône (défaut : identité).
+  // Sert aux entités : `minecraft:cow` → `minecraft:cow_spawn_egg` (l'entité n'a pas d'icône).
+  iconIdFor?: (id: string) => string
 }) {
   const [open, setOpen] = useState(false)
   const [highlight, setHighlight] = useState(0)
@@ -182,22 +216,26 @@ function ItemAutocomplete({
   // Charge les icônes du lot visible (+ item sélectionné), debouncé. Les ids déjà
   // demandés (résolus ou non, marqués '') ne sont pas redemandés. Le main cache.
   useEffect(() => {
+    const resolveIcon = iconIdFor ?? ((x: string) => x)
     const want = matches.map(m => m.id)
     if (exact) want.push(exact.id)
     const ids = want.filter(id => iconMap[id] === undefined)
     if (ids.length === 0) return
     const t = setTimeout(() => {
-      window.launcher.getItemIcons(ids).then(r => {
+      // On rend l'icône de l'id RÉSOLU (œuf pour une entité), mais on la range sous
+      // l'id d'affichage pour que le tri et l'aperçu restent indexés par la cible.
+      const iconIds = [...new Set(ids.map(resolveIcon))]
+      window.launcher.getItemIcons(iconIds).then(r => {
         if (!r.success) return
         setIconMap(prev => {
           const next = { ...prev }
-          for (const id of ids) next[id] = r.icons[id] || ''
+          for (const id of ids) next[id] = r.icons[resolveIcon(id)] || ''
           return next
         })
       })
     }, 130)
     return () => clearTimeout(t)
-  }, [matches, exact, iconMap])
+  }, [matches, exact, iconMap, iconIdFor])
 
   const select = (e: ItemCatalogEntry) => { onChange(e.id); setOpen(false) }
 
@@ -338,6 +376,11 @@ export default function AdminDashboard({
   // Catalogue d'items (extrait des jars du modpack) pour l'autocomplétion.
   const [itemCatalog, setItemCatalog] = useState<ItemCatalogEntry[]>([])
   const [itemCatalogLoading, setItemCatalogLoading] = useState(false)
+  // Catalogues de cibles des quêtes : entités (kill/breed) et blocs (break/place).
+  const [entityCatalog, setEntityCatalog] = useState<EntityCatalogEntry[]>([])
+  const [entityCatalogLoading, setEntityCatalogLoading] = useState(false)
+  const [blockCatalog, setBlockCatalog] = useState<ItemCatalogEntry[]>([])
+  const [blockCatalogLoading, setBlockCatalogLoading] = useState(false)
 
   // ── Quêtes : CRUD des définitions (la progression joueur est gérée côté serveur/mod) ──
   const [quests, setQuests] = useState<QuestDef[]>([])
@@ -348,6 +391,7 @@ export default function AdminDashboard({
   const [savingQuest, setSavingQuest] = useState(false)
   const [confirmDeleteQuest, setConfirmDeleteQuest] = useState<string | null>(null)
   const [questMsg, setQuestMsg] = useState<string | null>(null)
+  const [questTargetAny, setQuestTargetAny] = useState(false) // cible = « n'importe lequel » (wildcard)
 
   // ── Fonds d'écran : galerie d'images (le launcher en tire une au hasard au lancement) ──
   const [backgrounds, setBackgrounds] = useState<BackgroundImage[]>([])
@@ -426,6 +470,23 @@ export default function AdminDashboard({
       .then(r => { if (r.success) setItemCatalog(r.items) })
       .finally(() => setItemCatalogLoading(false))
   }, [tab, itemCatalog.length, itemCatalogLoading])
+
+  // Catalogues d'entités + de blocs : chargés paresseusement à la 1re ouverture de l'onglet Quêtes.
+  useEffect(() => {
+    if (tab !== 'quests') return
+    if (entityCatalog.length === 0 && !entityCatalogLoading) {
+      setEntityCatalogLoading(true)
+      window.launcher.getEntityCatalog()
+        .then(r => { if (r.success) setEntityCatalog(r.entities) })
+        .finally(() => setEntityCatalogLoading(false))
+    }
+    if (blockCatalog.length === 0 && !blockCatalogLoading) {
+      setBlockCatalogLoading(true)
+      window.launcher.getBlockCatalog()
+        .then(r => { if (r.success) setBlockCatalog(r.blocks) })
+        .finally(() => setBlockCatalogLoading(false))
+    }
+  }, [tab, entityCatalog.length, entityCatalogLoading, blockCatalog.length, blockCatalogLoading])
 
   const openCreate = () => {
     setForm({ ...EMPTY_FORM, date: todayLabel() })
@@ -926,27 +987,46 @@ export default function AdminDashboard({
     return () => clearTimeout(t)
   }, [questForm.rewardItem, questRewardIcon])
 
+  // Cible adaptative selon le type : entités (kill/breed), blocs (break/place), items (sinon).
+  const activeTargetKind = questTypeCfg(questForm.type).kind
+  const activeTargetCatalog: ItemCatalogEntry[] =
+    activeTargetKind === 'entity' ? entityCatalog : activeTargetKind === 'block' ? blockCatalog : itemCatalog
+  const activeTargetLoading =
+    activeTargetKind === 'entity' ? entityCatalogLoading : activeTargetKind === 'block' ? blockCatalogLoading : itemCatalogLoading
+  // Icône d'une entité = son œuf d'apparition (l'entité n'a pas d'icône d'inventaire).
+  const entityIconIdFor = useCallback((id: string) => entityCatalog.find(x => x.id === id)?.iconId || id, [entityCatalog])
+
   const openCreateQuest = () => {
-    setQuestForm(EMPTY_QUEST)
+    setQuestForm(EMPTY_QUEST); setQuestTargetAny(false)
     setEditingQuestId(null); setShowQuestForm(true); setConfirmDeleteQuest(null); setQuestMsg(null)
   }
   const openEditQuest = (q: QuestDef) => {
-    setQuestForm({ title: q.title, description: q.description, target: q.target, amount: q.amount ?? 1, rewardItem: q.rewardItem, rewardQty: q.rewardQty ?? 1 })
+    setQuestForm({
+      title: q.title, description: q.description,
+      type: q.type ?? 'kill', target: q.target ?? '', amount: q.amount ?? 1,
+      mode: q.mode ?? 'once', maxClaims: q.maxClaims ?? 10,
+      rewardItem: q.rewardItem, rewardQty: q.rewardQty ?? 1,
+    })
+    const t = (q.target ?? '').trim()
+    setQuestTargetAny(t === '' || t === '*')
     setEditingQuestId(q.id); setShowQuestForm(true); setConfirmDeleteQuest(null); setQuestMsg(null)
   }
   const cancelQuestForm = () => { setShowQuestForm(false); setEditingQuestId(null); setQuestMsg(null) }
 
   const saveQuest = async () => {
     if (!questForm.title.trim()) { setQuestMsg('Donne un titre à la quête.'); return }
-    if (!questForm.target.trim()) { setQuestMsg('Indique la cible (id du mob, ex : minecraft:pig).'); return }
     if (!questForm.rewardItem.trim()) { setQuestMsg('Indique un item de récompense.'); return }
     setSavingQuest(true)
     try {
+      const rawTarget = questForm.target.trim()
       const payload: QuestForm = {
         title: questForm.title.trim(),
         description: questForm.description.trim(),
-        target: questForm.target.trim(),
+        type: questForm.type,
+        target: questTargetAny || rawTarget === '*' ? '' : rawTarget, // joker → chaîne vide
         amount: Math.max(1, Math.floor(questForm.amount) || 1),
+        mode: questForm.mode,
+        maxClaims: Math.max(1, Math.floor(questForm.maxClaims) || 1),
         rewardItem: questForm.rewardItem.trim(),
         rewardQty: Math.max(1, Math.floor(questForm.rewardQty) || 1),
       }
@@ -2169,24 +2249,93 @@ export default function AdminDashboard({
                   />
                 </div>
 
-                {/* Objectif : tuer N × cible (id d'entité, saisie libre) */}
-                <div className="flex flex-col gap-[8px] bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.07)] rounded-[10px] p-[12px]">
+                {/* Objectif : type d'action + cible adaptative (entité / bloc / objet) + quantité */}
+                <div className="flex flex-col gap-[10px] bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.07)] rounded-[10px] p-[12px]">
                   <p className="font-ui text-[13px] text-white/45 tracking-[-0.3px]">Objectif</p>
+
+                  {/* Type d'objectif (pills, retour à la ligne si besoin) */}
+                  <div className="flex flex-wrap gap-[4px] p-[3px] rounded-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.06)] w-fit">
+                    {QUEST_TYPES.map(t => (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => { setQuestForm(f => ({ ...f, type: t.key, target: '' })); setQuestTargetAny(false) }}
+                        className={`font-ui text-[13px] tracking-[-0.3px] px-[12px] h-[30px] rounded-[9px] transition-colors ${questForm.type === t.key ? 'bg-white text-[#0e0b16] font-semibold' : 'text-white/55 hover:text-white hover:bg-[rgba(255,255,255,0.06)]'}`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="grid grid-cols-2 gap-[12px]">
                     <div className="flex flex-col">
-                      <p className={labelCls}>Cible (mob) <span className="text-white/30">*</span></p>
-                      <input
-                        className={inputCls} maxLength={120} autoComplete="off" spellCheck={false}
-                        placeholder="minecraft:pig"
-                        value={questForm.target}
-                        onChange={e => setQuestForm(f => ({ ...f, target: e.target.value }))}
-                      />
+                      <div className="flex items-center justify-between mb-[6px]">
+                        <p className="font-ui text-[14px] text-white/40 tracking-[-0.3px]">{questTypeCfg(questForm.type).targetLabel}</p>
+                        <label className="flex items-center gap-[5px] cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            className="accent-[#00ffe1] w-[13px] h-[13px]"
+                            checked={questTargetAny}
+                            onChange={e => { setQuestTargetAny(e.target.checked); if (e.target.checked) setQuestForm(f => ({ ...f, target: '' })) }}
+                          />
+                          <span className="font-ui text-[12px] text-white/45 tracking-[-0.3px]">N&apos;importe lequel</span>
+                        </label>
+                      </div>
+                      {questTargetAny ? (
+                        <div className="flex items-center h-[38px] px-[12px] rounded-[8px] border border-dashed border-[rgba(255,255,255,0.15)] bg-[rgba(255,255,255,0.03)]">
+                          <span className="font-ui text-[13px] text-[rgba(0,255,225,0.7)] tracking-[-0.3px]">✓ N&apos;importe quelle cible</span>
+                        </div>
+                      ) : (
+                        <ItemAutocomplete
+                          value={questForm.target}
+                          onChange={v => setQuestForm(f => ({ ...f, target: v }))}
+                          catalog={activeTargetCatalog}
+                          loading={activeTargetLoading}
+                          iconIdFor={activeTargetKind === 'entity' ? entityIconIdFor : undefined}
+                          placeholder={activeTargetKind === 'entity' ? 'Cherche une entité…' : activeTargetKind === 'block' ? 'Cherche un bloc…' : 'Cherche un objet…'}
+                        />
+                      )}
                     </div>
                     <div className="flex flex-col">
-                      <p className={labelCls}>Quantité à tuer</p>
+                      <p className={labelCls}>{questTypeCfg(questForm.type).amountLabel}</p>
                       <QtyInput value={questForm.amount} onChange={n => setQuestForm(f => ({ ...f, amount: n }))} min={1} />
                     </div>
                   </div>
+                </div>
+
+                {/* Répétition : mode + (si limité) nombre de fois max */}
+                <div className="flex flex-col gap-[10px] bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.07)] rounded-[10px] p-[12px]">
+                  <p className="font-ui text-[13px] text-white/45 tracking-[-0.3px]">Répétition</p>
+                  <div className="flex flex-wrap gap-[4px] p-[3px] rounded-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.06)] w-fit">
+                    {QUEST_MODES.map(m => (
+                      <button
+                        key={m.key}
+                        type="button"
+                        onClick={() => setQuestForm(f => ({ ...f, mode: m.key }))}
+                        className={`font-ui text-[13px] tracking-[-0.3px] px-[12px] h-[30px] rounded-[9px] transition-colors ${questForm.mode === m.key ? 'bg-white text-[#0e0b16] font-semibold' : 'text-white/55 hover:text-white hover:bg-[rgba(255,255,255,0.06)]'}`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                  {questForm.mode === 'limited' && (
+                    <div className="flex items-center gap-[10px]">
+                      <p className="font-ui text-[14px] text-white/40 tracking-[-0.3px]">Nombre de fois max</p>
+                      <div className="w-[116px]"><QtyInput value={questForm.maxClaims} onChange={n => setQuestForm(f => ({ ...f, maxClaims: n }))} min={1} /></div>
+                    </div>
+                  )}
+                  <p className="font-ui text-[12px] text-white/35 tracking-[-0.3px]">{questModeCfg(questForm.mode).hint}</p>
+                  {questForm.mode === 'unique' && editingQuestId && (() => {
+                    const w = quests.find(x => x.id === editingQuestId)?.winner
+                    return (
+                      <div className="flex items-center gap-[8px] bg-[rgba(255,200,0,0.06)] border border-[rgba(255,200,0,0.18)] rounded-[10px] px-[12px] py-[9px]">
+                        <span className="text-[15px]">🏆</span>
+                        <p className="font-ui text-[13px] text-white/60 tracking-[-0.3px]">
+                          {w ? <>Déjà gagnée par <span className="text-white font-semibold">{w.player}</span></> : "Aucun gagnant pour l'instant"}
+                        </p>
+                      </div>
+                    )
+                  })()}
                 </div>
 
                 {/* Récompense : item (autocomplete catalogue) + quantité + aperçu */}
@@ -2206,7 +2355,18 @@ export default function AdminDashboard({
                 </div>
 
                 <p className="font-ui text-[13px] text-white/35 tracking-[-0.3px] leading-snug">
-                  Le joueur doit tuer la quantité demandée du mob pour recevoir la récompense. La progression est suivie côté serveur.
+                  {(() => {
+                    const cfg = questTypeCfg(questForm.type)
+                    const tgtName = questTargetAny
+                      ? "n'importe quelle cible"
+                      : (activeTargetCatalog.find(x => x.id === questForm.target.trim())?.name || questForm.target.trim() || 'une cible')
+                    const rwName = itemCatalog.find(x => x.id === questForm.rewardItem.trim())?.name || questForm.rewardItem.trim() || 'une récompense'
+                    const modeSuffix = questForm.mode === 'daily' ? ', refaisable chaque jour'
+                      : questForm.mode === 'limited' ? `, ${Math.max(1, questForm.maxClaims)}× max par joueur`
+                      : questForm.mode === 'unique' ? ', un seul gagnant sur le serveur'
+                      : ''
+                    return `${cfg.verb} ${questForm.amount} × ${tgtName} → ${questForm.rewardQty} × ${rwName}${modeSuffix}. Progression suivie côté serveur.`
+                  })()}
                 </p>
 
                 {questMsg && <p className="font-ui text-[13px] text-[rgba(255,120,120,0.9)]">{questMsg}</p>}
@@ -2220,7 +2380,7 @@ export default function AdminDashboard({
                   </button>
                   <button
                     className="font-ui font-bold text-[14px] tracking-[-0.3px] bg-white text-[#0e0b16] px-[18px] h-[34px] rounded-[12px] hover:bg-white/90 disabled:opacity-30 disabled:hover:bg-white active:scale-[0.98] transition-all"
-                    disabled={savingQuest || !questForm.title.trim() || !questForm.target.trim() || !questForm.rewardItem.trim()}
+                    disabled={savingQuest || !questForm.title.trim() || !questForm.rewardItem.trim()}
                     onClick={saveQuest}
                   >
                     {savingQuest ? 'Enregistrement…' : editingQuestId ? 'Enregistrer' : 'Créer'}
@@ -2254,7 +2414,9 @@ export default function AdminDashboard({
                     <div className="flex-1 min-w-0 flex flex-col gap-[3px]">
                       <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px] truncate">{q.title}</p>
                       <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px] truncate">
-                        Tuer {q.amount} × {q.target.replace(/^minecraft:/, '')}
+                        {questTypeCfg(q.type ?? 'kill').verb} {q.amount} × {q.target ? q.target.replace(/^minecraft:/, '') : 'tout'}
+                        {q.mode && q.mode !== 'once' ? ` · ${questModeCfg(q.mode).label}` : ''}
+                        {q.mode === 'unique' && q.winner ? ` · 🏆 ${q.winner.player}` : ''}
                       </p>
                     </div>
 
