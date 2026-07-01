@@ -903,9 +903,17 @@ function fetchSkinDataUrl(skinUrl) {
 }
 
 ipcMain.handle('get-skin-info', async () => {
-  // Compte hors-ligne : aucun skin distant (pas de compte Mojang) → repli sur la
-  // tête distante côté renderer, sans appel réseau inutile qui échouerait.
-  if (currentToken?.offline) return { success: false, offline: true }
+  // Compte hors-ligne : le skin custom est stocké dans Firebase (/skins/{pseudo})
+  // et hébergé sur Storage. On le lit pour préremplir l'éditeur et la tête du joueur.
+  if (currentToken?.offline) {
+    try {
+      const rec = await firebaseRequest('GET', `/skins/${currentToken.name}`, null, false)
+      if (rec && rec.url) {
+        return { success: true, variant: normalizeVariant(rec.variant), skinUrl: rec.url, skinDataUrl: await fetchSkinDataUrl(rec.url), offline: true }
+      }
+    } catch { /* pas de skin custom / lecture impossible → éditeur vierge */ }
+    return { success: false, offline: true }
+  }
   if (!currentToken?.access_token) return { success: false, error: 'Non connecté', loggedOut: true }
   try {
     const res = await mcAuthorizedRequest('GET', MC_PROFILE_URL, { token: currentToken.access_token })
@@ -1015,8 +1023,7 @@ ipcMain.handle('pick-skin-file', async () => {
 })
 
 ipcMain.handle('upload-skin', async (_, { variant, path: filePath, dataUrl } = {}) => {
-  if (currentToken?.offline) return { success: false, error: 'Le changement de skin nécessite un compte Microsoft. En hors-ligne, le skin est géré côté serveur.', offline: true }
-  if (!currentToken?.access_token) return { success: false, error: 'Non connecté', loggedOut: true }
+  if (!currentToken) return { success: false, error: 'Non connecté', loggedOut: true }
   const v = normalizeVariant(variant)
 
   let buf
@@ -1038,6 +1045,12 @@ ipcMain.handle('upload-skin', async (_, { variant, path: filePath, dataUrl } = {
     return { success: false, error: 'Le skin doit être un PNG de 64×64 pixels.' }
   }
 
+  // Compte hors-ligne : héberger le PNG sur Firebase Storage + publier /skins/{pseudo}.
+  // Le mod serveur zigshop lira ce chemin au join et appliquera le skin via skinrestorer.
+  if (currentToken.offline) return uploadOfflineSkin(currentToken.name, v, buf)
+
+  // Compte Microsoft : envoi via l'API officielle Mojang.
+  if (!currentToken.access_token) return { success: false, error: 'Non connecté', loggedOut: true }
   const boundary = '----RawLauncherSkin' + crypto.randomUUID().replace(/-/g, '')
   const body = buildSkinMultipart(v, buf, boundary)
 
@@ -1059,7 +1072,7 @@ ipcMain.handle('upload-skin', async (_, { variant, path: filePath, dataUrl } = {
 })
 
 ipcMain.handle('reset-skin', async () => {
-  if (currentToken?.offline) return { success: false, error: 'Indisponible avec un compte hors-ligne.', offline: true }
+  if (currentToken?.offline) return { success: false, error: 'En hors-ligne, change simplement de skin dans l\'éditeur (la remise au skin par défaut n\'est pas encore disponible).', offline: true }
   if (!currentToken?.access_token) return { success: false, error: 'Non connecté', loggedOut: true }
   try {
     const res = await mcAuthorizedRequest('DELETE', `${MC_SKINS_URL}/active`, { token: currentToken.access_token })
@@ -3344,6 +3357,26 @@ async function uploadImageToStorage(objectPath, buffer, contentType) {
     return { success: true, url, mime: contentType }
   } catch (e) {
     return { success: false, error: e.message }
+  }
+}
+
+// Skin d'un compte hors-ligne : héberge le PNG sur Firebase Storage puis publie
+// /skins/{pseudo} = { url, variant, updatedAt }. Le mod serveur zigshop lit ce
+// chemin à la connexion et applique le skin via skinrestorer (visible par tous).
+async function uploadOfflineSkin(name, variant, buf) {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré.' }
+  if (!FIREBASE_STORAGE_BUCKET || FIREBASE_STORAGE_BUCKET.includes('YOUR-')) {
+    return { success: false, error: 'Bucket Storage non configuré.' }
+  }
+  if (!isValidPlayerName(name)) return { success: false, error: 'Pseudo invalide.' }
+  try {
+    const objectPath = `skins/${name}-${Date.now()}.png`
+    const up = await uploadImageToStorage(objectPath, buf, 'image/png')
+    if (!up.success) return { success: false, error: up.error || 'Envoi du skin échoué.' }
+    await firebaseRequest('PUT', `/skins/${name}`, { url: up.url, variant, updatedAt: Date.now() }, true)
+    return { success: true, variant, skinUrl: up.url, skinDataUrl: `data:image/png;base64,${buf.toString('base64')}`, offline: true }
+  } catch (e) {
+    return { success: false, error: String(e.message || e) }
   }
 }
 

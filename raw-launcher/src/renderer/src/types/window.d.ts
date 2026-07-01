@@ -159,7 +159,7 @@ declare global {
       // Connexion hors-ligne (compte non-premium) : le serveur est en online-mode=false.
       loginOffline: (username: string) => Promise<{ success: boolean; username?: string; uuid?: string; error?: string }>
       logout: () => Promise<{ success: boolean }>
-      getSkinInfo: () => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; skinDataUrl?: string | null; name?: string; uuid?: string; error?: string; expired?: boolean; loggedOut?: boolean }>
+      getSkinInfo: () => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; skinDataUrl?: string | null; name?: string; uuid?: string; error?: string; expired?: boolean; loggedOut?: boolean; offline?: boolean }>
       fetchPlayerSkin: (name: string) => Promise<string | null>
       pickSkinFile: () => Promise<{ canceled: boolean; path?: string; name?: string; dataUrl?: string; width?: number; height?: number; error?: string }>
       uploadSkin: (payload: { variant: 'classic' | 'slim'; path?: string; dataUrl?: string }) => Promise<{ success: boolean; variant?: 'classic' | 'slim'; skinUrl?: string | null; error?: string; expired?: boolean; loggedOut?: boolean }>

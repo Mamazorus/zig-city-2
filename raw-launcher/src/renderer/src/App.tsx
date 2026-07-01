@@ -1895,6 +1895,9 @@ export default function App() {
       setSelectedVariant(info.variant ?? 'classic')
       setEditorSrc(info.skinDataUrl ?? info.skinUrl ?? null)
       setEditorLoadKey(k => k + 1)
+    } else if (info.offline) {
+      // Compte hors-ligne sans skin custom encore défini : éditeur vierge (ce n'est pas une erreur).
+      setEditorLoadKey(k => k + 1)
     } else {
       setSkinError(info.expired || info.loggedOut ? sessionMessage : (info.error ?? 'Impossible de charger ton skin actuel.'))
     }
@@ -1936,7 +1939,9 @@ export default function App() {
     try {
       const res = await window.launcher.uploadSkin({ variant: selectedVariant, dataUrl })
       if (res.success) {
-        setSkinSuccess('Skin appliqué sur ton compte ! En jeu, il peut mettre quelques secondes à apparaître.')
+        setSkinSuccess(isOffline
+          ? 'Skin enregistré ! Il s\'appliquera à ta prochaine connexion au serveur (visible par tous les joueurs).'
+          : 'Skin appliqué sur ton compte ! En jeu, il peut mettre quelques secondes à apparaître.')
         setSkinVersion(v => v + 1)
         renderHeadFromSkin(dataUrl).then(setMyHead).catch(() => {})   // tête à jour partout, sans minotar
       } else {
@@ -2136,8 +2141,6 @@ export default function App() {
 
                   {/* Actions */}
                   <div className="px-[8px] py-[8px] flex flex-col gap-[2px]">
-                    {/* Changer de skin : nécessite un compte Microsoft (API Mojang) → masqué en hors-ligne */}
-                    {!isOffline && (
                     <button
                       className="flex items-center gap-[10px] w-full px-[10px] py-[8px] rounded-[8px] text-left hover:bg-[rgba(255,255,255,0.09)] transition-colors"
                       onClick={openSkinModal}
@@ -2148,7 +2151,6 @@ export default function App() {
                       </svg>
                       <p className="font-ui text-[14px] text-white">Changer de skin</p>
                     </button>
-                    )}
 
                     <button
                       className="flex items-center gap-[10px] w-full px-[10px] py-[8px] rounded-[8px] text-left hover:bg-[rgba(255,40,40,0.15)] transition-colors"
