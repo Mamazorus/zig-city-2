@@ -646,11 +646,26 @@ function offlineUuid(name) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
 }
 
-ipcMain.handle('login-offline', (_, rawName) => {
+// Un pseudo appartient-il à un vrai compte Minecraft (premium) ? (a un UUID chez Mojang)
+async function isPremiumName(name) {
+  try {
+    const res = await httpsGet(`https://api.mojang.com/users/profiles/minecraft/${encodeURIComponent(name)}`)
+    return !!(res && res.id)
+  } catch {
+    return false   // API Mojang indisponible → ne pas bloquer la connexion (fail-open)
+  }
+}
+
+ipcMain.handle('login-offline', async (_, rawName) => {
   try {
     const name = String(rawName ?? '').trim()
     if (!OFFLINE_NAME_RE.test(name)) {
       return { success: false, error: 'Pseudo invalide : 3 à 16 caractères (lettres, chiffres, _).' }
+    }
+    // Anti-usurpation : refuser un pseudo appartenant à un vrai compte Minecraft (premium).
+    // Son propriétaire doit passer par Microsoft ; personne ne peut le prendre en cracké.
+    if (await isPremiumName(name)) {
+      return { success: false, error: 'Ce pseudo appartient à un compte Minecraft — connecte-toi avec Microsoft, ou choisis un autre pseudo.' }
     }
     const token = {
       access_token:    '0',                // jeton factice : ignoré par un serveur en online-mode=false
