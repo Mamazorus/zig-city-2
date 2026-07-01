@@ -89,10 +89,14 @@ export default function ChatPanel({
   username,
   isAdmin,
   onlinePlayers,
+  myHead,
+  skinVersion,
 }: {
   username: string
   isAdmin: boolean
   onlinePlayers: OnlinePlayer[]
+  myHead?: string | null      // tête du joueur courant, rendue localement depuis son skin (à jour instantanément)
+  skinVersion?: number        // cache-buster des têtes distantes du joueur courant
 }) {
   const [channels, setChannels] = useState<ChatChannel[]>([])
   const [channelsLoaded, setChannelsLoaded] = useState(false)
@@ -118,6 +122,11 @@ export default function ChatPanel({
   const activeChannel = useMemo(() => channels.find(c => c.id === activeId) || null, [channels, activeId])
   const canWrite = !!username && (activeChannel?.type !== 'announce' || isAdmin)
   const hash = activeChannel?.type === 'open' ? '#' : ''
+
+  // Tête du joueur courant : on la rend localement (myHead) et on force le cache-buster
+  // distant (skinVersion), comme partout ailleurs dans le launcher, pour qu'un changement
+  // de skin se voie tout de suite ici aussi. Les autres joueurs passent par Mojang (Avatar).
+  const isSelf = (n: string) => !!username && n.toLowerCase() === username.toLowerCase()
 
   const scrollToEndIfAtBottom = () => {
     const el = scrollRef.current
@@ -370,7 +379,7 @@ export default function ChatPanel({
                           <span className="font-mono text-[10px] text-white/30 opacity-0 group-hover:opacity-100 transition-opacity pt-[3px] leading-none">{formatTime(m.ts)}</span>
                         ) : (
                           <div className="size-[40px] rounded-[9px] overflow-hidden">
-                            <Avatar name={m.author} className="size-full object-cover" />
+                            <Avatar name={m.author} srcOverride={isSelf(m.author) ? myHead : undefined} version={isSelf(m.author) ? skinVersion : undefined} className="size-full object-cover" />
                           </div>
                         )}
                       </div>
@@ -533,7 +542,7 @@ export default function ChatPanel({
           ) : onlinePlayers.map(p => (
             <div key={p.name} className="flex items-center gap-[9px] px-[8px] py-[6px] rounded-[8px] hover:bg-[rgba(255,255,255,0.04)] transition-colors">
               <div className="relative size-[34px] rounded-[8px] overflow-hidden shrink-0">
-                <Avatar name={p.name} className="size-full object-cover" />
+                <Avatar name={p.name} srcOverride={isSelf(p.name) ? myHead : undefined} version={isSelf(p.name) ? skinVersion : undefined} className="size-full object-cover" />
                 <span className="dot-twinkle absolute -bottom-[1px] -right-[1px] size-[9px] rounded-full bg-[rgba(0,255,9,0.36)] shadow-[0px_0px_8.6px_0px_rgba(9,255,54,0.4)] border-2 border-[#14121c]" />
               </div>
               <span className="font-mono text-[14px] text-white/70 truncate">{p.name}</span>

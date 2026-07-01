@@ -2242,7 +2242,7 @@ export default function App() {
           )}
           {activeTab === 'chat' && (
             <div className="flex-1 min-h-0 min-w-0">
-              <ChatPanel username={username} isAdmin={isAdmin} onlinePlayers={serverStatus.players} />
+              <ChatPanel username={username} isAdmin={isAdmin} onlinePlayers={serverStatus.players} myHead={myHead} skinVersion={skinVersion} />
             </div>
           )}
           {activeTab === 'settings' && (
