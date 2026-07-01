@@ -89,6 +89,11 @@ contextBridge.exposeInMainWorld('launcher', {
   createQuest:  (data) => ipcRenderer.invoke('create-quest', data),
   updateQuest:  (data) => ipcRenderer.invoke('update-quest', data),
   deleteQuest:  (id) => ipcRenderer.invoke('delete-quest', id),
+  // ── PNJ configurables ──
+  getNpcs:      () => ipcRenderer.invoke('get-npcs'),
+  createNpc:    (data) => ipcRenderer.invoke('create-npc', data),
+  updateNpc:    (data) => ipcRenderer.invoke('update-npc', data),
+  deleteNpc:    (id) => ipcRenderer.invoke('delete-npc', id),
   getItemCatalog:    () => ipcRenderer.invoke('get-item-catalog'),
   getEntityCatalog:  () => ipcRenderer.invoke('get-entity-catalog'),
   getBlockCatalog:   () => ipcRenderer.invoke('get-block-catalog'),

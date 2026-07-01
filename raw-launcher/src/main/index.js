@@ -2346,6 +2346,7 @@ function normalizeShopRow([id, o]) {
     output: String(o.output ?? ''),
     outputQty: Number(o.outputQty) > 0 ? Math.floor(Number(o.outputQty)) : 1,
     maxUses: Number(o.maxUses) > 0 ? Math.floor(Number(o.maxUses)) : 0,
+    npc: String(o.npc ?? ''),
     createdAt: o.createdAt || 0,
   }
 }
@@ -2459,6 +2460,7 @@ function sanitizeShopOffer(input) {
     // Limite d'échanges par joueur (0 = illimité). Shop du jour : repart à zéro chaque
     // jour (les offres changent d'identifiant) ; boutique : limite à vie de l'offre.
     maxUses: Number.isFinite(+o.maxUses) && +o.maxUses > 0 ? Math.min(Math.floor(+o.maxUses), 9999) : 0,
+    npc: String(o.npc ?? '').trim().slice(0, 32), // PNJ propriétaire ("" = offre globale)
   }
 }
 
@@ -2711,6 +2713,7 @@ function sanitizeQuest(input) {
     maxClaims: mode === 'limited'
       ? (Number.isFinite(+o.maxClaims) && +o.maxClaims >= 1 ? Math.min(Math.floor(+o.maxClaims), 9999) : 1)
       : null,
+    npc: String(o.npc ?? '').trim().slice(0, 32), // PNJ propriétaire ("" = quête globale)
   }
 }
 function normalizeQuestRow([id, o]) {
@@ -2725,6 +2728,7 @@ function normalizeQuestRow([id, o]) {
     rewardQty: Number(o.rewardQty) > 0 ? Math.floor(Number(o.rewardQty)) : 1,
     mode: QUEST_MODES.has(o.mode) ? o.mode : 'once',
     maxClaims: Number(o.maxClaims) >= 1 ? Math.floor(Number(o.maxClaims)) : undefined,
+    npc: String(o.npc ?? ''),
     createdAt: o.createdAt || 0,
   }
 }
@@ -2807,6 +2811,84 @@ ipcMain.handle('delete-quest', async (_, id) => {
   if (!isValidPushId(id)) return { success: false, error: 'Quête introuvable.' }
   try {
     await firebaseRequest('DELETE', `/quests/${id}`, null, true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+// ─── PNJ CONFIGURABLES (/npcs/{slug} = {name, role}) ──────────────────────────
+// Un PNJ nommé, spawné en jeu par `/zigshop npc <slug>`, n'affiche que le contenu
+// (quêtes/offres) tagué `npc == slug`. Le slug est la CLÉ Firebase ET l'argument de
+// la commande → on l'écrit en PUT sur /npcs/{slug} (pas un push id).
+const NPC_ROLES = new Set(['quest', 'daily', 'store', 'race'])
+function sanitizeNpcSlug(v) {
+  return String(v ?? '').trim().toLowerCase().slice(0, 32).replace(/[^a-z0-9-]/g, '')
+}
+function sanitizeNpc(input) {
+  const o = (input && typeof input === 'object') ? input : {}
+  return {
+    name: String(o.name ?? '').trim().slice(0, 60),
+    role: NPC_ROLES.has(o.role) ? o.role : 'quest',
+  }
+}
+async function fetchNpcs() {
+  const map = normalizeFbMap(await firebaseRequest('GET', '/npcs', null, false))
+  return Object.entries(map)
+    .filter(([, o]) => o && typeof o === 'object')
+    .map(([id, o]) => ({ id, name: String(o.name ?? ''), role: NPC_ROLES.has(o.role) ? o.role : 'quest', createdAt: o.createdAt || 0 }))
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+}
+
+ipcMain.handle('get-npcs', async () => {
+  if (!isFirebaseConfigured()) return { success: false, npcs: [] }
+  try {
+    return { success: true, npcs: await fetchNpcs() }
+  } catch (e) {
+    return { success: false, npcs: [], error: e.message }
+  }
+})
+
+ipcMain.handle('create-npc', async (_, data = {}) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  const slug = sanitizeNpcSlug(data.id)
+  const npc = sanitizeNpc(data)
+  if (!slug) return { success: false, error: 'Identifiant invalide (lettres, chiffres, tirets).' }
+  if (!npc.name) return { success: false, error: 'Donne un nom au PNJ.' }
+  try {
+    const existing = await firebaseRequest('GET', `/npcs/${slug}`, null, false)
+    if (existing && typeof existing === 'object') return { success: false, error: `L'identifiant « ${slug} » est déjà pris.` }
+    await firebaseRequest('PUT', `/npcs/${slug}`, { ...npc, createdAt: Date.now() }, true)
+    return { success: true, id: slug }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle('update-npc', async (_, { id, ...data } = {}) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  const slug = sanitizeNpcSlug(id)
+  if (!slug) return { success: false, error: 'PNJ introuvable.' }
+  try {
+    await firebaseRequest('PATCH', `/npcs/${slug}`, sanitizeNpc(data), true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle('delete-npc', async (_, id) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  const slug = sanitizeNpcSlug(id)
+  if (!slug) return { success: false, error: 'PNJ introuvable.' }
+  try {
+    await firebaseRequest('DELETE', `/npcs/${slug}`, null, true)
     return { success: true }
   } catch (e) {
     return { success: false, error: e.message }

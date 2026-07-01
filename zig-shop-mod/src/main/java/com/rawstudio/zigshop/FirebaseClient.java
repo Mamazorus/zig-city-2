@@ -80,6 +80,24 @@ public final class FirebaseClient {
         return out;
     }
 
+    /** Config d'un PNJ configurable ({@code /npcs/{id}} : {@code {name, role}}). */
+    public record NpcConfig(String role, String name) {}
+
+    /** Lit la config d'un PNJ ({@code /npcs/{npcId}}). {@code null} si introuvable ou sans rôle. */
+    public static CompletableFuture<NpcConfig> fetchNpc(String npcId) {
+        return getJson("/npcs/" + npcId).thenApply(FirebaseClient::parseNpc);
+    }
+
+    private static NpcConfig parseNpc(String body) {
+        if (body == null || body.isBlank()) return null;
+        JsonElement root = JsonParser.parseString(body);
+        if (root == null || !root.isJsonObject()) return null;
+        JsonObject o = root.getAsJsonObject();
+        String role = str(o, "role");
+        if (role.isBlank()) return null;
+        return new NpcConfig(role, str(o, "name"));
+    }
+
     private static List<QuestDef> parseQuests(String body) {
         List<QuestDef> out = new ArrayList<>();
         if (body == null || body.isBlank()) return out;
@@ -98,7 +116,8 @@ public final class FirebaseClient {
                     str(o, "rewardItem"),
                     intVal(o, "rewardQty"),
                     strOr(o, "mode", "once"),   // rétrocompat : sans mode = once
-                    intOr(o, "maxClaims", 0)
+                    intOr(o, "maxClaims", 0),
+                    str(o, "npc")               // PNJ propriétaire ("" = quête globale)
             ));
         }
         return out;
@@ -216,7 +235,8 @@ public final class FirebaseClient {
                     intVal(o, "inputQty"),
                     str(o, "output"),
                     intVal(o, "outputQty"),
-                    maxUsesVal(o)
+                    maxUsesVal(o),
+                    str(o, "npc")               // PNJ propriétaire ("" = offre globale)
             ));
         }
         return out;

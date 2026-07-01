@@ -31,18 +31,27 @@ import java.util.List;
 public final class QuestServerHandler {
     private QuestServerHandler() {}
 
-    /** Envoie l'écran de quêtes NON-uniques (PNJ « quest »). */
+    /** Envoie l'écran de quêtes NON-uniques (PNJ « quest » générique). */
     public static void openFor(ServerPlayer player, List<QuestDef> quests) {
-        openFor(player, quests, false);
+        openFor(player, quests, false, null);
     }
 
-    /** Envoie l'écran, filtré : {@code uniqueOnly=true} → quêtes {@code unique} ; sinon les autres. */
+    /** Envoie l'écran d'un PNJ générique (quêtes globales, filtre uniqueOnly). */
     public static void openFor(ServerPlayer player, List<QuestDef> quests, boolean uniqueOnly) {
-        PacketDistributor.sendToPlayer(player, new OpenQuestsPayload(buildJson(player, quests, uniqueOnly)));
+        openFor(player, quests, uniqueOnly, null);
     }
 
-    /** Sérialise les quêtes (filtrées) + l'état du joueur en JSON pour l'écran. */
-    public static String buildJson(ServerPlayer player, List<QuestDef> quests, boolean uniqueOnly) {
+    /**
+     * Envoie l'écran, filtré par PNJ : {@code npcId} défini → uniquement SES quêtes (tous
+     * modes) ; {@code npcId} null → quêtes globales (sans {@code npc}) filtrées par
+     * {@code uniqueOnly} (comportement historique des PNJ « quest » / « questspecial »).
+     */
+    public static void openFor(ServerPlayer player, List<QuestDef> quests, boolean uniqueOnly, @Nullable String npcId) {
+        PacketDistributor.sendToPlayer(player, new OpenQuestsPayload(buildJson(player, quests, uniqueOnly, npcId)));
+    }
+
+    /** Sérialise les quêtes (filtrées par PNJ + mode) + l'état du joueur en JSON pour l'écran. */
+    public static String buildJson(ServerPlayer player, List<QuestDef> quests, boolean uniqueOnly, @Nullable String npcId) {
         long now = System.currentTimeMillis();
         MinecraftServer server = player.getServer();
         QuestWinnersData winners = server != null ? QuestWinnersData.get(server) : null;
@@ -50,11 +59,21 @@ public final class QuestServerHandler {
         JsonArray arr = new JsonArray();
         if (quests != null) {
             for (QuestDef q : quests) {
-                boolean isUnique = "unique".equals(q.mode());
-                if (isUnique != uniqueOnly) {
-                    continue; // ce PNJ n'affiche pas ce type de quête
+                String qNpc = (q.npc() == null) ? "" : q.npc();
+                if (npcId != null) {
+                    if (!npcId.equals(qNpc)) {
+                        continue; // PNJ nommé : uniquement SES quêtes (tous modes confondus)
+                    }
+                } else {
+                    if (!qNpc.isBlank()) {
+                        continue; // PNJ générique : ignore les quêtes rattachées à un PNJ nommé
+                    }
+                    if ("unique".equals(q.mode()) != uniqueOnly) {
+                        continue; // générique : sépare quêtes unique / non-unique (PNJ dédié)
+                    }
                 }
-                QuestState.refreshDaily(player, q.id(), now); // ré-arme les daily arrivées à échéance
+                QuestState.refreshDaily(player, q.id(), now);
+                boolean isUnique = "unique".equals(q.mode()); // ré-arme les daily arrivées à échéance
                 JsonObject o = new JsonObject();
                 o.addProperty("id", q.id());
                 o.addProperty("title", q.title());
@@ -95,7 +114,8 @@ public final class QuestServerHandler {
             if (q != null) {
                 QuestState.accept(player, q);
             }
-            openFor(player, list, q != null && "unique".equals(q.mode()));
+            // Renvoie l'écran filtré comme le PNJ d'origine : le npc de la quête indique son PNJ.
+            openFor(player, list, q != null && "unique".equals(q.mode()), npcOf(q));
         }));
     }
 
@@ -110,7 +130,7 @@ public final class QuestServerHandler {
             }
             QuestDef q = find(list, questId);
             if (q == null) {
-                openFor(player, list, false);
+                openFor(player, list, false, null);
                 return;
             }
             long now = System.currentTimeMillis();
@@ -120,7 +140,7 @@ public final class QuestServerHandler {
             } else if (QuestState.claim(player, questId, now) == QuestState.ClaimResult.OK) {
                 giveReward(player, q);
             }
-            openFor(player, list, unique);
+            openFor(player, list, unique, npcOf(q));
         }));
     }
 
@@ -163,6 +183,16 @@ public final class QuestServerHandler {
                 player.drop(reward, false);
             }
         }
+    }
+
+    /** npc d'une quête, normalisé : null si absente/globale (→ écran générique). */
+    @Nullable
+    private static String npcOf(@Nullable QuestDef q) {
+        if (q == null) {
+            return null;
+        }
+        String n = q.npc();
+        return (n == null || n.isBlank()) ? null : n;
     }
 
     @Nullable

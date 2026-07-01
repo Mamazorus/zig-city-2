@@ -5,7 +5,7 @@ import { ItemIcon } from './item-icon'
 import { type ItemIconDesc } from './block-renderer'
 import { ImageCropper } from './image-cropper'
 
-type AdminTab = 'news' | 'admins' | 'players' | 'channels' | 'shop' | 'quests' | 'backgrounds'
+type AdminTab = 'news' | 'admins' | 'players' | 'channels' | 'shop' | 'quests' | 'npcs' | 'backgrounds'
 
 // Image de fond d'écran (miroir local de window.d.ts).
 interface BackgroundImage {
@@ -56,6 +56,7 @@ interface ShopOfferRow {
   output: string
   outputQty: number
   maxUses?: number
+  npc?: string
   createdAt?: number
   inputIcon?: ItemIconDesc | null
   outputIcon?: ItemIconDesc | null
@@ -78,14 +79,21 @@ interface QuestDef {
   amount: number
   mode: QuestMode
   maxClaims?: number
+  npc?: string
   rewardItem: string
   rewardQty: number
   createdAt?: number
   rewardIcon?: ItemIconDesc | null
   winner?: QuestWinner | null
 }
-type QuestForm = { title: string; description: string; type: QuestType; target: string; amount: number; mode: QuestMode; maxClaims: number; rewardItem: string; rewardQty: number }
-const EMPTY_QUEST: QuestForm = { title: '', description: '', type: 'kill', target: '', amount: 1, mode: 'once', maxClaims: 10, rewardItem: '', rewardQty: 1 }
+type QuestForm = { title: string; description: string; type: QuestType; target: string; amount: number; mode: QuestMode; maxClaims: number; rewardItem: string; rewardQty: number; npc: string }
+const EMPTY_QUEST: QuestForm = { title: '', description: '', type: 'kill', target: '', amount: 1, mode: 'once', maxClaims: 10, rewardItem: '', rewardQty: 1, npc: '' }
+
+// ── PNJ configurables (miroirs de window.d.ts) ──
+type NpcRole = 'quest' | 'daily' | 'store' | 'race'
+interface NpcDef { id: string; name: string; role: NpcRole; createdAt?: number }
+type NpcForm = { id: string; name: string; role: NpcRole }
+const NPC_ROLE_LABEL: Record<NpcRole, string> = { quest: 'Quêtes', daily: 'Shop du jour', store: 'Boutique', race: 'Course' }
 
 interface ShopConfigState { currencyName: string; currencyItem: string; currencyIcon: string }
 
@@ -393,6 +401,21 @@ export default function AdminDashboard({
   const [questMsg, setQuestMsg] = useState<string | null>(null)
   const [questTargetAny, setQuestTargetAny] = useState(false) // cible = « n'importe lequel » (wildcard)
 
+  // ── PNJ configurables (contenu regroupé par PNJ) ──
+  const [npcs, setNpcs] = useState<NpcDef[]>([])
+  const [npcLoading, setNpcLoading] = useState(false)
+  const [selectedNpc, setSelectedNpc] = useState<NpcDef | null>(null)
+  const [showNpcForm, setShowNpcForm] = useState(false)
+  const [npcForm, setNpcForm] = useState<NpcForm>({ id: '', name: '', role: 'quest' })
+  const [savingNpc, setSavingNpc] = useState(false)
+  const [confirmDeleteNpc, setConfirmDeleteNpc] = useState<string | null>(null)
+  const [npcMsg, setNpcMsg] = useState<string | null>(null)
+  // Contexte PNJ actif : null = onglets globaux (contenu sans npc) ; sinon fiche d'un PNJ (filtre + tag).
+  const npcContext = (tab === 'npcs' && selectedNpc) ? selectedNpc.id : null
+  // Contenu visible dans le contexte courant (global = npc vide ; fiche PNJ = son npc).
+  const visibleOffers = dayOffers.filter(o => (o.npc || '') === (npcContext || ''))
+  const visibleQuests = quests.filter(q => (q.npc || '') === (npcContext || ''))
+
   // ── Fonds d'écran : galerie d'images (le launcher en tire une au hasard au lancement) ──
   const [backgrounds, setBackgrounds] = useState<BackgroundImage[]>([])
   const [backgroundsLoading, setBackgroundsLoading] = useState(false)
@@ -440,7 +463,7 @@ export default function AdminDashboard({
       }
     } finally { setShopLoading(false) }
   }, [dayOffset, shopCat])
-  useEffect(() => { if (tab === 'shop') loadShopDay() }, [tab, loadShopDay])
+  useEffect(() => { if (tab === 'shop' || (tab === 'npcs' && selectedNpc && selectedNpc.role !== 'quest')) loadShopDay() }, [tab, selectedNpc, loadShopDay])
 
   // Icônes des items en cours de saisie dans le formulaire (aperçu live, debouncé).
   const [offerIcons, setOfferIcons] = useState<Record<string, ItemIconDesc | ''>>({})
@@ -865,14 +888,19 @@ export default function AdminDashboard({
   const cancelOfferForm = () => { setShowOfferForm(false); setEditingOfferId(null); setOfferMsg(null) }
 
   // Aiguille les écritures vers la bonne catégorie : jour daté / boutique / course.
-  const createOfferApi = (data: OfferForm) =>
-    shopCat === 'race' ? window.launcher.createShopRaceOffer(data)
-      : shopCat === 'store' ? window.launcher.createShopStoreOffer(data)
-        : window.launcher.createShopOffer({ date: shopDayKey, ...data })
-  const updateOfferApi = (id: string, data: OfferForm) =>
-    shopCat === 'race' ? window.launcher.updateShopRaceOffer({ id, ...data })
-      : shopCat === 'store' ? window.launcher.updateShopStoreOffer({ id, ...data })
-        : window.launcher.updateShopOffer({ date: shopDayKey, id, ...data })
+  // Tague l'offre avec le PNJ courant (npcContext) — vide = offre globale.
+  const createOfferApi = (data: OfferForm) => {
+    const d = { ...data, npc: npcContext ?? '' }
+    return shopCat === 'race' ? window.launcher.createShopRaceOffer(d)
+      : shopCat === 'store' ? window.launcher.createShopStoreOffer(d)
+        : window.launcher.createShopOffer({ date: shopDayKey, ...d })
+  }
+  const updateOfferApi = (id: string, data: OfferForm) => {
+    const d = { ...data, npc: npcContext ?? '' }
+    return shopCat === 'race' ? window.launcher.updateShopRaceOffer({ id, ...d })
+      : shopCat === 'store' ? window.launcher.updateShopStoreOffer({ id, ...d })
+        : window.launcher.updateShopOffer({ date: shopDayKey, id, ...d })
+  }
   const deleteOfferApi = (id: string) =>
     shopCat === 'race' ? window.launcher.deleteShopRaceOffer({ id })
       : shopCat === 'store' ? window.launcher.deleteShopStoreOffer({ id })
@@ -971,7 +999,39 @@ export default function AdminDashboard({
       if (r.success) setQuests(r.quests)
     } finally { setQuestLoading(false) }
   }, [])
-  useEffect(() => { if (tab === 'quests') loadQuests() }, [tab, loadQuests])
+  useEffect(() => { if (tab === 'quests' || (tab === 'npcs' && selectedNpc?.role === 'quest')) loadQuests() }, [tab, selectedNpc, loadQuests])
+
+  // ── PNJ : chargement de la liste + CRUD des fiches ──
+  const loadNpcs = useCallback(async () => {
+    setNpcLoading(true)
+    try { const r = await window.launcher.getNpcs(); if (r.success) setNpcs(r.npcs) } finally { setNpcLoading(false) }
+  }, [])
+  useEffect(() => { if (tab === 'npcs') loadNpcs() }, [tab, loadNpcs])
+
+  const slugify = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32)
+  const openCreateNpc = () => { setNpcForm({ id: '', name: '', role: 'quest' }); setShowNpcForm(true); setNpcMsg(null); setConfirmDeleteNpc(null) }
+  const openNpc = (npc: NpcDef) => {
+    setSelectedNpc(npc); setShowNpcForm(false); setNpcMsg(null)
+    setShowQuestForm(false); setShowOfferForm(false); setShowLibrary(false)
+    if (npc.role !== 'quest') setShopCat(npc.role as 'daily' | 'store' | 'race')
+  }
+  const closeNpc = () => { setSelectedNpc(null); setShowQuestForm(false); setShowOfferForm(false) }
+  const saveNpc = async () => {
+    const id = slugify(npcForm.id || npcForm.name)
+    if (!npcForm.name.trim()) { setNpcMsg('Donne un nom au PNJ.'); return }
+    if (!id) { setNpcMsg('Identifiant invalide (lettres/chiffres).'); return }
+    setSavingNpc(true)
+    try {
+      const res = await window.launcher.createNpc({ id, name: npcForm.name.trim(), role: npcForm.role })
+      if (!res.success) { setNpcMsg(res.error || 'Échec de la création.'); return }
+      setShowNpcForm(false); await loadNpcs()
+    } finally { setSavingNpc(false) }
+  }
+  const doDeleteNpc = async (id: string) => {
+    const res = await window.launcher.deleteNpc(id)
+    setConfirmDeleteNpc(null)
+    if (res.success) { if (selectedNpc?.id === id) setSelectedNpc(null); await loadNpcs() }
+  }
 
   // Icône de la récompense en cours de saisie (aperçu live dans le formulaire, debouncé).
   const [questRewardIcon, setQuestRewardIcon] = useState<Record<string, ItemIconDesc | ''>>({})
@@ -1005,7 +1065,7 @@ export default function AdminDashboard({
       title: q.title, description: q.description,
       type: q.type ?? 'kill', target: q.target ?? '', amount: q.amount ?? 1,
       mode: q.mode ?? 'once', maxClaims: q.maxClaims ?? 10,
-      rewardItem: q.rewardItem, rewardQty: q.rewardQty ?? 1,
+      rewardItem: q.rewardItem, rewardQty: q.rewardQty ?? 1, npc: q.npc ?? '',
     })
     const t = (q.target ?? '').trim()
     setQuestTargetAny(t === '' || t === '*')
@@ -1029,6 +1089,7 @@ export default function AdminDashboard({
         maxClaims: Math.max(1, Math.floor(questForm.maxClaims) || 1),
         rewardItem: questForm.rewardItem.trim(),
         rewardQty: Math.max(1, Math.floor(questForm.rewardQty) || 1),
+        npc: npcContext ?? '', // rattache la quête au PNJ courant (vide = quête globale)
       }
       const res = editingQuestId
         ? await window.launcher.updateQuest({ id: editingQuestId, ...payload })
@@ -1056,12 +1117,12 @@ export default function AdminDashboard({
         <div className="flex flex-col gap-[2px]">
           <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px] leading-none">Administration</p>
           <p className="font-ui text-[14px] text-white/40 tracking-[-0.3px]">
-            {tab === 'news' ? 'Gestion du contenu' : tab === 'admins' ? 'Gestion des accès' : tab === 'players' ? 'Carrousel d\'accueil' : tab === 'channels' ? 'Salons de discussion' : tab === 'shop' ? 'Boutique du serveur' : tab === 'quests' ? 'Quêtes du serveur' : 'Fonds d\'écran du launcher'}
+            {tab === 'news' ? 'Gestion du contenu' : tab === 'admins' ? 'Gestion des accès' : tab === 'players' ? 'Carrousel d\'accueil' : tab === 'channels' ? 'Salons de discussion' : tab === 'shop' ? 'Boutique du serveur' : tab === 'quests' ? 'Quêtes du serveur' : tab === 'npcs' ? 'PNJ configurables' : 'Fonds d\'écran du launcher'}
           </p>
         </div>
 
         <div className="flex gap-[3px] bg-[rgba(0,0,0,0.22)] border border-[rgba(255,255,255,0.06)] rounded-full p-[3px]">
-          {(['news', 'admins', 'players', 'channels', 'shop', 'quests', 'backgrounds'] as AdminTab[]).map(t => (
+          {(['news', 'admins', 'players', 'channels', 'shop', 'quests', 'npcs', 'backgrounds'] as AdminTab[]).map(t => (
             <button
               key={t}
               className={`font-ui text-[14px] tracking-[-0.3px] px-[14px] h-[28px] rounded-full transition-colors ${
@@ -1069,9 +1130,9 @@ export default function AdminDashboard({
                   ? 'bg-[rgba(255,255,255,0.12)] text-white font-semibold'
                   : 'text-white/40 hover:text-white/70'
               }`}
-              onClick={() => { setTab(t); setShowForm(false); setConfirmDeleteId(null); setConfirmRemoveAdmin(null); setConfirmRemovePlayer(null); setPlayersMsg(null); setShowChannelForm(false); setConfirmDeleteChannel(null); setChannelMsg(null); setShowOfferForm(false); setConfirmDeleteOffer(null); setOfferMsg(null); setShopMsg(null); setShowQuestForm(false); setConfirmDeleteQuest(null); setQuestMsg(null); setConfirmDeleteBg(null); setBgError(null) }}
+              onClick={() => { setTab(t); setShowForm(false); setConfirmDeleteId(null); setConfirmRemoveAdmin(null); setConfirmRemovePlayer(null); setPlayersMsg(null); setShowChannelForm(false); setConfirmDeleteChannel(null); setChannelMsg(null); setShowOfferForm(false); setConfirmDeleteOffer(null); setOfferMsg(null); setShopMsg(null); setShowQuestForm(false); setConfirmDeleteQuest(null); setQuestMsg(null); setConfirmDeleteBg(null); setBgError(null); setSelectedNpc(null); setShowNpcForm(false); setConfirmDeleteNpc(null); setNpcMsg(null) }}
             >
-              {t === 'news' ? 'Actualités' : t === 'admins' ? 'Administrateurs' : t === 'players' ? 'Joueurs' : t === 'channels' ? 'Salons' : t === 'shop' ? 'Shop' : t === 'quests' ? 'Quêtes' : 'Fonds'}
+              {t === 'news' ? 'Actualités' : t === 'admins' ? 'Administrateurs' : t === 'players' ? 'Joueurs' : t === 'channels' ? 'Salons' : t === 'shop' ? 'Shop' : t === 'quests' ? 'Quêtes' : t === 'npcs' ? 'PNJ' : 'Fonds'}
             </button>
           ))}
         </div>
@@ -1814,7 +1875,110 @@ export default function AdminDashboard({
         )}
 
         {/* ═══ ONGLET SHOP ═══ */}
-        {tab === 'shop' && (
+        {/* ── ONGLET PNJ : liste + création ── */}
+        {tab === 'npcs' && !selectedNpc && (
+          <div className="flex flex-col gap-[14px]">
+            <div className="flex items-center justify-between h-[34px] shrink-0">
+              <p className="font-ui text-[14px] text-white/40 tracking-[-0.3px]">
+                {npcs.length} PNJ · clique pour gérer son contenu
+              </p>
+              {!showNpcForm && (
+                <button
+                  className="flex items-center gap-[7px] bg-white text-[#0e0b16] font-ui font-bold text-[14px] tracking-[-0.3px] px-[16px] h-[34px] rounded-[12px] hover:bg-white/90 active:scale-[0.98] transition-all"
+                  onClick={openCreateNpc}
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="4.85" y="1" width="2.3" height="10" rx="1.15" /><rect x="1" y="4.85" width="10" height="2.3" rx="1.15" /></svg>
+                  Nouveau PNJ
+                </button>
+              )}
+            </div>
+
+            {showNpcForm && (
+              <div className="bg-[rgba(0,0,0,0.28)] border border-[rgba(0,255,225,0.18)] rounded-[12px] p-[18px] flex flex-col gap-[14px]">
+                <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px]">Nouveau PNJ</p>
+                <div className="grid grid-cols-2 gap-[12px]">
+                  <div className="flex flex-col">
+                    <p className={labelCls}>Nom <span className="text-white/30">*</span></p>
+                    <input className={inputCls} maxLength={60} placeholder="Ex : Marchand des donjons"
+                      value={npcForm.name}
+                      onChange={e => setNpcForm(f => ({ ...f, name: e.target.value, id: f.id ? f.id : slugify(e.target.value) }))} />
+                  </div>
+                  <div className="flex flex-col">
+                    <p className={labelCls}>Identifiant (commande)</p>
+                    <input className={inputCls} maxLength={32} autoComplete="off" spellCheck={false} placeholder="marchand-donjons"
+                      value={npcForm.id}
+                      onChange={e => setNpcForm(f => ({ ...f, id: slugify(e.target.value) }))} />
+                  </div>
+                </div>
+                <div className="flex flex-col">
+                  <p className={labelCls}>Rôle</p>
+                  <div className="flex flex-wrap gap-[4px] p-[3px] rounded-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.06)] w-fit">
+                    {(['quest', 'daily', 'store', 'race'] as NpcRole[]).map(r => (
+                      <button key={r} type="button" onClick={() => setNpcForm(f => ({ ...f, role: r }))}
+                        className={`font-ui text-[13px] tracking-[-0.3px] px-[12px] h-[30px] rounded-[9px] transition-colors ${npcForm.role === r ? 'bg-white text-[#0e0b16] font-semibold' : 'text-white/55 hover:text-white hover:bg-[rgba(255,255,255,0.06)]'}`}>
+                        {NPC_ROLE_LABEL[r]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="font-ui text-[12px] text-white/35 tracking-[-0.3px]">
+                  En jeu : <span className="text-white/60">/zigshop npc {slugify(npcForm.id || npcForm.name) || '…'}</span>
+                </p>
+                {npcMsg && <p className="font-ui text-[13px] text-[rgba(255,120,120,0.9)]">{npcMsg}</p>}
+                <div className="flex gap-[8px] justify-end pt-[4px]">
+                  <button className="font-ui text-[14px] text-white/40 px-[14px] h-[34px] rounded-[12px] hover:bg-[rgba(255,255,255,0.05)] hover:text-white/70 transition-colors" onClick={() => { setShowNpcForm(false); setNpcMsg(null) }}>Annuler</button>
+                  <button className="font-ui font-bold text-[14px] tracking-[-0.3px] bg-white text-[#0e0b16] px-[18px] h-[34px] rounded-[12px] hover:bg-white/90 disabled:opacity-30 disabled:hover:bg-white active:scale-[0.98] transition-all" disabled={savingNpc || !npcForm.name.trim()} onClick={saveNpc}>{savingNpc ? 'Création…' : 'Créer'}</button>
+                </div>
+              </div>
+            )}
+
+            {npcLoading ? (
+              <p className="font-ui text-[14px] text-white/25 text-center py-[40px]">Chargement…</p>
+            ) : npcs.length === 0 ? (
+              <div className="flex flex-col items-center gap-[14px] py-[60px]">
+                <p className="font-ui text-[14px] text-white/30 tracking-[-0.3px]">Aucun PNJ configuré</p>
+                {!showNpcForm && (
+                  <button className="flex items-center gap-[7px] bg-white text-[#0e0b16] font-ui font-bold text-[14px] tracking-[-0.3px] px-[16px] h-[34px] rounded-[12px] hover:bg-white/90 active:scale-[0.98] transition-all" onClick={openCreateNpc}>Créer le premier PNJ</button>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-[8px]">
+                {npcs.map(n => (
+                  <div key={n.id} className="flex items-center gap-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[8px] p-[10px] group hover:bg-[rgba(255,255,255,0.06)] hover:border-[rgba(255,255,255,0.12)] transition-colors">
+                    <button className="flex-1 min-w-0 flex flex-col gap-[3px] text-left" onClick={() => openNpc(n)}>
+                      <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px] truncate">{n.name}</p>
+                      <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px] truncate">{NPC_ROLE_LABEL[n.role]} · /zigshop npc {n.id}</p>
+                    </button>
+                    {confirmDeleteNpc === n.id ? (
+                      <div className="flex gap-[6px] items-center shrink-0">
+                        <span className="font-ui text-[14px] text-white/40">Supprimer ?</span>
+                        <button className="font-ui text-[14px] text-[rgba(255,100,100,0.8)] hover:text-[rgba(255,120,120,1)] px-[10px] py-[5px] rounded-[8px] bg-[rgba(255,60,60,0.1)] border border-[rgba(255,60,60,0.2)] transition-colors" onClick={() => doDeleteNpc(n.id)}>Confirmer</button>
+                        <button className="font-ui text-[14px] text-white/30 hover:text-white/60 px-[10px] py-[5px] rounded-[8px] hover:bg-[rgba(255,255,255,0.05)] transition-colors" onClick={() => setConfirmDeleteNpc(null)}>Annuler</button>
+                      </div>
+                    ) : (
+                      <button className="flex items-center justify-center size-[38px] rounded-[10px] text-white/40 hover:text-[rgba(255,120,120,0.95)] hover:bg-[rgba(255,60,60,0.12)] transition-colors opacity-0 group-hover:opacity-100 shrink-0" onClick={() => setConfirmDeleteNpc(n.id)} title="Supprimer le PNJ">
+                        <svg width="15" height="16" viewBox="0 0 11 12" fill="currentColor"><rect x="0.6" y="2.1" width="9.8" height="2.2" rx="1.1" /><rect x="3.6" y="0.4" width="3.8" height="2.1" rx="1" /><path d="M1.55 4.6h7.9l-.62 6.1a1.05 1.05 0 0 1-1.04.9H3.21a1.05 1.05 0 0 1-1.04-.9L1.55 4.6Z" /></svg>
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* En-tête de la fiche d'un PNJ (au-dessus de sa section quêtes/offres) */}
+        {tab === 'npcs' && selectedNpc && (
+          <div className="flex items-center gap-[12px] mb-[14px] shrink-0">
+            <button className="flex items-center gap-[5px] font-ui text-[14px] text-white/50 hover:text-white px-[12px] h-[34px] rounded-[10px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.08)] transition-colors" onClick={closeNpc}>← PNJ</button>
+            <div className="flex flex-col min-w-0">
+              <p className="font-ui font-semibold text-[15px] text-white tracking-[-0.4px] truncate">{selectedNpc.name}</p>
+              <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px] truncate">{NPC_ROLE_LABEL[selectedNpc.role]} · /zigshop npc {selectedNpc.id}</p>
+            </div>
+          </div>
+        )}
+
+        {(tab === 'shop' || (tab === 'npcs' && selectedNpc != null && selectedNpc.role !== 'quest')) && (
           <div className="flex flex-col gap-[14px]">
 
             {/* Réglages : la monnaie */}
@@ -1882,7 +2046,8 @@ export default function AdminDashboard({
               </div>
             </div>
 
-            {/* Sélecteur de catégorie : shop du jour (calendrier) vs boutique (offres fixes) */}
+            {/* Sélecteur de catégorie (masqué en fiche PNJ : son rôle fixe déjà la catégorie) */}
+            {!npcContext && (
             <div className="flex items-center gap-[4px] p-[3px] rounded-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] w-fit shrink-0">
               {([['daily', 'Shop du jour'], ['store', 'Boutique'], ['race', 'Course']] as const).map(([key, label]) => (
                 <button
@@ -1894,6 +2059,7 @@ export default function AdminDashboard({
                 </button>
               ))}
             </div>
+            )}
 
             {/* Sélecteur de jour (shop du jour seulement) + nouvelle offre */}
             <div className="flex items-center justify-between h-[34px] shrink-0">
@@ -2093,7 +2259,7 @@ export default function AdminDashboard({
               </div>
             ) : shopLoading ? (
               <p className="font-ui text-[14px] text-white/25 text-center py-[40px]">Chargement…</p>
-            ) : dayOffers.length === 0 ? (
+            ) : visibleOffers.length === 0 ? (
               <div className="flex flex-col items-center gap-[14px] py-[60px]">
                 <p className="font-ui text-[14px] text-white/30 tracking-[-0.3px]">{shopCat === 'race' ? 'Aucune course en cours' : shopCat === 'store' ? 'Aucune offre dans la boutique' : `Aucune offre pour ${dayOffset === 0 ? "aujourd'hui" : 'ce jour'}`}</p>
                 {!showOfferForm && (
@@ -2107,7 +2273,7 @@ export default function AdminDashboard({
               </div>
             ) : (
               <div className="flex flex-col gap-[8px]">
-                {dayOffers.map(o => (
+                {visibleOffers.map(o => (
                   <div
                     key={o.id}
                     className="flex items-center gap-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[8px] p-[10px] group hover:bg-[rgba(255,255,255,0.06)] hover:border-[rgba(255,255,255,0.12)] transition-colors"
@@ -2192,13 +2358,13 @@ export default function AdminDashboard({
         )}
 
         {/* ═══ ONGLET QUÊTES ═══ */}
-        {tab === 'quests' && (
+        {(tab === 'quests' || (tab === 'npcs' && selectedNpc?.role === 'quest')) && (
           <div className="flex flex-col gap-[14px]">
 
             {/* Barre supérieure */}
             <div className="flex items-center justify-between h-[34px] shrink-0">
               <p className="font-ui text-[14px] text-white/40 tracking-[-0.3px]">
-                {quests.length} quête{quests.length !== 1 ? 's' : ''} · tuer des mobs pour une récompense
+                {visibleQuests.length} quête{visibleQuests.length !== 1 ? 's' : ''}{npcContext ? ' · pour ce PNJ' : ' · globales'}
               </p>
               {!showQuestForm && (
                 <button
@@ -2392,7 +2558,7 @@ export default function AdminDashboard({
             {/* Liste des quêtes */}
             {questLoading ? (
               <p className="font-ui text-[14px] text-white/25 text-center py-[40px]">Chargement…</p>
-            ) : quests.length === 0 ? (
+            ) : visibleQuests.length === 0 ? (
               <div className="flex flex-col items-center gap-[14px] py-[60px]">
                 <p className="font-ui text-[14px] text-white/30 tracking-[-0.3px]">Aucune quête</p>
                 {!showQuestForm && (
@@ -2406,7 +2572,7 @@ export default function AdminDashboard({
               </div>
             ) : (
               <div className="flex flex-col gap-[8px]">
-                {quests.map(q => (
+                {visibleQuests.map(q => (
                   <div
                     key={q.id}
                     className="flex items-center gap-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[8px] p-[10px] group hover:bg-[rgba(255,255,255,0.06)] hover:border-[rgba(255,255,255,0.12)] transition-colors"

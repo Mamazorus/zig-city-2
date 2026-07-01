@@ -117,6 +117,7 @@ interface ShopOffer {
   output: string
   outputQty: number
   maxUses?: number // limite d'échanges par joueur (0/absent = illimité)
+  npc?: string     // PNJ propriétaire ("" = offre globale)
   createdAt?: number
   inputIcon?: import('../block-renderer').ItemIconDesc | null
   outputIcon?: import('../block-renderer').ItemIconDesc | null
@@ -128,6 +129,7 @@ type ShopOfferForm = {
   output: string
   outputQty: number
   maxUses: number // limite d'échanges par joueur (0 = illimité)
+  npc?: string
 }
 
 // Type d'objectif d'une quête (verbe) et mode de répétition.
@@ -152,6 +154,7 @@ interface QuestDef {
   amount: number
   mode: QuestMode
   maxClaims?: number
+  npc?: string
   rewardItem: string
   rewardQty: number
   createdAt?: number
@@ -168,7 +171,13 @@ type QuestForm = {
   maxClaims: number
   rewardItem: string
   rewardQty: number
+  npc: string
 }
+
+// PNJ configurable (/npcs/{id}) : rôle + nom, spawné en jeu par `/zigshop npc <id>`.
+type NpcRole = 'quest' | 'daily' | 'store' | 'race'
+interface NpcDef { id: string; name: string; role: NpcRole; createdAt?: number }
+type NpcForm = { id: string; name: string; role: NpcRole }
 
 // Entrée du catalogue d'items (extrait des jars du modpack installé) pour
 // l'autocomplétion de l'identifiant d'item côté admin.
@@ -278,6 +287,10 @@ declare global {
       createQuest: (data: QuestForm) => Promise<{ success: boolean; id?: string; error?: string }>
       updateQuest: (data: { id: string } & Partial<QuestForm>) => Promise<{ success: boolean; error?: string }>
       deleteQuest: (id: string) => Promise<{ success: boolean; error?: string }>
+      getNpcs: () => Promise<{ success: boolean; npcs: NpcDef[]; error?: string }>
+      createNpc: (data: NpcForm) => Promise<{ success: boolean; id?: string; error?: string }>
+      updateNpc: (data: { id: string; name?: string; role?: NpcRole }) => Promise<{ success: boolean; error?: string }>
+      deleteNpc: (id: string) => Promise<{ success: boolean; error?: string }>
       getItemCatalog: () => Promise<{ success: boolean; items: ItemCatalogEntry[]; error?: string }>
       getEntityCatalog: () => Promise<{ success: boolean; entities: EntityCatalogEntry[]; error?: string }>
       getBlockCatalog: () => Promise<{ success: boolean; blocks: BlockCatalogEntry[]; error?: string }>

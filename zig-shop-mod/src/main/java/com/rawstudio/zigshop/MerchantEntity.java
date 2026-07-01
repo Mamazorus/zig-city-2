@@ -71,6 +71,9 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
     private final Map<String, Integer> offerMaxUses = new HashMap<>();
     /** Compteur GLOBAL (mode "race") : identifiant d'offre → nombre total d'échanges (tous joueurs confondus). */
     private final Map<String, Integer> raceCounts = new HashMap<>();
+    /** Identifiant du PNJ configurable (null = PNJ générique historique). Filtre le contenu affiché. */
+    @Nullable
+    private String npcId = null;
 
     public MerchantEntity(EntityType<? extends PathfinderMob> type, Level level) {
         super(type, level);
@@ -134,6 +137,26 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
                 || "questspecial".equals(kind)) ? kind : "daily";
     }
 
+    /** Identifiant du PNJ configurable ; null = PNJ générique (contenu global sans tag npc). */
+    @Nullable
+    public String getNpcId() {
+        return this.npcId;
+    }
+
+    public void setNpcId(@Nullable String id) {
+        this.npcId = (id != null && !id.isBlank()) ? id : null;
+    }
+
+    /**
+     * Vrai si un contenu de tag {@code itemNpc} doit être affiché par CE PNJ : un PNJ nommé
+     * ne montre que SON contenu ({@code npcId} == tag) ; un PNJ générique ne montre que le
+     * contenu global (tag vide). Rétrocompat : contenu sans tag → global.
+     */
+    public boolean matchesNpc(String itemNpc) {
+        String tag = (itemNpc == null) ? "" : itemNpc;
+        return this.npcId != null ? this.npcId.equals(tag) : tag.isBlank();
+    }
+
     /** Skin embarqué de ce PNJ ("" = défaut). Voir {@link MerchantSkins}. */
     public String getSkin() {
         return this.entityData.get(DATA_SKIN);
@@ -149,6 +172,9 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
     public void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
         tag.putString("ShopKind", this.shopKind);
+        if (this.npcId != null) {
+            tag.putString("NpcId", this.npcId);
+        }
         tag.putString("Skin", this.getSkin());
         // Compteurs d'échanges par joueur : { <uuid>: { <offerId>: count } }.
         CompoundTag counts = new CompoundTag();
@@ -183,6 +209,7 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
             // redevenait "daily" (shop du jour) après un rechargement du monde.
             this.setShopKind(tag.getString("ShopKind"));
         }
+        this.npcId = tag.contains("NpcId") ? tag.getString("NpcId") : null;
         if (tag.contains("Skin")) {
             this.setSkin(tag.getString("Skin"));
         }
@@ -233,7 +260,7 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
                         sp.sendSystemMessage(Component.literal("§c[Zig Shop] Lecture des quetes impossible."));
                         return;
                     }
-                    QuestServerHandler.openFor(sp, list, uniqueOnly);
+                    QuestServerHandler.openFor(sp, list, uniqueOnly, this.getNpcId());
                 }));
             }
             return InteractionResult.CONSUME;
@@ -283,6 +310,9 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
                     ? this.raceCounts
                     : this.tradeCounts.getOrDefault(player.getUUID(), Map.of());
             for (ShopOffer o : list) {
+                if (!this.matchesNpc(o.npc())) {
+                    continue; // offre d'un autre PNJ (ou globale vs PNJ nommé)
+                }
                 Item input = resolveItem(o.input());
                 Item output = resolveItem(o.output());
                 if (input == null || output == null) {

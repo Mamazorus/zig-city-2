@@ -13,8 +13,11 @@ package com.rawstudio.zigshop;
  * quête Firebase sans {@code type}/{@code mode} vaut « kill » / « once » (cf.
  * {@link FirebaseClient#fetchQuests()}). La progression et l'état (acceptée, complétée,
  * réclamée) sont propres à CHAQUE joueur (cf. {@link QuestState}).
+ *
+ * <p>{@code npc} = identifiant du PNJ propriétaire de la quête (vide = quête « globale »,
+ * affichée par les PNJ génériques historiques). Rétrocompat : absent → "".
  */
 public record QuestDef(String id, String title, String description,
                        String type, String target, int amount,
                        String rewardItem, int rewardQty,
-                       String mode, int maxClaims) {}
+                       String mode, int maxClaims, String npc) {}

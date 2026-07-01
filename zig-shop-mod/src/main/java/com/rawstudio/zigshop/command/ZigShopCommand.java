@@ -48,6 +48,9 @@ public final class ZigShopCommand {
                         .then(Commands.literal("race").executes(ctx -> spawn(ctx, "race")))
                         .then(Commands.literal("quest").executes(ctx -> spawn(ctx, "quest")))
                         .then(Commands.literal("questspecial").executes(ctx -> spawn(ctx, "questspecial"))))
+                .then(Commands.literal("npc")
+                        .then(Commands.argument("id", StringArgumentType.word())
+                                .executes(ZigShopCommand::spawnNpc)))
                 .then(Commands.literal("skin")
                         .then(Commands.argument("nom", StringArgumentType.word())
                                 .suggests(SKIN_SUGGESTIONS)
@@ -68,6 +71,39 @@ public final class ZigShopCommand {
         merchant.moveTo(pos.x, pos.y, pos.z, src.getRotation().y, 0.0f);
         String label = "questspecial".equals(kind) ? "PNJ de quetes speciales" : "quest".equals(kind) ? "PNJ de quetes" : "race".equals(kind) ? "Marchand course" : "store".equals(kind) ? "Boutique" : "Marchand du jour";
         src.sendSuccess(() -> Component.literal("§a[Zig Shop] " + label + " créé. Clique dessus."), true);
+        return 1;
+    }
+
+    /**
+     * /zigshop npc &lt;id&gt; : fait apparaître un PNJ CONFIGURABLE lié à la fiche {@code /npcs/{id}}
+     * du dashboard. Le rôle est lu depuis Firebase (async) et appliqué au PNJ ; celui-ci
+     * n'affichera que SON contenu (quêtes/offres taguées {@code npc == id}).
+     */
+    private static int spawnNpc(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack src = ctx.getSource();
+        String npcId = StringArgumentType.getString(ctx, "id");
+        ServerLevel level = src.getLevel();
+        Vec3 pos = src.getPosition();
+        MerchantEntity merchant = ModEntities.MERCHANT.get().spawn(level, BlockPos.containing(pos), MobSpawnType.COMMAND);
+        if (merchant == null) {
+            src.sendFailure(Component.literal("[Zig Shop] Échec de la création du PNJ."));
+            return 0;
+        }
+        merchant.setNpcId(npcId);
+        merchant.moveTo(pos.x, pos.y, pos.z, src.getRotation().y, 0.0f);
+        // Applique le rôle depuis la config Firebase (le PNJ existe déjà ; réponse sur le thread serveur).
+        MinecraftServer server = src.getServer();
+        FirebaseClient.fetchNpc(npcId).whenComplete((cfg, err) -> server.execute(() -> {
+            if (merchant.isRemoved()) {
+                return;
+            }
+            if (err != null || cfg == null) {
+                src.sendFailure(Component.literal("§c[Zig Shop] PNJ \"" + npcId + "\" introuvable dans le dashboard."));
+                return;
+            }
+            merchant.setShopKind(cfg.role());
+            src.sendSuccess(() -> Component.literal("§a[Zig Shop] PNJ \"" + npcId + "\" (" + cfg.role() + ") cree. Clique dessus."), true);
+        }));
         return 1;
     }
 
