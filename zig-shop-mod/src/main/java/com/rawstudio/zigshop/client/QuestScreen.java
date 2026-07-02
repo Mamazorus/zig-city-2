@@ -159,15 +159,21 @@ public class QuestScreen extends Screen {
         int x = (this.width - PANEL_W) / 2;
         int bottom = listBottom();
 
+        // Fond OPAQUE du panneau (couleur sombre de l'app). Indispensable : l'écran floute
+        // l'arrière-plan du jeu, donc tout fill SEMI-TRANSPARENT laisse transparaître ce flou
+        // → cases/barre paraissent « floues » (les boutons, opaques, restaient nets). Ce fond
+        // plein règle le problème. Couvre aussi la gouttière de la barre de défilement.
+        g.fill(x - 6, TOP, x + PANEL_W + SCROLLBAR_W + 8, bottom, 0xF20E0B16);
+
         // Contenu de la liste, découpé (scissor) à la zone visible.
-        g.enableScissor(x - 2, TOP, x + PANEL_W + 2, bottom);
+        g.enableScissor(x - 6, TOP, x + PANEL_W + SCROLLBAR_W + 8, bottom);
         for (int i = 0; i < rows.size(); i++) {
             int y = TOP + i * ROW_H - scrollY;
             if (y + ROW_H < TOP || y > bottom) {
                 continue; // hors de la zone visible
             }
             Row r = rows.get(i);
-            g.fill(x, y, x + PANEL_W, y + ROW_H - 4, 0x55000000);
+            g.fill(x, y, x + PANEL_W, y + ROW_H - 4, 0x22FFFFFF);
             g.drawString(this.font, r.title(), x + 8, y + 5, 0xFFE08A);
 
             // Étiquette de mode (discrète, en haut à droite).
