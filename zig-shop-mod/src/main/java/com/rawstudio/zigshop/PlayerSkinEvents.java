@@ -61,9 +61,9 @@ public final class PlayerSkinEvents {
             String cmd = "skin set web " + variant + " \"" + skin.url() + "\"";
             CommandSourceStack src = player.createCommandSourceStack().withPermission(4).withSuppressedOutput();
             try {
-                int res = server.getCommands().performPrefixedCommand(src, cmd);
+                server.getCommands().performPrefixedCommand(src, cmd);
                 APPLIED.put(name, skin.updatedAt());
-                ZigShop.LOGGER.info("[ZigShop] Skin custom appliqué pour {} (variant={}, resultat={})", name, variant, res);
+                ZigShop.LOGGER.info("[ZigShop] Skin custom appliqué pour {} (variant={})", name, variant);
             } catch (Exception e) {
                 ZigShop.LOGGER.warn("[ZigShop] Application du skin de {} échouée : {}", name, e.toString());
             }
