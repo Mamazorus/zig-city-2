@@ -154,16 +154,20 @@ public class QuestScreen extends Screen {
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         this.renderBackground(g, mouseX, mouseY, partialTick);
-        g.drawCenteredString(this.font, this.title, this.width / 2, 20, 0xFFFFFF);
 
         int x = (this.width - PANEL_W) / 2;
         int bottom = listBottom();
 
-        // Fond OPAQUE du panneau (couleur sombre de l'app). Indispensable : l'écran floute
-        // l'arrière-plan du jeu, donc tout fill SEMI-TRANSPARENT laisse transparaître ce flou
-        // → cases/barre paraissent « floues » (les boutons, opaques, restaient nets). Ce fond
-        // plein règle le problème. Couvre aussi la gouttière de la barre de défilement.
+        // Fond OPAQUE du panneau (couleur sombre de l'app), AVANT les widgets. Sans lui, les
+        // fills semi-transparents laissent transparaître le flou de l'arrière-plan du jeu.
         g.fill(x - 6, TOP, x + PANEL_W + SCROLLBAR_W + 8, bottom, 0xF20E0B16);
+
+        // Widgets (boutons Accepter/Réclamer + Fermer) rendus AVANT le contenu de la liste :
+        // avec le pipeline du modpack (Sodium/Iris), le contenu (texte/icônes) dessiné APRÈS
+        // super.render() ne subit pas le flou d'arrière-plan — dessiné avant, il ressortait flou.
+        super.render(g, mouseX, mouseY, partialTick);
+
+        g.drawCenteredString(this.font, this.title, this.width / 2, 20, 0xFFFFFF);
 
         // Contenu de la liste, découpé (scissor) à la zone visible.
         g.enableScissor(x - 6, TOP, x + PANEL_W + SCROLLBAR_W + 8, bottom);
@@ -215,9 +219,6 @@ public class QuestScreen extends Screen {
             int thumbY = TOP + (int) ((long) (trackH - thumbH) * scrollY / maxScroll);
             g.fill(barX, thumbY, barX + SCROLLBAR_W, thumbY + thumbH, 0xAAFFFFFF);
         }
-
-        // Widgets (boutons Accepter/Réclamer visibles + Fermer) par-dessus les fonds de ligne.
-        super.render(g, mouseX, mouseY, partialTick);
     }
 
     @Override
