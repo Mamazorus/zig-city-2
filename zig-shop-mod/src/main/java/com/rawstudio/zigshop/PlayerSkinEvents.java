@@ -55,12 +55,15 @@ public final class PlayerSkinEvents {
             if (last != null && last == skin.updatedAt()) return;          // déjà appliqué cette session : SkinRestorer le restaure seul
 
             String variant = "slim".equalsIgnoreCase(skin.variant()) ? "slim" : "classic";
-            String cmd = "skin set web " + variant + " \"" + skin.url() + "\" " + name;
-            CommandSourceStack src = server.createCommandSourceStack().withPermission(4).withSuppressedOutput();
+            // Commande exécutée AU NOM DU JOUEUR (source = player) et SANS cible : elle
+            // s'applique à l'exécuteur lui-même. Une source « console » + cible par pseudo
+            // échouait silencieusement pour un compte hors-ligne (résolution du profil KO).
+            String cmd = "skin set web " + variant + " \"" + skin.url() + "\"";
+            CommandSourceStack src = player.createCommandSourceStack().withPermission(4).withSuppressedOutput();
             try {
-                server.getCommands().performPrefixedCommand(src, cmd);
+                int res = server.getCommands().performPrefixedCommand(src, cmd);
                 APPLIED.put(name, skin.updatedAt());
-                ZigShop.LOGGER.info("[ZigShop] Skin custom appliqué pour {} (variant={})", name, variant);
+                ZigShop.LOGGER.info("[ZigShop] Skin custom appliqué pour {} (variant={}, resultat={})", name, variant, res);
             } catch (Exception e) {
                 ZigShop.LOGGER.warn("[ZigShop] Application du skin de {} échouée : {}", name, e.toString());
             }
