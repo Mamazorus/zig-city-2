@@ -487,16 +487,17 @@ export default function AdminDashboard({
   // Catalogue d'items : chargé paresseusement à la 1re ouverture de l'onglet Shop
   // (scan ~5 s à froid côté main, puis instantané via cache disque).
   useEffect(() => {
-    if ((tab !== 'shop' && tab !== 'quests') || itemCatalog.length > 0 || itemCatalogLoading) return
+    if ((tab !== 'shop' && tab !== 'quests' && tab !== 'npcs') || itemCatalog.length > 0 || itemCatalogLoading) return
     setItemCatalogLoading(true)
     window.launcher.getItemCatalog()
       .then(r => { if (r.success) setItemCatalog(r.items) })
       .finally(() => setItemCatalogLoading(false))
   }, [tab, itemCatalog.length, itemCatalogLoading])
 
-  // Catalogues d'entités + de blocs : chargés paresseusement à la 1re ouverture de l'onglet Quêtes.
+  // Catalogues d'entités + de blocs : chargés paresseusement sur l'onglet Quêtes OU PNJ
+  // (les fiches PNJ réutilisent les mêmes sélecteurs de cible).
   useEffect(() => {
-    if (tab !== 'quests') return
+    if (tab !== 'quests' && tab !== 'npcs') return
     if (entityCatalog.length === 0 && !entityCatalogLoading) {
       setEntityCatalogLoading(true)
       window.launcher.getEntityCatalog()
