@@ -982,8 +982,10 @@ ipcMain.handle('get-skin-info', async () => {
   if (currentToken?.offline) {
     try {
       const rec = await firebaseRequest('GET', `/skins/${currentToken.name}`, null, false)
-      if (rec && rec.url) {
-        return { success: true, variant: normalizeVariant(rec.variant), skinUrl: rec.url, skinDataUrl: await fetchSkinDataUrl(rec.url), offline: true }
+      // `imageUrl` = image Firebase éditable ; repli `url` (peut pointer sur textures.minecraft.net).
+      const displayUrl = rec && (rec.imageUrl || rec.url)
+      if (displayUrl) {
+        return { success: true, variant: normalizeVariant(rec.variant), skinUrl: displayUrl, skinDataUrl: await fetchSkinDataUrl(displayUrl), offline: true }
       }
     } catch { /* pas de skin custom / lecture impossible → éditeur vierge */ }
     return { success: false, offline: true }
@@ -1030,7 +1032,9 @@ async function resolveCustomSkinDataUrl(name) {
   if (!isFirebaseConfigured()) return null
   try {
     const rec = await firebaseRequest('GET', `/skins/${name}`, null, false)
-    if (rec && rec.url) return await fetchSkinDataUrl(rec.url)
+    // `imageUrl` = image Firebase (tête/carrousel) ; repli `url` (textures.minecraft.net accepté).
+    const src = rec && (rec.imageUrl || rec.url)
+    if (src) return await fetchSkinDataUrl(src)
   } catch { /* pas de skin custom / lecture impossible */ }
   return null
 }
@@ -3690,9 +3694,64 @@ async function uploadImageToStorage(objectPath, buffer, contentType) {
   }
 }
 
-// Skin d'un compte hors-ligne : héberge le PNG sur Firebase Storage puis publie
-// /skins/{pseudo} = { url, variant, updatedAt }. Le mod serveur zigshop lit ce
-// chemin à la connexion et applique le skin via skinrestorer (visible par tous).
+// Génère une texture Minecraft SIGNÉE à partir des OCTETS d'un skin, via MineSkin.
+// 🔴 Pourquoi ici et pas au join côté serveur : le provider « web » de SkinRestorer
+// demande à MineSkin de TÉLÉCHARGER l'URL de l'image ; or les serveurs de MineSkin
+// reçoivent un HTTP 403 de Firebase Storage (Google bloque les IP de datacenter) →
+// génération échouée → skin custom jamais appliqué (Steve) pour les comptes crackés.
+// On envoie donc les OCTETS depuis le launcher (IP du joueur, non bloquée) : MineSkin
+// renvoie une texture hébergée sur textures.minecraft.net que lui, il SAIT re-télécharger
+// au join. Fonctionne sans clé API (quota ~10/min). Renvoie { url (textures.minecraft.net),
+// value, signature }. Voir feature-offline-skins (mémoire).
+function mineskinGenerateFromBytes(variant, buffer) {
+  return new Promise((resolve, reject) => {
+    const boundary = '----zigcity' + crypto.randomBytes(8).toString('hex')
+    const v = variant === 'slim' ? 'slim' : 'classic'
+    const field = (n, val) => Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${n}"\r\n\r\n${val}\r\n`)
+    const body = Buffer.concat([
+      field('variant', v),
+      field('visibility', 'public'),
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="skin.png"\r\nContent-Type: image/png\r\n\r\n`),
+      buffer,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ])
+    const req = https.request({
+      hostname: 'api.mineskin.org', path: '/v2/generate', method: 'POST',
+      headers: {
+        'User-Agent': 'ZigCity2-Launcher',
+        'Accept': 'application/json',
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': body.length,
+      },
+    }, (res) => {
+      let data = ''
+      res.on('data', (c) => data += c)
+      res.on('end', () => {
+        try {
+          const j = JSON.parse(data)
+          const value = j?.skin?.texture?.data?.value
+          if (!j?.success || !value) {
+            return reject(new Error(j?.errors?.[0]?.message || `MineSkin HTTP ${res.statusCode}`))
+          }
+          let url = ''
+          try { url = JSON.parse(Buffer.from(value, 'base64').toString('utf8')).textures.SKIN.url } catch { /* url reste vide */ }
+          if (!url) return reject(new Error('MineSkin : texture sans URL.'))
+          resolve({ url, value, signature: j.skin.texture.data.signature || '' })
+        } catch { reject(new Error(`MineSkin : réponse illisible (HTTP ${res.statusCode})`)) }
+      })
+    })
+    req.on('error', reject)
+    req.setTimeout(30000, () => { req.destroy(); reject(new Error('MineSkin : délai dépassé.')) })
+    req.write(body)
+    req.end()
+  })
+}
+
+// Skin d'un compte hors-ligne : héberge le PNG sur Firebase Storage, génère une texture
+// signée via MineSkin, puis publie /skins/{pseudo} = { url, imageUrl, variant, updatedAt,
+// textureValue, textureSignature }. Le mod serveur zigshop lit `url` (textures.minecraft.net)
+// à la connexion et applique le skin via skinrestorer (visible par tous). `imageUrl` = l'image
+// Firebase, utilisée par le launcher/carrousels (édition, tête) — cf. feature-offline-skins.
 async function uploadOfflineSkin(name, variant, buf) {
   if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré.' }
   if (!FIREBASE_STORAGE_BUCKET || FIREBASE_STORAGE_BUCKET.includes('YOUR-')) {
@@ -3700,14 +3759,35 @@ async function uploadOfflineSkin(name, variant, buf) {
   }
   if (!isValidPlayerName(name)) return { success: false, error: 'Pseudo invalide.' }
   try {
-    // Nom d'objet PLAT (sans dossier) : Firebase encode le « / » d'un dossier en « %2F »
-    // dans l'URL de téléchargement, et skinrestorer (java.net.URI) rejette ce « %2F »
-    // (« Illegal character in path »). Un nom sans « / » donne une URL propre, directe,
-    // que skinrestorer + MineSkin acceptent.
+    // 1) Héberge le PNG sur Firebase Storage (source éditable + affichage carrousels).
+    //    Nom d'objet PLAT (sans dossier) → URL de téléchargement propre.
     const objectPath = `skin_${name}_${Date.now()}.png`
     const up = await uploadImageToStorage(objectPath, buf, 'image/png')
     if (!up.success) return { success: false, error: up.error || 'Envoi du skin échoué.' }
-    await firebaseRequest('PUT', `/skins/${name}`, { url: up.url, variant, updatedAt: Date.now() }, true)
+
+    // 2) Produit une texture signée que le serveur pourra appliquer (voir helper).
+    //    Repli : si MineSkin est indisponible, on garde l'URL Firebase (carrousel OK,
+    //    application en jeu KO) plutôt que d'échouer tout le changement de skin.
+    let modUrl = up.url
+    let textureValue = ''
+    let textureSignature = ''
+    try {
+      const gen = await mineskinGenerateFromBytes(variant, buf)
+      modUrl = gen.url
+      textureValue = gen.value
+      textureSignature = gen.signature
+    } catch (e) {
+      console.warn('[skin] MineSkin indisponible, repli sur URL Firebase :', e.message)
+    }
+
+    // 3) Publie l'enregistrement.
+    await firebaseRequest('PUT', `/skins/${name}`, {
+      url: modUrl,
+      imageUrl: up.url,
+      variant,
+      updatedAt: Date.now(),
+      ...(textureValue ? { textureValue, textureSignature } : {}),
+    }, true)
     recordPlayerSeen(name)   // mettre un skin → apparaître dans le carrousel partagé (si pas masqué)
     return { success: true, variant, skinUrl: up.url, skinDataUrl: `data:image/png;base64,${buf.toString('base64')}`, offline: true }
   } catch (e) {
