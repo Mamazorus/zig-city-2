@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, type KeyboardEvent as ReactKeyboardEvent, type CSSProperties } from 'react'
 import { NEWS_CATEGORIES, CATEGORY_ORDER, resolveCategory, CategoryBadge, NewsFallback, NEWS_BANNER_RATIO, type NewsCategory } from './news'
 import { Avatar, RemoteNewsImage } from './remote-image'
 import { ItemIcon } from './item-icon'
@@ -91,9 +91,50 @@ const EMPTY_QUEST: QuestForm = { title: '', description: '', type: 'kill', targe
 
 // ── PNJ configurables (miroirs de window.d.ts) ──
 type NpcRole = 'quest' | 'daily' | 'store' | 'race'
-interface NpcDef { id: string; name: string; role: NpcRole; createdAt?: number }
+interface NpcDef { id: string; name: string; role: NpcRole; createdAt?: number; skinUrl?: string | null; skinVariant?: 'classic' | 'slim' }
 type NpcForm = { id: string; name: string; role: NpcRole }
 const NPC_ROLE_LABEL: Record<NpcRole, string> = { quest: 'Quêtes', daily: 'Shop du jour', store: 'Boutique', race: 'Course' }
+
+// Aperçu « tête » d'un skin de PNJ (image 64×64 hébergée), rendu par crop CSS des régions
+// tête + calque, comme un avatar Minecraft. Passe par le main (fetchImage) pour contourner le
+// proxy/VPN/AV que Chromium respecte. Sans skin custom → pastille neutre.
+function NpcSkinHead({ skinUrl, size = 40 }: { skinUrl?: string | null; size?: number }) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    setDataUrl(null)
+    if (skinUrl) {
+      window.launcher.fetchImage(skinUrl).then(d => { if (alive) setDataUrl(d) }).catch(() => {})
+    }
+    return () => { alive = false }
+  }, [skinUrl])
+  const scale = size / 8
+  if (!dataUrl) {
+    return (
+      <div className="shrink-0 flex items-center justify-center" style={{ width: size, height: size, borderRadius: 10, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
+        <svg width={size * 0.5} height={size * 0.5} viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="5.5" r="2.5" stroke="rgba(255,255,255,0.35)" strokeWidth="1.4" />
+          <path d="M2.5 13.5C3.2 11.2 5.3 9.8 8 9.8s4.8 1.4 5.5 3.7" stroke="rgba(255,255,255,0.35)" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+      </div>
+    )
+  }
+  const layer = (x: number, y: number, z: number): CSSProperties => ({
+    position: 'absolute', inset: 0,
+    backgroundImage: `url(${dataUrl})`,
+    backgroundRepeat: 'no-repeat',
+    backgroundSize: `${64 * scale}px ${64 * scale}px`,
+    backgroundPosition: `${-x * scale}px ${-y * scale}px`,
+    imageRendering: 'pixelated',
+    zIndex: z,
+  })
+  return (
+    <div className="shrink-0" style={{ position: 'relative', width: size, height: size, borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.12)' }}>
+      <div style={layer(8, 8, 1)} />
+      <div style={layer(40, 8, 2)} />
+    </div>
+  )
+}
 
 interface ShopConfigState { currencyName: string; currencyItem: string; currencyIcon: string }
 
@@ -324,9 +365,14 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 export default function AdminDashboard({
   username,
   onNewsUpdated,
+  onEditNpcSkin,
 }: {
   username: string
   onNewsUpdated: () => void
+  onEditNpcSkin?: (
+    npc: { id: string; name: string; skinUrl?: string | null; skinVariant?: 'classic' | 'slim' },
+    onSaved?: (skinUrl: string | null, variant: 'classic' | 'slim') => void,
+  ) => void
 }) {
   const [tab, setTab] = useState<AdminTab>('news')
   const [news, setNews] = useState<NewsItem[]>([])
@@ -1032,6 +1078,15 @@ export default function AdminDashboard({
     const res = await window.launcher.deleteNpc(id)
     setConfirmDeleteNpc(null)
     if (res.success) { if (selectedNpc?.id === id) setSelectedNpc(null); await loadNpcs() }
+  }
+  // Ouvre l'éditeur de skin (App.tsx) ciblé sur ce PNJ ; au retour, MAJ optimiste de l'aperçu.
+  const handleEditNpcSkin = () => {
+    if (!selectedNpc || !onEditNpcSkin) return
+    const target = selectedNpc
+    onEditNpcSkin(target, (skinUrl, skinVariant) => {
+      setSelectedNpc(prev => (prev && prev.id === target.id ? { ...prev, skinUrl, skinVariant } : prev))
+      setNpcs(list => list.map(n => (n.id === target.id ? { ...n, skinUrl, skinVariant } : n)))
+    })
   }
 
   // Icône de la récompense en cours de saisie (aperçu live dans le formulaire, debouncé).
@@ -1972,10 +2027,24 @@ export default function AdminDashboard({
         {tab === 'npcs' && selectedNpc && (
           <div className="flex items-center gap-[12px] mb-[14px] shrink-0">
             <button className="flex items-center gap-[5px] font-ui text-[14px] text-white/50 hover:text-white px-[12px] h-[34px] rounded-[10px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.08)] transition-colors" onClick={closeNpc}>← PNJ</button>
-            <div className="flex flex-col min-w-0">
+            <NpcSkinHead skinUrl={selectedNpc.skinUrl} size={40} />
+            <div className="flex flex-col min-w-0 flex-1">
               <p className="font-ui font-semibold text-[15px] text-white tracking-[-0.4px] truncate">{selectedNpc.name}</p>
               <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px] truncate">{NPC_ROLE_LABEL[selectedNpc.role]} · /zigshop npc {selectedNpc.id}</p>
             </div>
+            {onEditNpcSkin && (
+              <button
+                onClick={handleEditNpcSkin}
+                title="Choisir un skin pour ce PNJ (éditeur, bibliothèque ou import PNG 64×64)"
+                className="flex items-center gap-[7px] font-ui font-semibold text-[14px] text-white px-[14px] h-[34px] rounded-[10px] bg-[rgba(0,255,225,0.12)] border border-[rgba(0,255,225,0.4)] hover:bg-[rgba(0,255,225,0.2)] transition-colors shrink-0"
+              >
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                  <circle cx="8" cy="5.5" r="2.5" stroke="currentColor" strokeWidth="1.4" />
+                  <path d="M2.5 13.5C3.2 11.2 5.3 9.8 8 9.8s4.8 1.4 5.5 3.7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
+                {selectedNpc.skinUrl ? 'Changer le skin' : 'Ajouter un skin'}
+              </button>
+            )}
           </div>
         )}
 

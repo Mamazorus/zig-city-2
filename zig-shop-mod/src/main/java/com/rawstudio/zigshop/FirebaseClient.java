@@ -80,8 +80,13 @@ public final class FirebaseClient {
         return out;
     }
 
-    /** Config d'un PNJ configurable ({@code /npcs/{id}} : {@code {name, role}}). */
-    public record NpcConfig(String role, String name) {}
+    /**
+     * Config d'un PNJ configurable ({@code /npcs/{id}}) : {@code {name, role}} + skin
+     * optionnel choisi depuis le launcher ({@code skinUrl} = image PNG 64×64 hébergée sur
+     * Firebase Storage ; {@code skinSlim} = modèle fin type Alex). {@code skinUrl} vide = pas
+     * de skin custom → le PNJ garde son skin par défaut (Steve ou preset embarqué).
+     */
+    public record NpcConfig(String role, String name, String skinUrl, boolean skinSlim) {}
 
     /** Lit la config d'un PNJ ({@code /npcs/{npcId}}). {@code null} si introuvable ou sans rôle. */
     public static CompletableFuture<NpcConfig> fetchNpc(String npcId) {
@@ -95,7 +100,7 @@ public final class FirebaseClient {
         JsonObject o = root.getAsJsonObject();
         String role = str(o, "role");
         if (role.isBlank()) return null;
-        return new NpcConfig(role, str(o, "name"));
+        return new NpcConfig(role, str(o, "name"), str(o, "skinUrl"), "slim".equals(str(o, "skinVariant")));
     }
 
     private static List<QuestDef> parseQuests(String body) {

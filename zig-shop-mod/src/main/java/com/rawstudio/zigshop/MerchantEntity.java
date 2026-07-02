@@ -53,10 +53,16 @@ import java.util.UUID;
  */
 public class MerchantEntity extends PathfinderMob implements Merchant {
 
-    /** Nom du skin embarqué de ce PNJ ("" = skin par défaut) ; voir {@link MerchantSkins}.
-     *  Synchronisé client↔serveur (le rendu est côté client) et persisté en NBT. */
+    /** Skin de ce PNJ ("" = skin par défaut Steve) ; synchronisé client↔serveur (le rendu est
+     *  côté client) et persisté en NBT. Contient SOIT un nom de skin embarqué (voir
+     *  {@link MerchantSkins}), SOIT une URL http(s) d'image PNG 64×64 choisie depuis le launcher
+     *  (téléchargée et rendue dynamiquement, cf. {@code client.NpcSkinTextures}). */
     private static final EntityDataAccessor<String> DATA_SKIN =
             SynchedEntityData.defineId(MerchantEntity.class, EntityDataSerializers.STRING);
+    /** Variant d'un skin par URL : vrai = modèle fin (Alex, bras 3 px), faux = classique (Steve).
+     *  Sans effet sur les presets embarqués. Synchronisé pour le rendu client. */
+    private static final EntityDataAccessor<Boolean> DATA_SLIM =
+            SynchedEntityData.defineId(MerchantEntity.class, EntityDataSerializers.BOOLEAN);
 
     @Nullable
     private Player tradingPlayer;
@@ -94,6 +100,7 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
         super.defineSynchedData(builder);
         builder.define(DATA_SKIN, "");
+        builder.define(DATA_SLIM, false);
     }
 
     @Override
@@ -162,10 +169,20 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
         return this.entityData.get(DATA_SKIN);
     }
 
-    /** Applique un skin embarqué ; null/"" ⇒ skin par défaut. La validation du nom (qu'il
-     *  existe vraiment) revient à l'appelant (commande) via {@link MerchantSkins#exists}. */
+    /** Applique un skin : soit un NOM de preset embarqué (validé par l'appelant via
+     *  {@link MerchantSkins#exists}), soit une URL http(s) d'image 64×64 (skin du launcher).
+     *  null/"" ⇒ skin par défaut (Steve). */
     public void setSkin(String name) {
         this.entityData.set(DATA_SKIN, name == null ? "" : name);
+    }
+
+    /** Variant du skin custom par URL : vrai = modèle fin (Alex). */
+    public boolean isSlimSkin() {
+        return this.entityData.get(DATA_SLIM);
+    }
+
+    public void setSlimSkin(boolean slim) {
+        this.entityData.set(DATA_SLIM, slim);
     }
 
     @Override
@@ -176,6 +193,7 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
             tag.putString("NpcId", this.npcId);
         }
         tag.putString("Skin", this.getSkin());
+        tag.putBoolean("SkinSlim", this.isSlimSkin());
         // Compteurs d'échanges par joueur : { <uuid>: { <offerId>: count } }.
         CompoundTag counts = new CompoundTag();
         for (Map.Entry<UUID, Map<String, Integer>> byPlayer : this.tradeCounts.entrySet()) {
@@ -212,6 +230,9 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
         this.npcId = tag.contains("NpcId") ? tag.getString("NpcId") : null;
         if (tag.contains("Skin")) {
             this.setSkin(tag.getString("Skin"));
+        }
+        if (tag.contains("SkinSlim")) {
+            this.setSlimSkin(tag.getBoolean("SkinSlim"));
         }
         this.tradeCounts.clear();
         if (tag.contains("TradeCounts")) {

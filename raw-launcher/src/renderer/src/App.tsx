@@ -1509,6 +1509,10 @@ export default function App() {
   const [renamingId, setRenamingId] = useState<string | null>(null)   // id du skin en cours de renommage
   const [renameValue, setRenameValue] = useState('')
   const renameCancelRef = useRef(false)                               // Échap = annuler sans enregistrer
+  // Cible de l'éditeur : null = skin du JOUEUR (mode historique) ; sinon skin d'un PNJ ouvert
+  // depuis le dashboard. En mode PNJ, les actions « compte » deviennent « ce PNJ ».
+  const [skinTargetNpc, setSkinTargetNpc] = useState<{ id: string; name: string } | null>(null)
+  const npcSkinSavedRef = useRef<((skinUrl: string | null, variant: 'classic' | 'slim') => void) | null>(null)
 
   const fetchNews = useCallback(async () => {
     const result = await window.launcher.getNews()
@@ -1915,6 +1919,8 @@ export default function App() {
       setEditorSrc(null)   // libère le dataUrl base64
       setSkinError(null)
       setSkinSuccess(null)
+      setSkinTargetNpc(null)          // retour au mode joueur par défaut
+      npcSkinSavedRef.current = null
     }, 250)
   }
 
@@ -1950,6 +1956,76 @@ export default function App() {
         renderHeadFromSkin(dataUrl).then(setMyHead).catch(() => {})   // tête à jour partout, sans minotar
       } else {
         setSkinError(res.expired || res.loggedOut ? sessionMessage : (res.error ?? 'Échec du changement de skin.'))
+      }
+    } finally {
+      skinRequestRef.current = false
+      setSkinBusy(false)
+    }
+  }
+
+  // ── Skin d'un PNJ (éditeur ouvert depuis le dashboard) ──
+  const openNpcSkinModal = async (
+    npc: { id: string; name: string; skinUrl?: string | null; skinVariant?: 'classic' | 'slim' },
+    onSaved?: (skinUrl: string | null, variant: 'classic' | 'slim') => void,
+  ) => {
+    setSkinTargetNpc({ id: npc.id, name: npc.name })
+    npcSkinSavedRef.current = onSaved ?? null
+    setSkinModalOpen(true)
+    setSkinModalClosing(false)
+    setSkinTab('editor')
+    setSkinError(null)
+    setSkinSuccess(null)
+    setSkinInfoLoading(false)   // pas de skin de compte à charger pour un PNJ
+    setSelectedVariant(npc.skinVariant ?? 'classic')
+    refreshLibrary()
+    // Précharge le skin actuel du PNJ dans l'éditeur (via le main pour éviter le taint CORS
+    // du canvas) ; sinon éditeur vierge (dessin from scratch / bibliothèque / import).
+    if (npc.skinUrl) {
+      const dataUrl = await window.launcher.fetchImage(npc.skinUrl).catch(() => null)
+      setEditorSrc(dataUrl || null)
+    } else {
+      setEditorSrc(null)
+    }
+    setEditorLoadKey(k => k + 1)
+  }
+
+  const handleApplyNpcSkin = async () => {
+    if (skinRequestRef.current || !skinTargetNpc) return
+    const dataUrl = editorApiRef.current?.getDataURL()
+    if (!dataUrl) { setSkinError('Aucun skin à appliquer.'); return }
+    skinRequestRef.current = true
+    setSkinBusy(true)
+    setSkinError(null)
+    setSkinSuccess(null)
+    try {
+      const res = await window.launcher.setNpcSkin({ id: skinTargetNpc.id, dataUrl, variant: selectedVariant })
+      if (res.success) {
+        setSkinSuccess(`Skin enregistré pour « ${skinTargetNpc.name} ». Il s'applique au prochain /zigshop npc ${skinTargetNpc.id} (re-spawn le PNJ en jeu pour le voir).`)
+        npcSkinSavedRef.current?.(res.skinUrl ?? null, selectedVariant)
+      } else {
+        setSkinError(res.error ?? "Échec de l'enregistrement du skin.")
+      }
+    } finally {
+      skinRequestRef.current = false
+      setSkinBusy(false)
+    }
+  }
+
+  const handleRemoveNpcSkin = async () => {
+    if (skinRequestRef.current || !skinTargetNpc) return
+    skinRequestRef.current = true
+    setSkinBusy(true)
+    setSkinError(null)
+    setSkinSuccess(null)
+    try {
+      const res = await window.launcher.setNpcSkin({ id: skinTargetNpc.id })   // sans dataUrl = retrait
+      if (res.success) {
+        setSkinSuccess(`Skin retiré : « ${skinTargetNpc.name} » reprend le skin par défaut au prochain spawn.`)
+        setEditorSrc(null)
+        setEditorLoadKey(k => k + 1)
+        npcSkinSavedRef.current?.(null, 'classic')
+      } else {
+        setSkinError(res.error ?? 'Échec du retrait du skin.')
       }
     } finally {
       skinRequestRef.current = false
@@ -2280,7 +2356,7 @@ export default function App() {
           {/* ── CONTENU PRINCIPAL ── */}
           {activeTab === 'admin' && (
             <div className="flex-1 min-h-0 min-w-0">
-              <AdminDashboard username={username} onNewsUpdated={fetchNews} />
+              <AdminDashboard username={username} onNewsUpdated={fetchNews} onEditNpcSkin={openNpcSkinModal} />
             </div>
           )}
           {activeTab === 'stats' && (
@@ -2824,7 +2900,7 @@ export default function App() {
                     <circle cx="8" cy="5.5" r="2.5" stroke="rgba(0,255,225,0.9)" strokeWidth="1.4"/>
                     <path d="M2.5 13.5C3.2 11.2 5.3 9.8 8 9.8s4.8 1.4 5.5 3.7" stroke="rgba(0,255,225,0.9)" strokeWidth="1.4" strokeLinecap="round"/>
                   </svg>
-                  <p className="font-ui font-bold text-[18px] text-white tracking-[-0.6px]">Changer de skin</p>
+                  <p className="font-ui font-bold text-[18px] text-white tracking-[-0.6px]">{skinTargetNpc ? `Skin du PNJ · ${skinTargetNpc.name}` : 'Changer de skin'}</p>
                 </div>
                 <div className="flex gap-[3px] bg-[rgba(0,0,0,0.22)] border border-[rgba(255,255,255,0.06)] rounded-full p-[3px]">
                   {(['editor', 'library'] as const).map(t => (
@@ -3021,16 +3097,16 @@ export default function App() {
                 </button>
 
                 <button
-                  onClick={handleResetSkin}
+                  onClick={skinTargetNpc ? handleRemoveNpcSkin : handleResetSkin}
                   disabled={skinBusy}
-                  title="Revenir au skin Minecraft par défaut"
+                  title={skinTargetNpc ? 'Retirer le skin de ce PNJ (retour au skin par défaut)' : 'Revenir au skin Minecraft par défaut'}
                   className="flex items-center gap-[8px] px-[14px] py-[11px] rounded-[10px] font-ui font-semibold text-[14px] text-white/60 border border-[rgba(255,255,255,0.12)] hover:bg-[rgba(255,255,255,0.07)] hover:text-white transition-colors disabled:opacity-40 whitespace-nowrap"
                 >
                   <svg width="17" height="17" viewBox="0 0 20 20" fill="none">
                     <path d="M15.5 10a5.5 5.5 0 1 1-1.6-3.9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                     <path d="M15.5 3.5V6.5H12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
-                  Réinitialiser
+                  {skinTargetNpc ? 'Retirer le skin' : 'Réinitialiser'}
                 </button>
 
                 <div className="flex-1" />
@@ -3051,9 +3127,9 @@ export default function App() {
 
                 {/* Appliquer sur le compte (action principale, blanc plein) */}
                 <button
-                  onClick={handleApplySkin}
+                  onClick={skinTargetNpc ? handleApplyNpcSkin : handleApplySkin}
                   disabled={skinBusy}
-                  title="Appliquer ce skin sur ton compte Minecraft"
+                  title={skinTargetNpc ? 'Enregistrer ce skin pour ce PNJ' : 'Appliquer ce skin sur ton compte Minecraft'}
                   className="flex items-center justify-center gap-[8px] px-[26px] py-[11px] rounded-[10px] font-ui font-bold text-[14px] text-[#0e0b16] bg-white hover:bg-white/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
                 >
                   {skinBusy && (
@@ -3062,7 +3138,7 @@ export default function App() {
                       <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
                   )}
-                  Appliquer le skin
+                  {skinTargetNpc ? 'Utiliser pour ce PNJ' : 'Appliquer le skin'}
                 </button>
               </div>
             )}

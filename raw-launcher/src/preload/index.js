@@ -94,6 +94,7 @@ contextBridge.exposeInMainWorld('launcher', {
   createNpc:    (data) => ipcRenderer.invoke('create-npc', data),
   updateNpc:    (data) => ipcRenderer.invoke('update-npc', data),
   deleteNpc:    (id) => ipcRenderer.invoke('delete-npc', id),
+  setNpcSkin:   (data) => ipcRenderer.invoke('set-npc-skin', data),
   getItemCatalog:    () => ipcRenderer.invoke('get-item-catalog'),
   getEntityCatalog:  () => ipcRenderer.invoke('get-entity-catalog'),
   getBlockCatalog:   () => ipcRenderer.invoke('get-block-catalog'),

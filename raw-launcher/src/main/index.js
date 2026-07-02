@@ -2901,7 +2901,14 @@ async function fetchNpcs() {
   const map = normalizeFbMap(await firebaseRequest('GET', '/npcs', null, false))
   return Object.entries(map)
     .filter(([, o]) => o && typeof o === 'object')
-    .map(([id, o]) => ({ id, name: String(o.name ?? ''), role: NPC_ROLES.has(o.role) ? o.role : 'quest', createdAt: o.createdAt || 0 }))
+    .map(([id, o]) => ({
+      id,
+      name: String(o.name ?? ''),
+      role: NPC_ROLES.has(o.role) ? o.role : 'quest',
+      createdAt: o.createdAt || 0,
+      skinUrl: o.skinUrl ? String(o.skinUrl) : null,
+      skinVariant: o.skinVariant === 'slim' ? 'slim' : 'classic',
+    }))
     .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
 }
 
@@ -2955,6 +2962,57 @@ ipcMain.handle('delete-npc', async (_, id) => {
   try {
     await firebaseRequest('DELETE', `/npcs/${slug}`, null, true)
     return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
+// Assigne (ou retire) le skin d'un PNJ. `dataUrl` = PNG 64×64 (dessiné dans l'éditeur, pioché
+// en bibliothèque ou importé) → hébergé sur Firebase Storage (`npc-skins/`), puis /npcs/{slug}
+// reçoit { skinUrl, skinVariant, skinUpdatedAt }. Le mod zigshop applique ce skin au spawn
+// `/zigshop npc <slug>` (téléchargement + rendu dynamiques). `dataUrl` absent/vide = retrait
+// (retour au skin par défaut). On PATCH UNIQUEMENT les champs skin → name/role restent intacts
+// (≠ update-npc qui passe par sanitizeNpc et écraserait name/role).
+ipcMain.handle('set-npc-skin', async (_, { id, dataUrl, variant } = {}) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  if (!FIREBASE_STORAGE_BUCKET || FIREBASE_STORAGE_BUCKET.includes('YOUR-')) {
+    return { success: false, error: 'Bucket Storage non configuré.' }
+  }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  const slug = sanitizeNpcSlug(id)
+  if (!slug) return { success: false, error: 'PNJ introuvable.' }
+
+  // Retrait du skin → retour au skin par défaut (Steve) en jeu.
+  if (!dataUrl) {
+    try {
+      await firebaseRequest('PATCH', `/npcs/${slug}`, { skinUrl: null, skinVariant: null, skinUpdatedAt: null }, true)
+      return { success: true, skinUrl: null }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  }
+
+  let buf
+  try {
+    buf = Buffer.from(String(dataUrl).split(',')[1] || '', 'base64')
+  } catch {
+    return { success: false, error: 'Image du skin invalide.' }
+  }
+  if (!isValidSkinSize(pngDimensions(buf))) {
+    return { success: false, error: 'Le skin doit être un PNG de 64×64 pixels.' }
+  }
+  const v = normalizeVariant(variant)
+  try {
+    const objectPath = `npc-skins/${slug}-${Date.now()}.png`
+    const up = await uploadImageToStorage(objectPath, buf, 'image/png')
+    if (!up.success) return { success: false, error: up.error || 'Envoi du skin échoué.' }
+    await firebaseRequest('PATCH', `/npcs/${slug}`, {
+      skinUrl: up.url,
+      skinVariant: v,
+      skinUpdatedAt: Date.now(),
+    }, true)
+    return { success: true, skinUrl: up.url, skinVariant: v }
   } catch (e) {
     return { success: false, error: e.message }
   }

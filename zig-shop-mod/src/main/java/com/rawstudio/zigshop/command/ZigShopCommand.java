@@ -102,6 +102,12 @@ public final class ZigShopCommand {
                 return;
             }
             merchant.setShopKind(cfg.role());
+            // Skin choisi depuis le launcher (URL d'image 64×64 hébergée) : appliqué ici, le
+            // rendu client le télécharge dynamiquement (cf. client.NpcSkinTextures). Vide = défaut.
+            if (!cfg.skinUrl().isBlank()) {
+                merchant.setSkin(cfg.skinUrl());
+                merchant.setSlimSkin(cfg.skinSlim());
+            }
             src.sendSuccess(() -> Component.literal("§a[Zig Shop] PNJ \"" + npcId + "\" (" + cfg.role() + ") cree. Clique dessus."), true);
         }));
         return 1;

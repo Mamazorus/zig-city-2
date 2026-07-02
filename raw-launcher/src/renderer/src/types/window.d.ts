@@ -175,8 +175,9 @@ type QuestForm = {
 }
 
 // PNJ configurable (/npcs/{id}) : rôle + nom, spawné en jeu par `/zigshop npc <id>`.
+// skinUrl/skinVariant = skin optionnel (image 64×64 hébergée) appliqué au PNJ en jeu.
 type NpcRole = 'quest' | 'daily' | 'store' | 'race'
-interface NpcDef { id: string; name: string; role: NpcRole; createdAt?: number }
+interface NpcDef { id: string; name: string; role: NpcRole; createdAt?: number; skinUrl?: string | null; skinVariant?: 'classic' | 'slim' }
 type NpcForm = { id: string; name: string; role: NpcRole }
 
 // Entrée du catalogue d'items (extrait des jars du modpack installé) pour
@@ -291,6 +292,8 @@ declare global {
       createNpc: (data: NpcForm) => Promise<{ success: boolean; id?: string; error?: string }>
       updateNpc: (data: { id: string; name?: string; role?: NpcRole }) => Promise<{ success: boolean; error?: string }>
       deleteNpc: (id: string) => Promise<{ success: boolean; error?: string }>
+      // Skin d'un PNJ : dataUrl PNG 64×64 → Firebase Storage (npc-skins/) + /npcs/{id}. dataUrl absent/null = retrait.
+      setNpcSkin: (data: { id: string; dataUrl?: string | null; variant?: 'classic' | 'slim' }) => Promise<{ success: boolean; skinUrl?: string | null; skinVariant?: 'classic' | 'slim'; error?: string }>
       getItemCatalog: () => Promise<{ success: boolean; items: ItemCatalogEntry[]; error?: string }>
       getEntityCatalog: () => Promise<{ success: boolean; entities: EntityCatalogEntry[]; error?: string }>
       getBlockCatalog: () => Promise<{ success: boolean; blocks: BlockCatalogEntry[]; error?: string }>
