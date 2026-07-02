@@ -3700,7 +3700,11 @@ async function uploadOfflineSkin(name, variant, buf) {
   }
   if (!isValidPlayerName(name)) return { success: false, error: 'Pseudo invalide.' }
   try {
-    const objectPath = `skins/${name}-${Date.now()}.png`
+    // Nom d'objet PLAT (sans dossier) : Firebase encode le « / » d'un dossier en « %2F »
+    // dans l'URL de téléchargement, et skinrestorer (java.net.URI) rejette ce « %2F »
+    // (« Illegal character in path »). Un nom sans « / » donne une URL propre, directe,
+    // que skinrestorer + MineSkin acceptent.
+    const objectPath = `skin_${name}_${Date.now()}.png`
     const up = await uploadImageToStorage(objectPath, buf, 'image/png')
     if (!up.success) return { success: false, error: up.error || 'Envoi du skin échoué.' }
     await firebaseRequest('PUT', `/skins/${name}`, { url: up.url, variant, updatedAt: Date.now() }, true)
