@@ -1,0 +1,102 @@
+name: Build Slots Machine patch
+
+# Recompile 3 classes de menu du mod tiers "slotsmachine" en version null-safe, les réinjecte dans
+# le jar original et publie slotsmachine1.21.1-1.1.8-zigcity2.jar sur la branche mod-jars.
+# Voir slotsmachine-patch/README.md pour le pourquoi.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'slotsmachine-patch/**'
+      - '.github/workflows/slotsmachine-patch.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  ORIGINAL_JAR: slotsmachine1.21.1-1.1.8.jar
+  PATCHED_JAR: slotsmachine1.21.1-1.1.8-zigcity2.jar
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # moddev 2.0.141 -> Gradle 8.12 (comme zig-shop-mod).
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.12'
+
+      - name: Télécharger le jar original (depuis mod-jars)
+        run: |
+          set -euo pipefail
+          mkdir -p slotsmachine-patch/libs
+          curl -fsSL -o "slotsmachine-patch/libs/$ORIGINAL_JAR" \
+            "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/$ORIGINAL_JAR"
+          test -s "slotsmachine-patch/libs/$ORIGINAL_JAR" || { echo "::error::jar original introuvable sur mod-jars"; exit 1; }
+
+      - name: Compiler les classes corrigées
+        working-directory: slotsmachine-patch
+        run: gradle compileJava --no-daemon --stacktrace
+
+      - name: Réinjecter les classes patchées dans le jar
+        working-directory: slotsmachine-patch
+        run: |
+          set -euo pipefail
+          CLASSES=build/classes/java/main
+          cp "libs/$ORIGINAL_JAR" "$PATCHED_JAR"
+          for c in \
+            net/micaxs/slotsmachine/screen/SlotsMachineMenu.class \
+            net/micaxs/slotsmachine/screen/SlotsMachineOwnerMenu.class \
+            net/micaxs/slotsmachine/screen/PlayerShopMenu.class ; do
+            test -f "$CLASSES/$c" || { echo "::error::classe recompilée manquante : $c"; exit 1; }
+          done
+          jar uf "$PATCHED_JAR" \
+            -C "$CLASSES" net/micaxs/slotsmachine/screen/SlotsMachineMenu.class \
+            -C "$CLASSES" net/micaxs/slotsmachine/screen/SlotsMachineOwnerMenu.class \
+            -C "$CLASSES" net/micaxs/slotsmachine/screen/PlayerShopMenu.class
+          # Vérifie que les 3 classes sont bien dans le jar final.
+          for c in SlotsMachineMenu SlotsMachineOwnerMenu PlayerShopMenu ; do
+            unzip -l "$PATCHED_JAR" | grep -q "net/micaxs/slotsmachine/screen/$c.class" \
+              || { echo "::error::$c absente du jar patché"; exit 1; }
+          done
+          echo "Jar patché prêt : $PATCHED_JAR"
+
+      - name: Publier le .jar (artefact, filet de secours)
+        uses: actions/upload-artifact@v4
+        with:
+          name: slotsmachine-zigcity2-jar
+          path: slotsmachine-patch/${{ env.PATCHED_JAR }}
+          if-no-files-found: error
+
+      # Dépose le jar patché sur la branche mod-jars (raw), d'où le launcher le télécharge
+      # (cf. raw-launcher/modpack.json). Seulement sur main.
+      - name: Déposer le .jar sur la branche mod-jars
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          JAR="slotsmachine-patch/$PATCHED_JAR"
+          test -s "$JAR" || { echo "::error::jar patché introuvable"; exit 1; }
+          cp "$JAR" "$RUNNER_TEMP/$PATCHED_JAR"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin mod-jars:mod-jars
+          git checkout mod-jars
+          cp "$RUNNER_TEMP/$PATCHED_JAR" "./$PATCHED_JAR"
+          git add "$PATCHED_JAR"
+          if git diff --cached --quiet; then
+            echo "Aucun changement ($PATCHED_JAR déjà présent) — rien à pousser."
+          else
+            git commit -m "build: $PATCHED_JAR (menus null-safe, CI)"
+            git push origin mod-jars
+          fi

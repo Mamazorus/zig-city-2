@@ -1,0 +1,4 @@
+.gradle/
+build/
+# Le jar original est téléchargé depuis mod-jars par la CI, pas versionné ici.
+libs/

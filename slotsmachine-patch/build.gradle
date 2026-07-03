@@ -1,0 +1,24 @@
+plugins {
+    id 'java'
+    id 'net.neoforged.moddev' version '2.0.141'
+}
+
+// Minecraft 1.21.1 tourne sous Java 21.
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+neoForge {
+    // Ajoute Minecraft (mojmap) + NeoForge au classpath de compilation.
+    version = project.neo_version
+}
+
+dependencies {
+    // Le jar original du mod (téléchargé depuis la branche mod-jars par la CI dans libs/) fournit
+    // net.micaxs.slotsmachine.* (BlockEntity, ModBlocks, ModMenuTypes…) pour la compilation.
+    // compileOnly : on ne réembarque PAS le mod, on réinjecte seulement nos .class recompilés
+    // dans une copie du jar (étape `jar uf` du workflow).
+    compileOnly files('libs/slotsmachine1.21.1-1.1.8.jar')
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
