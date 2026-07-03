@@ -4,6 +4,7 @@ import { Avatar, RemoteNewsImage } from './remote-image'
 import { ItemIcon } from './item-icon'
 import { type ItemIconDesc } from './block-renderer'
 import { ImageCropper } from './image-cropper'
+import playerImage from './assets/player.png'
 
 type AdminTab = 'news' | 'admins' | 'players' | 'channels' | 'shop' | 'quests' | 'npcs' | 'backgrounds'
 
@@ -97,7 +98,8 @@ const NPC_ROLE_LABEL: Record<NpcRole, string> = { quest: 'Quêtes', daily: 'Shop
 
 // Aperçu « tête » d'un skin de PNJ (image 64×64 hébergée), rendu par crop CSS des régions
 // tête + calque, comme un avatar Minecraft. Passe par le main (fetchImage) pour contourner le
-// proxy/VPN/AV que Chromium respecte. Sans skin custom → pastille neutre.
+// proxy/VPN/AV que Chromium respecte. Sans skin custom (ou le temps que le skin distant se
+// charge) → tête de Steve bundlée, comme le skin par défaut du PNJ en jeu.
 function NpcSkinHead({ skinUrl, size = 40 }: { skinUrl?: string | null; size?: number }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null)
   useEffect(() => {
@@ -110,13 +112,15 @@ function NpcSkinHead({ skinUrl, size = 40 }: { skinUrl?: string | null; size?: n
   }, [skinUrl])
   const scale = size / 8
   if (!dataUrl) {
+    // player.png est une tête déjà rendue (downscalée ici) → lissage par défaut, pas de
+    // `pixelated` (celui-ci sert à l'upscale du crop CSS des skins custom ci-dessous).
     return (
-      <div className="shrink-0 flex items-center justify-center" style={{ width: size, height: size, borderRadius: 10, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
-        <svg width={size * 0.5} height={size * 0.5} viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="5.5" r="2.5" stroke="rgba(255,255,255,0.35)" strokeWidth="1.4" />
-          <path d="M2.5 13.5C3.2 11.2 5.3 9.8 8 9.8s4.8 1.4 5.5 3.7" stroke="rgba(255,255,255,0.35)" strokeWidth="1.4" strokeLinecap="round" />
-        </svg>
-      </div>
+      <img
+        src={playerImage}
+        alt=""
+        className="shrink-0"
+        style={{ width: size, height: size, borderRadius: 10, objectFit: 'cover', border: '1px solid rgba(255,255,255,0.12)' }}
+      />
     )
   }
   const layer = (x: number, y: number, z: number): CSSProperties => ({
@@ -2001,9 +2005,12 @@ export default function AdminDashboard({
               <div className="flex flex-col gap-[8px]">
                 {npcs.map(n => (
                   <div key={n.id} className="flex items-center gap-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[8px] p-[10px] group hover:bg-[rgba(255,255,255,0.06)] hover:border-[rgba(255,255,255,0.12)] transition-colors">
-                    <button className="flex-1 min-w-0 flex flex-col gap-[3px] text-left" onClick={() => openNpc(n)}>
-                      <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px] truncate">{n.name}</p>
-                      <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px] truncate">{NPC_ROLE_LABEL[n.role]} · /zigshop npc {n.id}</p>
+                    <button className="flex-1 min-w-0 flex items-center gap-[12px] text-left" onClick={() => openNpc(n)}>
+                      <NpcSkinHead skinUrl={n.skinUrl} size={40} />
+                      <div className="flex flex-col gap-[3px] min-w-0">
+                        <p className="font-ui font-semibold text-[14px] text-white tracking-[-0.3px] truncate">{n.name}</p>
+                        <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px] truncate">{NPC_ROLE_LABEL[n.role]} · /zigshop npc {n.id}</p>
+                      </div>
                     </button>
                     {confirmDeleteNpc === n.id ? (
                       <div className="flex gap-[6px] items-center shrink-0">
