@@ -1949,9 +1949,9 @@ export default function App() {
     try {
       const res = await window.launcher.uploadSkin({ variant: selectedVariant, dataUrl })
       if (res.success) {
-        setSkinSuccess(isOffline
-          ? 'Skin enregistré ! Il s\'appliquera à ta prochaine connexion au serveur (visible par tous les joueurs).'
-          : 'Skin appliqué sur ton compte ! En jeu, il peut mettre quelques secondes à apparaître.')
+        // Le skin est appliqué en jeu par le mod au moment du join → il faut se (re)connecter
+        // au serveur pour le voir, quel que soit le type de compte. cf. feature-offline-skins.
+        setSkinSuccess('Skin enregistré ! Il s\'appliquera à ta prochaine connexion au serveur (visible par tous les joueurs).')
         setSkinVersion(v => v + 1)
         renderHeadFromSkin(dataUrl).then(setMyHead).catch(() => {})   // tête à jour partout, sans minotar
       } else {

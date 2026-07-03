@@ -1139,30 +1139,37 @@ ipcMain.handle('upload-skin', async (_, { variant, path: filePath, dataUrl } = {
     return { success: false, error: 'Le skin doit être un PNG de 64×64 pixels.' }
   }
 
-  // Compte hors-ligne : héberger le PNG sur Firebase Storage + publier /skins/{pseudo}.
-  // Le mod serveur zigshop lira ce chemin au join et appliquera le skin via skinrestorer.
-  if (currentToken.offline) return uploadOfflineSkin(currentToken.name, v, buf)
-
-  // Compte Microsoft : envoi via l'API officielle Mojang.
-  if (!currentToken.access_token) return { success: false, error: 'Non connecté', loggedOut: true }
-  const boundary = '----RawLauncherSkin' + crypto.randomUUID().replace(/-/g, '')
-  const body = buildSkinMultipart(v, buf, boundary)
-
-  try {
-    const res = await mcAuthorizedRequest('POST', MC_SKINS_URL, {
-      token: currentToken.access_token,
-      body,
-      contentType: `multipart/form-data; boundary=${boundary}`
-    })
-    if (res.statusCode === 401) return { success: false, error: 'Session Minecraft expirée — reconnecte-toi.', expired: true }
-    if (res.statusCode !== 200) {
-      return { success: false, error: `Échec de l'envoi (HTTP ${res.statusCode}). ${(res.text || '').slice(0, 160)}` }
-    }
-    const skin = activeSkin(res.json)
-    return { success: true, variant: normalizeVariant(skin?.variant) || v, skinUrl: skin?.url || null }
-  } catch (e) {
-    return { success: false, error: String(e.message || e) }
+  // Le mod serveur zigshop applique le skin EN JEU à partir de Firebase /skins/{pseudo} :
+  // le serveur tourne en online-mode=false et ne lit donc PAS les skins Mojang. On publie
+  // TOUJOURS sur Firebase — comptes hors-ligne comme Microsoft — sinon le skin change chez
+  // Mojang (carrousel OK) mais reste inchangé en jeu. cf. feature-offline-skins (mémoire).
+  if (currentToken.offline) {
+    const r = await publishSkinToFirebase(currentToken.name, v, buf)
+    return r.success ? { ...r, offline: true } : r
   }
+
+  // Compte Microsoft : (1) publier sur Firebase (application en jeu, cf. ci-dessus), PUIS
+  // (2) pousser aussi sur le compte Mojang — best-effort — pour la cohérence du compte et
+  // les têtes des carrousels (mc-heads/minotar). Un échec Mojang ne doit pas bloquer le
+  // changement : le skin s'appliquera quand même en jeu grâce à (1).
+  const published = await publishSkinToFirebase(currentToken.name, v, buf)
+
+  if (currentToken.access_token) {
+    try {
+      const boundary = '----RawLauncherSkin' + crypto.randomUUID().replace(/-/g, '')
+      const body = buildSkinMultipart(v, buf, boundary)
+      const res = await mcAuthorizedRequest('POST', MC_SKINS_URL, {
+        token: currentToken.access_token,
+        body,
+        contentType: `multipart/form-data; boundary=${boundary}`
+      })
+      if (res.statusCode !== 200) console.warn(`[skin] Envoi Mojang ignoré (HTTP ${res.statusCode}).`)
+    } catch (e) {
+      console.warn('[skin] Envoi Mojang ignoré :', e.message)
+    }
+  }
+
+  return published
 })
 
 ipcMain.handle('reset-skin', async () => {
@@ -1172,6 +1179,10 @@ ipcMain.handle('reset-skin', async () => {
     const res = await mcAuthorizedRequest('DELETE', `${MC_SKINS_URL}/active`, { token: currentToken.access_token })
     if (res.statusCode === 401) return { success: false, error: 'Session Minecraft expirée — reconnecte-toi.', expired: true }
     if (res.statusCode !== 200) return { success: false, error: `Échec de la réinitialisation (HTTP ${res.statusCode}).` }
+    // Retirer aussi le skin publié sur Firebase : sinon zigshop le réappliquerait en jeu au
+    // prochain join (serveur online-mode=false). cf. feature-offline-skins (mémoire).
+    try { await firebaseRequest('DELETE', `/skins/${currentToken.name}`, null, true) }
+    catch (e) { console.warn('[skin] Nettoyage Firebase au reset échoué :', e.message) }
     const skin = activeSkin(res.json)
     return { success: true, variant: normalizeVariant(skin?.variant), skinUrl: skin?.url || null, skinDataUrl: await fetchSkinDataUrl(skin?.url) }
   } catch (e) {
@@ -3805,12 +3816,15 @@ function mineskinGenerateFromBytes(variant, buffer) {
   })
 }
 
-// Skin d'un compte hors-ligne : héberge le PNG sur Firebase Storage, génère une texture
-// signée via MineSkin, puis publie /skins/{pseudo} = { url, imageUrl, variant, updatedAt,
-// textureValue, textureSignature }. Le mod serveur zigshop lit `url` (textures.minecraft.net)
-// à la connexion et applique le skin via skinrestorer (visible par tous). `imageUrl` = l'image
-// Firebase, utilisée par le launcher/carrousels (édition, tête) — cf. feature-offline-skins.
-async function uploadOfflineSkin(name, variant, buf) {
+// Publie un skin sur Firebase pour que le SERVEUR l'applique en jeu : héberge le PNG sur
+// Firebase Storage, génère une texture signée via MineSkin, puis publie /skins/{pseudo} =
+// { url, imageUrl, variant, updatedAt, textureValue, textureSignature }. Le mod serveur
+// zigshop lit `url` (textures.minecraft.net) à la connexion et applique le skin via
+// skinrestorer (visible par tous) — indispensable car le serveur tourne en online-mode=false
+// et ne lit pas les skins Mojang. `imageUrl` = l'image Firebase, utilisée par le
+// launcher/carrousels (édition, tête). Utilisé pour les comptes hors-ligne ET Microsoft.
+// cf. feature-offline-skins (mémoire).
+async function publishSkinToFirebase(name, variant, buf) {
   if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré.' }
   if (!FIREBASE_STORAGE_BUCKET || FIREBASE_STORAGE_BUCKET.includes('YOUR-')) {
     return { success: false, error: 'Bucket Storage non configuré.' }
@@ -3847,7 +3861,7 @@ async function uploadOfflineSkin(name, variant, buf) {
       ...(textureValue ? { textureValue, textureSignature } : {}),
     }, true)
     recordPlayerSeen(name)   // mettre un skin → apparaître dans le carrousel partagé (si pas masqué)
-    return { success: true, variant, skinUrl: up.url, skinDataUrl: `data:image/png;base64,${buf.toString('base64')}`, offline: true }
+    return { success: true, variant, skinUrl: up.url, skinDataUrl: `data:image/png;base64,${buf.toString('base64')}` }
   } catch (e) {
     return { success: false, error: String(e.message || e) }
   }
