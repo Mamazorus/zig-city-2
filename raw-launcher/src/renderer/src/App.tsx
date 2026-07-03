@@ -2790,8 +2790,9 @@ export default function App() {
               )}
             </div>
 
-            {/* Shop du jour */}
-            <div className="backdrop-blur-[5.95px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] flex flex-col gap-[22px] items-start overflow-clip p-[16px] rounded-[16px] shadow-[2px_2px_8px_0px_rgba(0,0,0,0.1)] w-full flex-1 min-h-0">
+            {/* Shop du jour — overflow-y-auto : quand il y a beaucoup de trades, la liste
+                déborde et le panneau devient scrollable (même pattern que la liste des joueurs). */}
+            <div className="backdrop-blur-[5.95px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] flex flex-col gap-[22px] items-start overflow-x-clip overflow-y-auto p-[16px] rounded-[16px] shadow-[2px_2px_8px_0px_rgba(0,0,0,0.1)] w-full flex-1 min-h-0">
               <div className="flex items-center justify-between w-full shrink-0" style={{ height: 20 }}>
                 <p className="font-ui font-semibold text-[16px] text-white tracking-[-0.64px] whitespace-nowrap">Shop du jour</p>
                 <div className={greenDot} />
