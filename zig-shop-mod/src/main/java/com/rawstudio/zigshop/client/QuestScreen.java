@@ -39,8 +39,8 @@ public class QuestScreen extends Screen {
                        int amount, String status, int progress, String rewardItem, int rewardQty,
                        String mode, int maxClaims, int claims, long cooldownMs, String winner) {}
 
-    /** Bouton d'une quête + son Y « absolu » (hors défilement), pour le repositionner au scroll. */
-    private record Positioned(Button button, int baseY) {}
+    /** Bouton d'une quête + son Y « absolu » (hors défilement) + s'il doit rester grisé (limite atteinte). */
+    private record Positioned(Button button, int baseY, boolean disabled) {}
 
     private static final int PANEL_W = 320;
     private static final int ROW_H = 56;
@@ -54,6 +54,8 @@ public class QuestScreen extends Screen {
     private int scrollY = 0;           // défilement courant (px), 0 = haut
     private int maxScroll = 0;         // défilement max (0 = tout tient à l'écran)
     private boolean draggingScrollbar = false;
+    private int activeCount = 0;       // quêtes en cours (tous PNJ), reçu du serveur
+    private int maxActive = 0;         // limite de quêtes en cours (0 = pas de limite → aucun affichage/grisage)
 
     public QuestScreen(String json) {
         super(Component.literal("Quetes"));
@@ -98,6 +100,8 @@ public class QuestScreen extends Screen {
                         o.has("winner") ? o.get("winner").getAsString() : ""
                 ));
             }
+            this.activeCount = root.has("activeCount") ? root.get("activeCount").getAsInt() : 0;
+            this.maxActive = root.has("maxActive") ? root.get("maxActive").getAsInt() : 0;
         } catch (RuntimeException ignored) {
             // JSON invalide : écran vide
         }
@@ -109,6 +113,9 @@ public class QuestScreen extends Screen {
         scrollY = clamp(scrollY, 0, maxScroll); // conserve la position (re-clampée) après refresh
 
         int x = (this.width - PANEL_W) / 2;
+        // Limite de quêtes en cours atteinte : on grise les boutons « Accepter » (le serveur
+        // refuserait de toute façon), les « Réclamer » restent actifs.
+        boolean limitReached = maxActive > 0 && activeCount >= maxActive;
         for (int i = 0; i < rows.size(); i++) {
             Row r = rows.get(i);
             int baseY = TOP + i * ROW_H + 18;
@@ -118,10 +125,12 @@ public class QuestScreen extends Screen {
                 continue; // quête unique déjà remportée : aucun bouton
             }
             Button btn = null;
+            boolean disabled = false;
             if ("available".equals(r.status())) {
                 btn = Button.builder(Component.literal("Accepter"),
                                 b -> PacketDistributor.sendToServer(new AcceptQuestPayload(id)))
                         .bounds(x + PANEL_W - 84, baseY, 80, 20).build();
+                disabled = limitReached;
             } else if ("completed".equals(r.status())) {
                 btn = Button.builder(Component.literal("Reclamer"),
                                 b -> PacketDistributor.sendToServer(new ClaimQuestPayload(id)))
@@ -129,7 +138,7 @@ public class QuestScreen extends Screen {
             }
             if (btn != null) {
                 this.addRenderableWidget(btn);
-                questButtons.add(new Positioned(btn, baseY));
+                questButtons.add(new Positioned(btn, baseY, disabled));
             }
         }
         // Bouton « Fermer » FIXE en bas (hors liste défilante → toujours accessible).
@@ -146,7 +155,7 @@ public class QuestScreen extends Screen {
             int y = pb.baseY() - scrollY;
             boolean visible = y >= TOP && (y + 20) <= bottom;
             pb.button().visible = visible;
-            pb.button().active = visible;
+            pb.button().active = visible && !pb.disabled();
             pb.button().setY(y);
         }
     }
@@ -168,6 +177,12 @@ public class QuestScreen extends Screen {
         super.render(g, mouseX, mouseY, partialTick);
 
         g.drawCenteredString(this.font, this.title, this.width / 2, 20, 0xFFFFFF);
+
+        // Compteur global de quêtes en cours (rouge si la limite est atteinte).
+        if (maxActive > 0) {
+            String count = (activeCount >= maxActive ? "§c" : "§a") + activeCount + "§7/" + maxActive;
+            g.drawCenteredString(this.font, "§7Quetes en cours : " + count, this.width / 2, 32, 0xFFFFFF);
+        }
 
         // Contenu de la liste, découpé (scissor) à la zone visible.
         g.enableScissor(x - 6, TOP, x + PANEL_W + SCROLLBAR_W + 8, bottom);

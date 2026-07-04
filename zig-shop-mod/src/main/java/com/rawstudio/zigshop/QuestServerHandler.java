@@ -98,6 +98,9 @@ public final class QuestServerHandler {
         }
         JsonObject root = new JsonObject();
         root.add("quests", arr);
+        // Compteur global (tous PNJ) pour l'écran : quêtes en cours vs limite autorisée.
+        root.addProperty("activeCount", QuestState.countActive(player));
+        root.addProperty("maxActive", ServerConfig.maxActiveQuests());
         return root.toString();
     }
 
@@ -112,7 +115,16 @@ public final class QuestServerHandler {
             }
             QuestDef q = find(list, questId);
             if (q != null) {
-                QuestState.accept(player, q);
+                // Une acceptation n'active une quête que si elle est AVAILABLE (neuve, ou daily/limited
+                // ré-armable) : on ne plafonne QUE ces cas (ré-cliquer une quête déjà en cours = no-op).
+                boolean willActivate = QuestState.AVAILABLE.equals(QuestState.status(player, q.id()));
+                int max = ServerConfig.maxActiveQuests();
+                if (willActivate && QuestState.countActive(player) >= max) {
+                    player.sendSystemMessage(Component.literal("§c[Zig Shop] Tu as deja " + max
+                            + " quetes en cours. Termine-en une avant d'en accepter une nouvelle."));
+                } else {
+                    QuestState.accept(player, q);
+                }
             }
             // Renvoie l'écran filtré comme le PNJ d'origine : le npc de la quête indique son PNJ.
             openFor(player, list, q != null && "unique".equals(q.mode()), npcOf(q));

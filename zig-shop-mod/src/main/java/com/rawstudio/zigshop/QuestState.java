@@ -2,6 +2,7 @@ package com.rawstudio.zigshop;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Player;
 
 /**
  * État des quêtes PAR JOUEUR, persisté dans les données du joueur
@@ -74,6 +75,23 @@ public final class QuestState {
     public static int claims(ServerPlayer player, String questId) {
         CompoundTag r = root(player);
         return r.contains(questId) ? r.getCompound(questId).getInt("claims") : 0;
+    }
+
+    /**
+     * Nombre de quêtes actuellement ACCEPTÉES (en cours de réalisation) par ce joueur, tous
+     * PNJ confondus. Sert à plafonner le nombre de quêtes activables simultanément (cf.
+     * {@link QuestServerHandler#accept}). Les quêtes complétées/réclamées/disponibles ne
+     * comptent pas : seul un objectif en cours occupe un « emplacement ».
+     */
+    public static int countActive(ServerPlayer player) {
+        CompoundTag r = root(player);
+        int n = 0;
+        for (String id : r.getAllKeys()) {
+            if (ACCEPTED.equals(r.getCompound(id).getString("status"))) {
+                n++;
+            }
+        }
+        return n;
     }
 
     /**
@@ -203,5 +221,20 @@ public final class QuestState {
         }
         player.getPersistentData().put(ROOT, r);
         return ClaimResult.OK;
+    }
+
+    /**
+     * Copie l'état des quêtes de l'ANCIENNE instance de joueur vers la NOUVELLE lors d'un
+     * clonage (respawn après la mort, retour de l'End). INDISPENSABLE : le vanilla ne
+     * conserve PAS le {@code getPersistentData()} racine à travers un respawn (seul le
+     * sous-tag {@code PlayerPersisted} survit), donc sans cette recopie toutes les quêtes
+     * acceptées — et leur progression — seraient réinitialisées à chaque mort. Appelé depuis
+     * {@code QuestEvents.onPlayerClone} ({@code PlayerEvent.Clone}).
+     */
+    public static void copyForRespawn(Player original, Player fresh) {
+        CompoundTag oldData = original.getPersistentData();
+        if (oldData.contains(ROOT)) {
+            fresh.getPersistentData().put(ROOT, oldData.getCompound(ROOT).copy());
+        }
     }
 }

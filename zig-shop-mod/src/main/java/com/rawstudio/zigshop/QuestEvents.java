@@ -97,6 +97,15 @@ public final class QuestEvents {
         QuestState.addProgress(player, "breed", entityId(parent.getType()), 1);
     }
 
+    // ─── Respawn / retour de l'End : CONSERVER les quêtes acceptées ───────────
+    // Le vanilla ne recopie que le sous-tag PlayerPersisted à travers un respawn ;
+    // notre état (getPersistentData() racine → ZigShopQuests) serait donc perdu à
+    // chaque mort. On le recopie manuellement de l'ancien joueur vers le nouveau.
+    @SubscribeEvent
+    public static void onPlayerClone(PlayerEvent.Clone event) {
+        QuestState.copyForRespawn(event.getOriginal(), event.getEntity());
+    }
+
     // ─── Démarrage serveur : ré-importe les gagnants « unique » depuis Firebase ─
     // (robustesse si le monde a été réinitialisé alors que Firebase garde la trace).
     @SubscribeEvent
