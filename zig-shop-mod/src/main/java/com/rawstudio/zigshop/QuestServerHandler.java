@@ -131,6 +131,22 @@ public final class QuestServerHandler {
         }));
     }
 
+    /** C→S : annule une quête en cours (la remet disponible), puis renvoie l'écran à jour. */
+    public static void cancel(IPayloadContext context, String questId) {
+        if (!(context.player() instanceof ServerPlayer player)) {
+            return;
+        }
+        FirebaseClient.fetchQuests().whenComplete((list, err) -> player.getServer().execute(() -> {
+            if (err != null || list == null) {
+                return;
+            }
+            QuestDef q = find(list, questId);
+            // Annulation par id : libère l'emplacement même si la quête a été retirée du catalogue.
+            QuestState.cancel(player, questId);
+            openFor(player, list, q != null && "unique".equals(q.mode()), npcOf(q));
+        }));
+    }
+
     /** C→S : réclame la récompense d'une quête complétée, puis renvoie l'écran. */
     public static void claim(IPayloadContext context, String questId) {
         if (!(context.player() instanceof ServerPlayer player)) {

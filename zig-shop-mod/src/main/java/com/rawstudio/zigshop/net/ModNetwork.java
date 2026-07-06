@@ -10,7 +10,7 @@ import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 /**
  * Enregistrement des paquets réseau du mod (bus du MOD). 1 paquet S→C (ouvrir l'écran)
- * et 2 paquets C→S (accepter / réclamer une quête).
+ * et 3 paquets C→S (accepter / réclamer / annuler une quête).
  *
  * <p>Le handler de {@code OpenQuestsPayload} référence une classe CLIENT
  * ({@code QuestClientHandler}) : comme il n'est exécuté que côté client (playToClient),
@@ -30,5 +30,7 @@ public final class ModNetwork {
                 (payload, context) -> QuestServerHandler.accept(context, payload.questId()));
         registrar.playToServer(ClaimQuestPayload.TYPE, ClaimQuestPayload.CODEC,
                 (payload, context) -> QuestServerHandler.claim(context, payload.questId()));
+        registrar.playToServer(CancelQuestPayload.TYPE, CancelQuestPayload.CODEC,
+                (payload, context) -> QuestServerHandler.cancel(context, payload.questId()));
     }
 }

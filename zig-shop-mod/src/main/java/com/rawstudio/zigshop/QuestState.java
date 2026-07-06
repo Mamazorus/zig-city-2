@@ -135,6 +135,30 @@ public final class QuestState {
     }
 
     /**
+     * Annule une quête ACCEPTÉE (en cours) : la remet {@code AVAILABLE} avec la progression
+     * remise à zéro, ce qui libère un emplacement (cf. {@link #countActive}) et la rend de
+     * nouveau acceptable plus tard. Préserve {@code claims}/{@code lastClaim} (l'historique de
+     * répétabilité limited/daily n'est pas touché). No-op si la quête n'est pas en cours
+     * (disponible / complétée / réclamée).
+     *
+     * @return true si une quête en cours a bien été annulée.
+     */
+    public static boolean cancel(ServerPlayer player, String questId) {
+        CompoundTag r = root(player);
+        if (!r.contains(questId)) {
+            return false;
+        }
+        CompoundTag t = r.getCompound(questId);
+        if (!ACCEPTED.equals(t.getString("status"))) {
+            return false; // seule une quête réellement en cours occupe un emplacement
+        }
+        t.putString("status", AVAILABLE);
+        t.putInt("progress", 0);
+        player.getPersistentData().put(ROOT, r);
+        return true;
+    }
+
+    /**
      * Incrémente de {@code count} la progression de toutes les quêtes ACCEPTÉES du joueur
      * dont le {@code type} correspond ET dont la cible correspond (ou est un joker : cible
      * vide/"*"). Passe en COMPLETED quand la quantité est atteinte. Idempotent (ne dépasse

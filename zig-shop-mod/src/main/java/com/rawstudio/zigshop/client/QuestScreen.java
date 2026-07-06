@@ -5,8 +5,10 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.rawstudio.zigshop.net.AcceptQuestPayload;
+import com.rawstudio.zigshop.net.CancelQuestPayload;
 import com.rawstudio.zigshop.net.ClaimQuestPayload;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -134,6 +136,11 @@ public class QuestScreen extends Screen {
             } else if ("completed".equals(r.status())) {
                 btn = Button.builder(Component.literal("Reclamer"),
                                 b -> PacketDistributor.sendToServer(new ClaimQuestPayload(id)))
+                        .bounds(x + PANEL_W - 84, baseY, 80, 20).build();
+            } else if ("accepted".equals(r.status())) {
+                // Quête en cours : bouton pour l'abandonner (libère un emplacement ; progression perdue).
+                btn = Button.builder(Component.literal("Annuler").withStyle(ChatFormatting.RED),
+                                b -> PacketDistributor.sendToServer(new CancelQuestPayload(id)))
                         .bounds(x + PANEL_W - 84, baseY, 80, 20).build();
             }
             if (btn != null) {
