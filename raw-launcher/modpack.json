@@ -965,6 +965,14 @@
     {
       "name": "skinlayers3d-neoforge-1.11.2-mc1.21.1.jar",
       "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/skinlayers3d-neoforge-1.11.2-mc1.21.1.jar"
+    },
+    {
+      "name": "CreateDragonsPlus-1.11.2b.jar",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/CreateDragonsPlus-1.11.2b.jar"
+    },
+    {
+      "name": "create-enchantment-industry-2.4.2.jar",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/create-enchantment-industry-2.4.2.jar"
     }
   ]
 }
