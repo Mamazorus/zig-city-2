@@ -1,6 +1,8 @@
 package com.rawstudio.zigshop;
 
 import com.mojang.authlib.properties.Property;
+import net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket;
+import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -22,9 +24,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code GameProfile} du joueur directement (une commande via une source « construite »
  * échouait silencieusement). Deux voies (cf. {@link #applyWebSkin}) : (1) injecter la
  * <b>texture déjà signée</b> par le launcher ({@code SkinRestorer.applySkin}) — instantané et
- * stable, donc pas de « refresh » d'entité répété qui désynchronisait le skin chez certains
- * observateurs ; (2) à défaut, refetch MineSkin via {@code SkinRestorer.setSkinAsync}. Dans les
- * deux cas SkinRestorer injecte la texture dans le profil (visible par TOUS) et la persiste.
+ * stable, donc idempotent (aucun refresh quand le skin est déjà le bon) ; (2) à défaut, refetch
+ * MineSkin via {@code SkinRestorer.setSkinAsync}. Dans les deux cas SkinRestorer injecte la
+ * texture dans le profil (visible par TOUS) et la persiste.
+ *
+ * <p><b>Dé-groupage anti-« skin noir »</b> : quand la texture DIFFÈRE de celle déjà appliquée
+ * (changement de skin, ou 1er join avec un persisté ≠ Firebase), SkinRestorer 2.3.1 effectue un
+ * {@code refreshPlayer} qui diffuse un {@code ClientboundBundlePacket} groupant
+ * {@code PlayerInfoRemove + PlayerInfoUpdate(ADD)} — bundle qu'une partie des clients ne
+ * digère pas (texture non re-résolue → joueur en <b>silhouette noire</b> chez EUX seulement).
+ * On corrige via {@link #resyncPlayerInfo} (dé-groupage = correctif officiel 2.7.0, issue #96).
  *
  * <p>La réflexion évite une dépendance de compilation sur SkinRestorer (mod optionnel).
  */
@@ -67,10 +76,11 @@ public final class PlayerSkinEvents {
      *   (+ signature), on l'injecte TELLE QUELLE via {@code SkinRestorer.applySkin(...)}. C'est
      *   instantané (aucun appel MineSkin au join) et surtout <b>stable</b> donc idempotent :
      *   SkinRestorer compare la texture à celle déjà appliquée ({@code areSkinPropertiesEquals})
-     *   et NE re-« refresh » PAS si elle est identique. Cela supprime le respawn d'entité en cours
-     *   de partie qui, à chaque 1er join après le redémarrage nocturne (le provider « web » refait
-     *   générer une texture au timestamp différent, donc « nouvelle »), désynchronisait le skin
-     *   chez une partie seulement des observateurs (skin par défaut / noir vus par certains).</li>
+     *   et NE re-« refresh » PAS si elle est identique — cas majoritaire, la texture signée étant
+     *   stable. Quand elle DIFFÈRE (changement de skin, ou persisté ≠ Firebase), SkinRestorer
+     *   déclenche un {@code refreshPlayer} : on renvoie alors le PlayerInfo dé-groupé
+     *   ({@link #resyncPlayerInfo}) pour éviter la silhouette noire chez une partie des
+     *   observateurs (bundle remove+add groupé de SkinRestorer 2.3.1, issue #96).</li>
      *   <li><b>Repli provider « web »</b> : sans texture signée (ancien enregistrement ou échec
      *   MineSkin côté launcher), on retombe sur {@code setSkinAsync("web", url)}.</li>
      * </ol>
@@ -110,6 +120,16 @@ public final class PlayerSkinEvents {
                     .getMethod("applySkin", MinecraftServer.class, Iterable.class, skinValueClass, boolean.class)
                     .invoke(null, server, List.of(player.getGameProfile()), skinValue, true);
             int refreshed = (accepted instanceof java.util.Collection<?> c) ? c.size() : -1;
+            if (refreshed > 0) {
+                // SkinRestorer 2.3.1 vient d'émettre (dans applySkin -> refreshPlayer) un
+                // ClientboundBundlePacket GROUPANT PlayerInfoRemove + PlayerInfoUpdate(ADD) du
+                // joueur. Ce « remove+add groupés » est mal appliqué par une PARTIE des clients
+                // (la texture n'est pas re-résolue -> joueur rendu en SILHOUETTE NOIRE chez EUX
+                // seulement, les autres voient le bon skin) : c'est l'issue #96 de SkinRestorer,
+                // corrigée en 2.7.0 par simple DÉ-GROUPAGE. On reproduit ce correctif ici, sans
+                // toucher au mod tiers, en renvoyant nous-mêmes le PlayerInfo dé-groupé.
+                resyncPlayerInfo(server, player);
+            }
             ZigShop.LOGGER.info("[ZigShop] Skin signé appliqué pour {} (variant={}, refresh={})",
                     name, skin.variant(), refreshed > 0);
             return true;
@@ -131,7 +151,12 @@ public final class PlayerSkinEvents {
                     .getMethod("setSkinAsync", MinecraftServer.class, java.util.Collection.class, ctxClass, boolean.class)
                     .invoke(null, server, List.of(player.getGameProfile()), ctx, true);
             if (future instanceof CompletableFuture<?> cf) {
-                cf.thenAccept(result -> ZigShop.LOGGER.info("[ZigShop] Skin (web) appliqué pour {} -> {}", name, result))
+                cf.thenAccept(result -> {
+                      ZigShop.LOGGER.info("[ZigShop] Skin (web) appliqué pour {} -> {}", name, result);
+                      // Le refresh de SkinRestorer 2.3.1 est asynchrone ici : on re-synchronise le
+                      // PlayerInfo dé-groupé sur le thread serveur (cf. issue #96, voir applySignedSkin).
+                      server.execute(() -> resyncPlayerInfo(server, player));
+                  })
                   .exceptionally(ex -> {
                       ZigShop.LOGGER.warn("[ZigShop] Skin de {} : échec MineSkin/application : {}", name, ex.toString());
                       return null;
@@ -141,6 +166,24 @@ public final class PlayerSkinEvents {
         } catch (Throwable t) {
             ZigShop.LOGGER.warn("[ZigShop] Application (web) du skin de {} échouée : {}", name, t.toString());
         }
+    }
+
+    /**
+     * Renvoie le {@code PlayerInfo} de {@code player} à TOUS les joueurs en DEUX paquets top-level
+     * SÉPARÉS — {@code ClientboundPlayerInfoRemovePacket} puis
+     * {@code ClientboundPlayerInfoUpdatePacket.createPlayerInitializing} — au lieu du
+     * {@code ClientboundBundlePacket} groupé qu'émet {@code PlayerUtils.refreshPlayer} de
+     * SkinRestorer 2.3.1. Ce dé-groupage EST le correctif officiel de SkinRestorer 2.7.0
+     * (issue #96) : certains clients ne rafraîchissent pas la texture d'un bundle remove+add
+     * groupé et rendent le joueur en silhouette noire. Le {@code remove} force le client à jeter
+     * son {@code PlayerInfo} (et la texture associée), l'{@code add} le recrée → re-téléchargement
+     * de la texture. Les deux {@code broadcastAll} produisent des paquets top-level (non groupés),
+     * traités séquentiellement par le client, même s'ils partent dans le même tick.
+     */
+    private static void resyncPlayerInfo(MinecraftServer server, ServerPlayer player) {
+        var playerList = server.getPlayerList();
+        playerList.broadcastAll(new ClientboundPlayerInfoRemovePacket(List.of(player.getUUID())));
+        playerList.broadcastAll(ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(List.of(player)));
     }
 
     /** Refuse une URL non-HTTP ou contenant un caractère qui casserait le traitement (guillemet, espace, retour ligne). */
