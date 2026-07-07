@@ -75,6 +75,10 @@
   ],
   "mods": [
     {
+      "name": "drugsmod-1.5.5-neoforge-1.21.1.jar",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/drugsmod-1.5.5-neoforge-1.21.1.jar"
+    },
+    {
       "name": "[1.21.1] SecurityCraft v1.9.12.jar",
       "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/%5B1.21.1%5D%20SecurityCraft%20v1.9.12.jar"
     },
