@@ -3843,13 +3843,21 @@ async function publishSkinToFirebase(name, variant, buf) {
     let modUrl = up.url
     let textureValue = ''
     let textureSignature = ''
-    try {
-      const gen = await mineskinGenerateFromBytes(variant, buf)
-      modUrl = gen.url
-      textureValue = gen.value
-      textureSignature = gen.signature
-    } catch (e) {
-      console.warn('[skin] MineSkin indisponible, repli sur URL Firebase :', e.message)
+    // MineSkin peut échouer ponctuellement (rate limit ~10/min, timeout réseau). On réessaie
+    // quelques fois AVANT de replier : sans texture signée, le skin ne s'applique pas en jeu
+    // (le mod serveur retombe sur le provider « web » qui refait fetcher l'URL par MineSkin →
+    // 403 sur Firebase). Le repli n'est donc qu'un dernier recours. cf. feature-offline-skins.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const gen = await mineskinGenerateFromBytes(variant, buf)
+        modUrl = gen.url
+        textureValue = gen.value
+        textureSignature = gen.signature
+        break
+      } catch (e) {
+        console.warn(`[skin] MineSkin tentative ${attempt}/3 échouée : ${e.message}`)
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 1500 * attempt))
+      }
     }
 
     // 3) Publie l'enregistrement.
