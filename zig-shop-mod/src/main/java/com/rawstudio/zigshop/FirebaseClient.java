@@ -186,9 +186,15 @@ public final class FirebaseClient {
     // ─── SKINS (comptes hors-ligne) ───────────────────────────────────────────
     /**
      * Skin custom d'un joueur choisi depuis le launcher, publié sous {@code /skins/{pseudo}} :
-     * {@code url} (image PNG hébergée), {@code variant} (classic|slim), {@code updatedAt} (ms).
+     * {@code url} (texture hébergée, en principe textures.minecraft.net), {@code variant}
+     * (classic|slim), {@code updatedAt} (ms) et, quand le launcher a pu la produire, la
+     * <b>texture signée</b> ({@code textureValue}/{@code textureSignature}) telle que renvoyée
+     * par MineSkin. Ces deux derniers champs permettent d'appliquer le skin SANS repasser par
+     * MineSkin au join (application directe, stable, idempotente). Vides = repli sur le provider
+     * « web » (l'URL est refetchée par MineSkin côté serveur).
      */
-    public record PlayerSkin(String url, String variant, long updatedAt) {}
+    public record PlayerSkin(String url, String variant, long updatedAt,
+                             String textureValue, String textureSignature) {}
 
     /** Lit le skin custom d'un joueur ({@code /skins/{pseudo}}). {@code null} si aucun défini. */
     public static CompletableFuture<PlayerSkin> fetchPlayerSkin(String player) {
@@ -206,7 +212,8 @@ public final class FirebaseClient {
         try {
             if (o.has("updatedAt") && !o.get("updatedAt").isJsonNull()) updatedAt = o.get("updatedAt").getAsLong();
         } catch (RuntimeException ignored) { /* garde updatedAt=0 */ }
-        return new PlayerSkin(url, str(o, "variant"), updatedAt);
+        return new PlayerSkin(url, str(o, "variant"), updatedAt,
+                str(o, "textureValue"), str(o, "textureSignature"));
     }
 
     /** GET public sur un chemin de la base (sans auth). Le corps brut est renvoyé. */

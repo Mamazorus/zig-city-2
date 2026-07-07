@@ -1,5 +1,6 @@
 package com.rawstudio.zigshop;
 
+import com.mojang.authlib.properties.Property;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -16,12 +17,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * Applique automatiquement le skin custom d'un joueur (choisi dans le launcher, publié
  * dans Firebase {@code /skins/{pseudo}}) à sa connexion, via le mod <b>SkinRestorer</b>.
  *
- * <p>On appelle DIRECTEMENT l'API de SkinRestorer par réflexion
- * ({@code net.lionarius.skinrestorer.SkinRestorer#setSkinAsync}) au lieu de passer par sa
- * commande {@code /skin} : cela évite tout parsing d'URL / résolution de cible et fournit
- * le {@code GameProfile} du joueur directement (une commande lancée via une source
- * « construite » échouait silencieusement). SkinRestorer télécharge la texture (via
- * MineSkin), l'injecte dans le profil de jeu (visible par TOUS les clients) et la persiste.
+ * <p>On appelle DIRECTEMENT l'API de SkinRestorer par réflexion (au lieu de sa commande
+ * {@code /skin}) : cela évite tout parsing d'URL / résolution de cible et fournit le
+ * {@code GameProfile} du joueur directement (une commande via une source « construite »
+ * échouait silencieusement). Deux voies (cf. {@link #applyWebSkin}) : (1) injecter la
+ * <b>texture déjà signée</b> par le launcher ({@code SkinRestorer.applySkin}) — instantané et
+ * stable, donc pas de « refresh » d'entité répété qui désynchronisait le skin chez certains
+ * observateurs ; (2) à défaut, refetch MineSkin via {@code SkinRestorer.setSkinAsync}. Dans les
+ * deux cas SkinRestorer injecte la texture dans le profil (visible par TOUS) et la persiste.
  *
  * <p>La réflexion évite une dépendance de compilation sur SkinRestorer (mod optionnel).
  */
@@ -57,8 +60,67 @@ public final class PlayerSkinEvents {
         }));
     }
 
-    /** Appelle SkinRestorer.setSkinAsync(server, [profil], new SkinProviderContext("web", url, variant), true) par réflexion. */
+    /**
+     * Applique le skin custom, en deux voies :
+     * <ol>
+     *   <li><b>Texture signée directe</b> (préférée) : si Firebase fournit {@code textureValue}
+     *   (+ signature), on l'injecte TELLE QUELLE via {@code SkinRestorer.applySkin(...)}. C'est
+     *   instantané (aucun appel MineSkin au join) et surtout <b>stable</b> donc idempotent :
+     *   SkinRestorer compare la texture à celle déjà appliquée ({@code areSkinPropertiesEquals})
+     *   et NE re-« refresh » PAS si elle est identique. Cela supprime le respawn d'entité en cours
+     *   de partie qui, à chaque 1er join après le redémarrage nocturne (le provider « web » refait
+     *   générer une texture au timestamp différent, donc « nouvelle »), désynchronisait le skin
+     *   chez une partie seulement des observateurs (skin par défaut / noir vus par certains).</li>
+     *   <li><b>Repli provider « web »</b> : sans texture signée (ancien enregistrement ou échec
+     *   MineSkin côté launcher), on retombe sur {@code setSkinAsync("web", url)}.</li>
+     * </ol>
+     */
     private static void applyWebSkin(MinecraftServer server, ServerPlayer player, String name, FirebaseClient.PlayerSkin skin) {
+        boolean applied = false;
+        if (skin.textureValue() != null && !skin.textureValue().isBlank()) {
+            applied = applySignedSkin(server, player, name, skin);          // voie 1 (préférée, stable)
+        }
+        if (!applied) {
+            applyViaWebProvider(server, player, name, skin);                // voie 2 (repli MineSkin)
+        }
+        APPLIED.put(name, skin.updatedAt());                                // évite un re-fetch dans la même session
+    }
+
+    /**
+     * Injecte la texture signée du launcher via
+     * {@code SkinRestorer.applySkin(server, [profil], new SkinValue("web", url, variant,
+     * new Property("textures", value, signature)), true)} par réflexion. Synchrone (on est déjà
+     * sur le thread serveur via {@code server.execute}). Renvoie {@code false} si l'API de
+     * SkinRestorer est indisponible → repli sur {@link #applyViaWebProvider}.
+     */
+    private static boolean applySignedSkin(MinecraftServer server, ServerPlayer player, String name, FirebaseClient.PlayerSkin skin) {
+        try {
+            Class<?> srClass = Class.forName("net.lionarius.skinrestorer.SkinRestorer");
+            Class<?> skinValueClass = Class.forName("net.lionarius.skinrestorer.skin.SkinValue");
+            Class<?> variantClass = Class.forName("net.lionarius.skinrestorer.skin.SkinVariant");
+            Object variant = variantClass.getField("slim".equalsIgnoreCase(skin.variant()) ? "SLIM" : "CLASSIC").get(null);
+            String sig = (skin.textureSignature() == null || skin.textureSignature().isBlank()) ? null : skin.textureSignature();
+            Property texture = new Property("textures", skin.textureValue(), sig);
+            // SkinValue(String provider, String argument, SkinVariant variant, Property value)
+            Object skinValue = skinValueClass
+                    .getConstructor(String.class, String.class, variantClass, Property.class)
+                    .newInstance("web", skin.url(), variant, texture);
+            // applySkin(MinecraftServer, Iterable<GameProfile>, SkinValue, boolean) -> Collection<ServerPlayer>
+            Object accepted = srClass
+                    .getMethod("applySkin", MinecraftServer.class, Iterable.class, skinValueClass, boolean.class)
+                    .invoke(null, server, List.of(player.getGameProfile()), skinValue, true);
+            int refreshed = (accepted instanceof java.util.Collection<?> c) ? c.size() : -1;
+            ZigShop.LOGGER.info("[ZigShop] Skin signé appliqué pour {} (variant={}, refresh={})",
+                    name, skin.variant(), refreshed > 0);
+            return true;
+        } catch (Throwable t) {
+            ZigShop.LOGGER.warn("[ZigShop] Application directe du skin de {} échouée ({}) — repli web", name, t.toString());
+            return false;
+        }
+    }
+
+    /** Repli : {@code SkinRestorer.setSkinAsync(server, [profil], new SkinProviderContext("web", url, variant), true)}. */
+    private static void applyViaWebProvider(MinecraftServer server, ServerPlayer player, String name, FirebaseClient.PlayerSkin skin) {
         try {
             Class<?> srClass = Class.forName("net.lionarius.skinrestorer.SkinRestorer");
             Class<?> ctxClass = Class.forName("net.lionarius.skinrestorer.skin.provider.SkinProviderContext");
@@ -69,16 +131,15 @@ public final class PlayerSkinEvents {
                     .getMethod("setSkinAsync", MinecraftServer.class, java.util.Collection.class, ctxClass, boolean.class)
                     .invoke(null, server, List.of(player.getGameProfile()), ctx, true);
             if (future instanceof CompletableFuture<?> cf) {
-                cf.thenAccept(result -> ZigShop.LOGGER.info("[ZigShop] Skin custom appliqué pour {} -> {}", name, result))
+                cf.thenAccept(result -> ZigShop.LOGGER.info("[ZigShop] Skin (web) appliqué pour {} -> {}", name, result))
                   .exceptionally(ex -> {
                       ZigShop.LOGGER.warn("[ZigShop] Skin de {} : échec MineSkin/application : {}", name, ex.toString());
                       return null;
                   });
             }
-            APPLIED.put(name, skin.updatedAt());
-            ZigShop.LOGGER.info("[ZigShop] setSkinAsync lancé pour {} (variant={})", name, skin.variant());
+            ZigShop.LOGGER.info("[ZigShop] setSkinAsync (repli web) lancé pour {} (variant={})", name, skin.variant());
         } catch (Throwable t) {
-            ZigShop.LOGGER.warn("[ZigShop] Application du skin de {} échouée : {}", name, t.toString());
+            ZigShop.LOGGER.warn("[ZigShop] Application (web) du skin de {} échouée : {}", name, t.toString());
         }
     }
 
