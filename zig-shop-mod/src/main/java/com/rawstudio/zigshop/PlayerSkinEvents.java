@@ -91,7 +91,9 @@ public final class PlayerSkinEvents {
             applied = applySignedSkin(server, player, name, skin);          // voie 1 (préférée, stable)
         }
         if (!applied) {
-            applyViaWebProvider(server, player, name, skin);                // voie 2 (repli MineSkin)
+            applyViaWebProvider(server, player, name, skin);                // voie 2 (repli MineSkin) — resync inclus à la complétion
+        } else {
+            scheduleResync(server, player);                                 // filet #96 : dé-groupage INCONDITIONNEL post-join (cf. méthode)
         }
         APPLIED.put(name, skin.updatedAt());                                // évite un re-fetch dans la même session
     }
@@ -180,6 +182,38 @@ public final class PlayerSkinEvents {
      * de la texture. Les deux {@code broadcastAll} produisent des paquets top-level (non groupés),
      * traités séquentiellement par le client, même s'ils partent dans le même tick.
      */
+    /**
+     * Planifie un {@link #resyncPlayerInfo} <b>inconditionnel</b> ~0,5 s après le join. C'est le
+     * correctif de fond du bug « certains me voient noir, d'autres non » (vérifié par les logs
+     * serveur : la quasi-totalité des joins sont {@code refresh=false}).
+     *
+     * <p>Avec {@code refreshSkinOnJoin=false}, le profil ne porte PAS encore la texture au moment
+     * où le paquet {@code ADD_PLAYER} du join est diffusé → les joueurs <b>déjà connectés</b>
+     * rendent le nouvel arrivant en skin par défaut / silhouette noire. La texture signée est
+     * ensuite posée sur le profil (SkinRestorer restore + notre {@code applySkin}), mais comme elle
+     * est <b>identique</b>, {@code applySkin} renvoie {@code refresh=false} et <b>aucun paquet de
+     * correction n'est émis</b> → les observateurs déjà présents restent bloqués sur le rendu noir
+     * (ceux qui se connectent APRÈS reçoivent le profil déjà à jour et voient le bon skin, d'où le
+     * « dépend de l'observateur »). L'ancien dé-groupage conditionnel ({@code if refreshed > 0}) ne
+     * corrigeait donc jamais ce cas majoritaire.
+     *
+     * <p>On renvoie ici à TOUS, systématiquement, un PlayerInfo <b>dé-groupé</b> (remove + add) :
+     * un skin ne pouvant être transmis que par l'action {@code ADD_PLAYER}, ce remove+add force les
+     * clients à re-résoudre la texture. C'est aussi le correctif de l'issue #96 (bundle mal digéré)
+     * quand un refresh a bien lieu. Le court délai place notre paquet après le tracking d'entité et
+     * tout refresh de SkinRestorer. No-op si le joueur s'est déconnecté entre-temps.
+     */
+    private static void scheduleResync(MinecraftServer server, ServerPlayer player) {
+        final java.util.UUID id = player.getUUID();
+        CompletableFuture
+                .runAsync(() -> {}, CompletableFuture.delayedExecutor(500L, java.util.concurrent.TimeUnit.MILLISECONDS))
+                .thenRun(() -> server.execute(() -> {
+                    if (!server.isRunning()) return;
+                    ServerPlayer p = server.getPlayerList().getPlayer(id);
+                    if (p != null) resyncPlayerInfo(server, p);
+                }));
+    }
+
     private static void resyncPlayerInfo(MinecraftServer server, ServerPlayer player) {
         var playerList = server.getPlayerList();
         playerList.broadcastAll(new ClientboundPlayerInfoRemovePacket(List.of(player.getUUID())));
