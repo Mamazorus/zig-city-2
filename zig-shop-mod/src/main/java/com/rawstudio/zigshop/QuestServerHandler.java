@@ -3,6 +3,7 @@ package com.rawstudio.zigshop;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.rawstudio.zigshop.net.OpenQuestsPayload;
+import com.rawstudio.zigshop.net.SyncActiveQuestsPayload;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -48,6 +49,15 @@ public final class QuestServerHandler {
      */
     public static void openFor(ServerPlayer player, List<QuestDef> quests, boolean uniqueOnly, @Nullable String npcId) {
         PacketDistributor.sendToPlayer(player, new OpenQuestsPayload(buildJson(player, quests, uniqueOnly, npcId)));
+    }
+
+    /**
+     * Pousse au client la liste des quêtes ACTIVES du joueur (journal d'inventaire + suivi
+     * permanent). À rappeler après toute modification d'état (accept/annule/réclame/progression)
+     * et à la connexion — c'est ce qui permet au client de connaître ses quêtes HORS de l'écran PNJ.
+     */
+    public static void syncActive(ServerPlayer player) {
+        PacketDistributor.sendToPlayer(player, new SyncActiveQuestsPayload(QuestState.activeQuestsJson(player)));
     }
 
     /** Sérialise les quêtes (filtrées par PNJ + mode) + l'état du joueur en JSON pour l'écran. */
@@ -128,6 +138,7 @@ public final class QuestServerHandler {
             }
             // Renvoie l'écran filtré comme le PNJ d'origine : le npc de la quête indique son PNJ.
             openFor(player, list, q != null && "unique".equals(q.mode()), npcOf(q));
+            syncActive(player); // met à jour le journal (nouvelle quête en cours)
         }));
     }
 
@@ -144,6 +155,7 @@ public final class QuestServerHandler {
             // Annulation par id : libère l'emplacement même si la quête a été retirée du catalogue.
             QuestState.cancel(player, questId);
             openFor(player, list, q != null && "unique".equals(q.mode()), npcOf(q));
+            syncActive(player); // met à jour le journal (quête retirée)
         }));
     }
 
@@ -169,6 +181,7 @@ public final class QuestServerHandler {
                 giveReward(player, q);
             }
             openFor(player, list, unique, npcOf(q));
+            syncActive(player); // met à jour le journal (quête réclamée → retirée des actives)
         }));
     }
 

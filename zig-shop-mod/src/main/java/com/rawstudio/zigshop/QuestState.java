@@ -1,6 +1,10 @@
 package com.rawstudio.zigshop;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 
@@ -123,6 +127,10 @@ public final class QuestState {
         }
         t.putString("type", normType(quest.type()));
         t.putString("target", quest.target());
+        // Titre mémorisé dans l'instantané : permet au journal client d'afficher un libellé lisible
+        // sans re-lire Firebase (rétrocompat : une quête acceptée avant cette MAJ n'a pas de titre →
+        // le client se rabat sur l'objectif « verbe + cible »).
+        t.putString("title", quest.title() == null ? "" : quest.title());
         t.putInt("amount", Math.max(1, quest.amount()));
         t.putString("mode", normMode(quest.mode()));
         t.putInt("maxClaims", Math.max(1, quest.maxClaims()));
@@ -164,8 +172,8 @@ public final class QuestState {
      * vide/"*"). Passe en COMPLETED quand la quantité est atteinte. Idempotent (ne dépasse
      * jamais {@code amount} — un craft de 64 sur une quête « 10 » plafonne à 10).
      */
-    public static void addProgress(ServerPlayer player, String type, String targetId, int count) {
-        if (count <= 0) return;
+    public static boolean addProgress(ServerPlayer player, String type, String targetId, int count) {
+        if (count <= 0) return false;
         CompoundTag r = root(player);
         boolean changed = false;
         for (String id : r.getAllKeys()) {
@@ -182,12 +190,21 @@ public final class QuestState {
             t.putInt("progress", prog);
             if (prog >= amount) {
                 t.putString("status", COMPLETED);
+                notifyCompleted(player, t.getString("title"));
             }
             changed = true;
         }
         if (changed) {
             player.getPersistentData().put(ROOT, r);
         }
+        return changed;
+    }
+
+    /** Message chat à la complétion (transition unique) : le joueur sait qu'il peut aller réclamer. */
+    private static void notifyCompleted(ServerPlayer player, String title) {
+        String label = (title == null || title.isBlank()) ? "Ta quete" : title;
+        player.sendSystemMessage(Component.literal("§aQuete terminee : §f" + label
+                + " §a- retourne voir le marchand !"));
     }
 
     /**
@@ -245,6 +262,37 @@ public final class QuestState {
         }
         player.getPersistentData().put(ROOT, r);
         return ClaimResult.OK;
+    }
+
+    /**
+     * JSON des quêtes ACTIVES (acceptées + complétées) du joueur, pour l'affichage client (journal
+     * d'inventaire / suivi). Construit UNIQUEMENT depuis l'instantané NBT — aucun accès Firebase,
+     * donc envoyable à tout instant. Forme : {@code {"quests":[{id,title,type,target,amount,progress,
+     * status,mode}, ...]}} (même conteneur « quests » que l'écran du PNJ).
+     */
+    public static String activeQuestsJson(ServerPlayer player) {
+        CompoundTag r = root(player);
+        JsonArray arr = new JsonArray();
+        for (String id : r.getAllKeys()) {
+            CompoundTag t = r.getCompound(id);
+            String status = t.getString("status");
+            if (!ACCEPTED.equals(status) && !COMPLETED.equals(status)) {
+                continue; // seules les quêtes en cours / à réclamer sont « actives »
+            }
+            JsonObject o = new JsonObject();
+            o.addProperty("id", id);
+            o.addProperty("title", t.getString("title"));
+            o.addProperty("type", normType(t.getString("type")));
+            o.addProperty("target", t.getString("target"));
+            o.addProperty("amount", Math.max(1, t.getInt("amount")));
+            o.addProperty("progress", t.getInt("progress"));
+            o.addProperty("status", status);
+            o.addProperty("mode", normMode(t.getString("mode")));
+            arr.add(o);
+        }
+        JsonObject rootObj = new JsonObject();
+        rootObj.add("quests", arr);
+        return rootObj.toString();
     }
 
     /**

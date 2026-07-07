@@ -36,7 +36,9 @@ public final class QuestEvents {
         if (!(event.getSource().getEntity() instanceof ServerPlayer player)) {
             return; // pas tué par un joueur
         }
-        QuestState.addProgress(player, "kill", entityId(event.getEntity().getType()), 1);
+        if (QuestState.addProgress(player, "kill", entityId(event.getEntity().getType()), 1)) {
+            QuestServerHandler.syncActive(player);
+        }
     }
 
     // ─── Casser un bloc ───────────────────────────────────────────────────────
@@ -45,7 +47,9 @@ public final class QuestEvents {
         if (!(event.getPlayer() instanceof ServerPlayer player)) {
             return;
         }
-        QuestState.addProgress(player, "break", blockId(event.getState()), 1);
+        if (QuestState.addProgress(player, "break", blockId(event.getState()), 1)) {
+            QuestServerHandler.syncActive(player);
+        }
     }
 
     // ─── Poser un bloc ────────────────────────────────────────────────────────
@@ -54,7 +58,9 @@ public final class QuestEvents {
         if (!(event.getEntity() instanceof ServerPlayer player)) {
             return; // posé par un piston / autre entité → ignoré
         }
-        QuestState.addProgress(player, "place", blockId(event.getPlacedBlock()), 1);
+        if (QuestState.addProgress(player, "place", blockId(event.getPlacedBlock()), 1)) {
+            QuestServerHandler.syncActive(player);
+        }
     }
 
     // ─── Fabriquer un objet (compte TOUTE la pile produite : 64 planches = +64) ─
@@ -64,7 +70,9 @@ public final class QuestEvents {
             return;
         }
         ItemStack stack = event.getCrafting();
-        QuestState.addProgress(player, "craft", itemId(stack), Math.max(1, stack.getCount()));
+        if (QuestState.addProgress(player, "craft", itemId(stack), Math.max(1, stack.getCount()))) {
+            QuestServerHandler.syncActive(player);
+        }
     }
 
     // ─── Cuire au four (compte toute la pile produite) ────────────────────────
@@ -74,7 +82,9 @@ public final class QuestEvents {
             return;
         }
         ItemStack stack = event.getSmelting();
-        QuestState.addProgress(player, "smelt", itemId(stack), Math.max(1, stack.getCount()));
+        if (QuestState.addProgress(player, "smelt", itemId(stack), Math.max(1, stack.getCount()))) {
+            QuestServerHandler.syncActive(player);
+        }
     }
 
     // ─── Pêcher (une prise = +1 ; cible = objet pêché, ou joker) ──────────────
@@ -84,7 +94,9 @@ public final class QuestEvents {
             return;
         }
         String target = event.getDrops().isEmpty() ? "" : itemId(event.getDrops().get(0));
-        QuestState.addProgress(player, "fish", target, 1);
+        if (QuestState.addProgress(player, "fish", target, 1)) {
+            QuestServerHandler.syncActive(player);
+        }
     }
 
     // ─── Élever des animaux (reproduction déclenchée par un joueur) ───────────
@@ -94,7 +106,9 @@ public final class QuestEvents {
         if (!(event.getCausedByPlayer() instanceof ServerPlayer player) || parent == null) {
             return; // reproduction naturelle (sans joueur) → ignorée
         }
-        QuestState.addProgress(player, "breed", entityId(parent.getType()), 1);
+        if (QuestState.addProgress(player, "breed", entityId(parent.getType()), 1)) {
+            QuestServerHandler.syncActive(player);
+        }
     }
 
     // ─── Respawn / retour de l'End : CONSERVER les quêtes acceptées ───────────
@@ -104,6 +118,31 @@ public final class QuestEvents {
     @SubscribeEvent
     public static void onPlayerClone(PlayerEvent.Clone event) {
         QuestState.copyForRespawn(event.getOriginal(), event.getEntity());
+    }
+
+    // ─── Connexion / respawn / changement de dimension : (re)pousser le journal au client ─────
+    // Le client ne persiste PAS l'état des quêtes (il ne le reçoit que par réseau) : à chaque fois
+    // qu'un joueur (re)prend le contrôle de son entité, on lui renvoie ses quêtes actives, sinon
+    // l'onglet quêtes resterait vide tant qu'il n'a pas reparlé à un PNJ.
+    @SubscribeEvent
+    public static void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            QuestServerHandler.syncActive(player);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onRespawn(PlayerEvent.PlayerRespawnEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            QuestServerHandler.syncActive(player);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            QuestServerHandler.syncActive(player);
+        }
     }
 
     // ─── Démarrage serveur : ré-importe les gagnants « unique » depuis Firebase ─

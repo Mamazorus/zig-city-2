@@ -9,12 +9,12 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 /**
- * Enregistrement des paquets réseau du mod (bus du MOD). 1 paquet S→C (ouvrir l'écran)
- * et 3 paquets C→S (accepter / réclamer / annuler une quête).
+ * Enregistrement des paquets réseau du mod (bus du MOD). 2 paquets S→C (ouvrir l'écran du PNJ ;
+ * synchroniser le journal des quêtes actives) et 3 paquets C→S (accepter / réclamer / annuler).
  *
- * <p>Le handler de {@code OpenQuestsPayload} référence une classe CLIENT
- * ({@code QuestClientHandler}) : comme il n'est exécuté que côté client (playToClient),
- * cette classe n'est chargée que là — le serveur dédié ne la touche jamais.
+ * <p>Les handlers S→C référencent des classes CLIENT ({@code QuestClientHandler},
+ * {@code ActiveQuestsClient}) : comme ils ne s'exécutent que côté client (playToClient), ces
+ * classes ne sont chargées que là — le serveur dédié ne les touche jamais.
  */
 @EventBusSubscriber(modid = ZigShop.MODID, bus = EventBusSubscriber.Bus.MOD)
 public final class ModNetwork {
@@ -26,6 +26,9 @@ public final class ModNetwork {
         registrar.playToClient(OpenQuestsPayload.TYPE, OpenQuestsPayload.CODEC,
                 (payload, context) -> context.enqueueWork(() ->
                         com.rawstudio.zigshop.client.QuestClientHandler.open(payload.json())));
+        registrar.playToClient(SyncActiveQuestsPayload.TYPE, SyncActiveQuestsPayload.CODEC,
+                (payload, context) -> context.enqueueWork(() ->
+                        com.rawstudio.zigshop.client.ActiveQuestsClient.update(payload.json())));
         registrar.playToServer(AcceptQuestPayload.TYPE, AcceptQuestPayload.CODEC,
                 (payload, context) -> QuestServerHandler.accept(context, payload.questId()));
         registrar.playToServer(ClaimQuestPayload.TYPE, ClaimQuestPayload.CODEC,
