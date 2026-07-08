@@ -1,6 +1,7 @@
 package com.rawstudio.zigshop.net;
 
 import com.rawstudio.zigshop.QuestServerHandler;
+import com.rawstudio.zigshop.ShopServerHandler;
 import com.rawstudio.zigshop.ZigShop;
 
 import net.neoforged.bus.api.SubscribeEvent;
@@ -9,12 +10,13 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 /**
- * Enregistrement des paquets réseau du mod (bus du MOD). 2 paquets S→C (ouvrir l'écran du PNJ ;
- * synchroniser le journal des quêtes actives) et 3 paquets C→S (accepter / réclamer / annuler).
+ * Enregistrement des paquets réseau du mod (bus du MOD). S→C : ouvrir l'écran de quêtes,
+ * synchroniser le journal des quêtes actives, ouvrir la boutique. C→S : accepter / réclamer /
+ * annuler une quête, acheter une offre.
  *
  * <p>Les handlers S→C référencent des classes CLIENT ({@code QuestClientHandler},
- * {@code ActiveQuestsClient}) : comme ils ne s'exécutent que côté client (playToClient), ces
- * classes ne sont chargées que là — le serveur dédié ne les touche jamais.
+ * {@code ActiveQuestsClient}, {@code ShopClientHandler}) : comme ils ne s'exécutent que côté
+ * client (playToClient), ces classes ne sont chargées que là — le serveur dédié ne les touche jamais.
  */
 @EventBusSubscriber(modid = ZigShop.MODID, bus = EventBusSubscriber.Bus.MOD)
 public final class ModNetwork {
@@ -35,5 +37,11 @@ public final class ModNetwork {
                 (payload, context) -> QuestServerHandler.claim(context, payload.questId()));
         registrar.playToServer(CancelQuestPayload.TYPE, CancelQuestPayload.CODEC,
                 (payload, context) -> QuestServerHandler.cancel(context, payload.questId()));
+        // Boutique : ouverture (S→C) + achat d'une offre (C→S).
+        registrar.playToClient(OpenShopPayload.TYPE, OpenShopPayload.CODEC,
+                (payload, context) -> context.enqueueWork(() ->
+                        com.rawstudio.zigshop.client.ShopClientHandler.open(payload.json())));
+        registrar.playToServer(BuyOfferPayload.TYPE, BuyOfferPayload.CODEC,
+                (payload, context) -> ShopServerHandler.buy(context, payload.entityId(), payload.offerId()));
     }
 }

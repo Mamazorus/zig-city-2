@@ -8,8 +8,7 @@ import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.sounds.SoundEvent;
-import net.minecraft.sounds.SoundEvents;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -21,12 +20,7 @@ import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.trading.ItemCost;
-import net.minecraft.world.item.trading.Merchant;
-import net.minecraft.world.item.trading.MerchantOffer;
-import net.minecraft.world.item.trading.MerchantOffers;
 import net.minecraft.world.level.Level;
 
 import javax.annotation.Nullable;
@@ -37,21 +31,26 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Marchand connecté au shop du launcher. Au clic, lit les offres (shop du jour OU
- * boutique selon {@link #shopKind}) depuis Firebase et ouvre l'interface de troc
- * VANILLA : donner inputQty × input → recevoir outputQty × output.
+ * Marchand connecté au shop du launcher. Au clic, lit les offres (shop du jour OU boutique OU
+ * course selon {@link #shopKind}) depuis Firebase et ouvre l'interface de BOUTIQUE custom
+ * ({@code ShopScreen} via {@link ShopServerHandler}) : donner inputQty × input → recevoir
+ * outputQty × output, payé en un clic depuis l'inventaire.
  *
- * <p><b>Limite par joueur</b> : chaque offre porte un {@code maxUses} (0 = illimité).
- * Le nombre d'échanges déjà faits est mémorisé PAR JOUEUR et PAR identifiant d'offre
- * ({@link #tradeCounts}, persisté en NBT). Comme le shop du jour change d'identifiants
- * chaque jour, la limite y repart à zéro chaque jour ; en boutique (identifiants
- * fixes) c'est une limite à vie. Limite atteinte ⇒ l'offre apparaît grisée (rupture).
+ * <p><b>Pourquoi une boutique custom (et plus le troc villageois natif)&nbsp;?</b> Le troc natif
+ * plafonnait le paiement à une pile (64) par case de coût, rendant tout prix supérieur (armes à
+ * 150+ Zig Coins) impossible. La boutique débite le prix de l'inventaire ENTIER, sans limite.
  *
- * <p>NoAI + persistant : ne bouge pas, ne despawn pas. Indestructible en survie (aucun
- * dégât ordinaire ne passe) ; un joueur en créatif le supprime d'un seul coup (clic
- * gauche), ce qui sert à replacer/retirer les PNJ pendant le build. Voir {@link #hurt}.
+ * <p><b>Limite par joueur</b> : chaque offre porte un {@code maxUses} (0 = illimité). Le nombre
+ * d'échanges déjà faits est mémorisé PAR JOUEUR et PAR identifiant d'offre ({@link #tradeCounts},
+ * persisté en NBT). Comme le shop du jour change d'identifiants chaque jour, la limite y repart à
+ * zéro chaque jour ; en boutique (identifiants fixes) c'est une limite à vie. En mode course, le
+ * compteur est GLOBAL ({@link #raceCounts}, partagé entre tous les joueurs).
+ *
+ * <p>NoAI + persistant : ne bouge pas, ne despawn pas. Indestructible en survie (aucun dégât
+ * ordinaire ne passe) ; un joueur en créatif le supprime d'un seul coup (clic gauche), ce qui sert
+ * à replacer/retirer les PNJ pendant le build. Voir {@link #hurt}.
  */
-public class MerchantEntity extends PathfinderMob implements Merchant {
+public class MerchantEntity extends PathfinderMob {
 
     /** Skin de ce PNJ ("" = skin par défaut Steve) ; synchronisé client↔serveur (le rendu est
      *  côté client) et persisté en NBT. Contient SOIT un nom de skin embarqué (voir
@@ -64,17 +63,10 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
     private static final EntityDataAccessor<Boolean> DATA_SLIM =
             SynchedEntityData.defineId(MerchantEntity.class, EntityDataSerializers.BOOLEAN);
 
-    @Nullable
-    private Player tradingPlayer;
-    private MerchantOffers offers = new MerchantOffers();
-    /** Identifiants d'offre Firebase, dans le MÊME ordre que {@link #offers} (mappe une offre marchande → son id). */
-    private final List<String> offerIds = new ArrayList<>();
     /** Source du marchand : "daily" = shop du jour (calendrier), "store" = boutique (offres fixes). */
     private String shopKind = "daily";
     /** Échanges déjà effectués : joueur (UUID) → (identifiant d'offre → nombre d'utilisations). */
     private final Map<UUID, Map<String, Integer>> tradeCounts = new HashMap<>();
-    /** Limite par offre du dernier menu construit (identifiant d'offre → maxUses, 0 = illimité). */
-    private final Map<String, Integer> offerMaxUses = new HashMap<>();
     /** Compteur GLOBAL (mode "race") : identifiant d'offre → nombre total d'échanges (tous joueurs confondus). */
     private final Map<String, Integer> raceCounts = new HashMap<>();
     /** Identifiant du PNJ configurable (null = PNJ générique historique). Filtre le contenu affiché. */
@@ -142,6 +134,11 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
     public void setShopKind(String kind) {
         this.shopKind = ("store".equals(kind) || "race".equals(kind) || "quest".equals(kind)
                 || "questspecial".equals(kind)) ? kind : "daily";
+    }
+
+    /** Type de PNJ courant (daily/store/race/quest/questspecial). */
+    public String getShopKind() {
+        return this.shopKind;
     }
 
     /** Identifiant du PNJ configurable ; null = PNJ générique (contenu global sans tag npc). */
@@ -268,11 +265,11 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
         if (server == null) {
             return InteractionResult.CONSUME;
         }
-        // PNJ de quêtes : ouvre l'écran de quêtes (pas le menu marchand). Le PNJ "questspecial"
+        // PNJ de quêtes : ouvre l'écran de quêtes (pas la boutique). Le PNJ "questspecial"
         // n'affiche que les quêtes UNIQUE (1 gagnant / serveur) ; le PNJ "quest" affiche les autres.
         if ("quest".equals(this.shopKind) || "questspecial".equals(this.shopKind)) {
             boolean uniqueOnly = "questspecial".equals(this.shopKind);
-            if (player instanceof net.minecraft.server.level.ServerPlayer sp) {
+            if (player instanceof ServerPlayer sp) {
                 FirebaseClient.fetchQuests().whenComplete((list, err) -> server.execute(() -> {
                     if (this.isRemoved() || !sp.isAlive()) {
                         return;
@@ -289,7 +286,7 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
         boolean isStore = "store".equals(this.shopKind);
         boolean isRace = "race".equals(this.shopKind);
         // Lecture asynchrone des offres (course OU boutique OU shop du jour), puis ouverture
-        // du menu sur le thread serveur.
+        // de la boutique custom sur le thread serveur.
         var future = isRace ? FirebaseClient.fetchRaceOffers()
                 : isStore ? FirebaseClient.fetchStoreOffers()
                 : FirebaseClient.fetchDayOffers(ZigShopDate.today());
@@ -301,60 +298,74 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
                 player.sendSystemMessage(Component.literal("§c[Zig Shop] Lecture du shop impossible."));
                 return;
             }
-            this.rebuildOffers(list, player);
-            if (this.offers.isEmpty()) {
+            List<ShopOffer> mine = this.filterOffers(list);
+            if (mine.isEmpty()) {
                 player.sendSystemMessage(Component.literal(isRace
                         ? "§7[Zig Shop] Aucune course en cours."
                         : isStore ? "§7[Zig Shop] La boutique est vide pour le moment."
                         : "§7[Zig Shop] Aucune offre aujourd'hui."));
                 return;
             }
-            this.setTradingPlayer(player);
-            Component title = Component.literal(isRace ? "Course" : isStore ? "Boutique" : "Shop du jour");
-            this.openTradingScreen(player, title, 1);
+            if (player instanceof ServerPlayer sp) {
+                ShopServerHandler.open(sp, this, mine);
+            }
         }));
         return InteractionResult.CONSUME;
     }
 
     /**
-     * (Re)construit les offres marchandes pour {@code player}. Items introuvables ignorés.
-     * Pour chaque offre limitée, on pré-consomme le nombre d'échanges déjà faits par ce
-     * joueur (via {@code increaseUses}) : une fois la limite atteinte, l'offre est en rupture.
+     * Offres de CE PNJ (filtrées par {@link #matchesNpc}) parmi la liste lue, dont l'input ET
+     * l'output se résolvent en items connus. Une offre à item introuvable est ignorée.
      */
-    private void rebuildOffers(List<ShopOffer> list, Player player) {
-        MerchantOffers result = new MerchantOffers();
-        this.offerIds.clear();
-        this.offerMaxUses.clear();
+    public List<ShopOffer> filterOffers(@Nullable List<ShopOffer> list) {
+        List<ShopOffer> out = new ArrayList<>();
         if (list != null) {
-            // mode course : compteur GLOBAL partagé ; sinon, compteur propre au joueur.
-            Map<String, Integer> used = "race".equals(this.shopKind)
-                    ? this.raceCounts
-                    : this.tradeCounts.getOrDefault(player.getUUID(), Map.of());
             for (ShopOffer o : list) {
                 if (!this.matchesNpc(o.npc())) {
                     continue; // offre d'un autre PNJ (ou globale vs PNJ nommé)
                 }
-                Item input = resolveItem(o.input());
-                Item output = resolveItem(o.output());
-                if (input == null || output == null) {
-                    continue;
+                if (resolveItem(o.input()) == null || resolveItem(o.output()) == null) {
+                    continue; // item introuvable
                 }
-                ItemCost cost = new ItemCost(input, Math.max(1, o.inputQty()));
-                ItemStack out = new ItemStack(output, Math.max(1, o.outputQty()));
-                int maxUses = o.maxUses() > 0 ? o.maxUses() : Integer.MAX_VALUE;
-                MerchantOffer mo = new MerchantOffer(cost, out, maxUses, 0, 0.0f);
-                if (o.maxUses() > 0) {
-                    int uses = Math.min(Math.max(0, used.getOrDefault(o.id(), 0)), maxUses);
-                    for (int i = 0; i < uses; i++) {
-                        mo.increaseUses();
-                    }
-                }
-                result.add(mo);
-                this.offerIds.add(o.id());
-                this.offerMaxUses.put(o.id(), o.maxUses());
+                out.add(o);
             }
         }
-        this.offers = result;
+        return out;
+    }
+
+    /**
+     * Nombre d'échanges déjà effectués pour {@code offerId} : compteur GLOBAL en mode course,
+     * sinon compteur propre à {@code player}. Sert au calcul du quota (affichage + blocage).
+     */
+    public int usesDoneFor(Player player, String offerId) {
+        if ("race".equals(this.shopKind)) {
+            return Math.max(0, this.raceCounts.getOrDefault(offerId, 0));
+        }
+        Map<String, Integer> m = this.tradeCounts.get(player.getUUID());
+        return m == null ? 0 : Math.max(0, m.getOrDefault(offerId, 0));
+    }
+
+    /**
+     * Enregistre un achat : incrémente le bon compteur (global en course, sinon par joueur) et,
+     * hors course, publie le total dans Firebase (miroir pour l'affichage du quota côté launcher).
+     * Renvoie le nouveau total. Le contrôle du quota est fait EN AMONT par {@link ShopServerHandler}.
+     */
+    public int recordPurchase(ServerPlayer player, String offerId) {
+        if ("race".equals(this.shopKind)) {
+            // Course : compteur GLOBAL partagé — une fois la limite atteinte, bloqué pour tous.
+            return this.raceCounts.merge(offerId, 1, Integer::sum);
+        }
+        int count = this.tradeCounts
+                .computeIfAbsent(player.getUUID(), k -> new HashMap<>())
+                .merge(offerId, 1, Integer::sum);
+        // Publie le compteur dans Firebase (SERVEUR uniquement) pour l'affichage launcher.
+        if (!this.level().isClientSide) {
+            String secret = ServerConfig.firebaseSecret();
+            if (secret != null) {
+                FirebaseClient.putTradeCount(secret, player.getGameProfile().getName(), offerId, count);
+            }
+        }
+        return count;
     }
 
     /** Résout un identifiant d'item ; null si introuvable (le registre ITEM est defaulté sur AIR). */
@@ -369,87 +380,5 @@ public class MerchantEntity extends PathfinderMob implements Merchant {
         }
         Item item = BuiltInRegistries.ITEM.get(rl);
         return (item == Items.AIR && !"minecraft:air".equals(id)) ? null : item;
-    }
-
-    // ─── Merchant ───────────────────────────────────────────────────────────────
-    @Override
-    public void setTradingPlayer(@Nullable Player player) {
-        this.tradingPlayer = player;
-    }
-
-    @Nullable
-    @Override
-    public Player getTradingPlayer() {
-        return this.tradingPlayer;
-    }
-
-    @Override
-    public MerchantOffers getOffers() {
-        return this.offers;
-    }
-
-    @Override
-    public void overrideOffers(MerchantOffers newOffers) {
-        this.offers = newOffers;
-    }
-
-    @Override
-    public void notifyTrade(MerchantOffer offer) {
-        offer.increaseUses();
-        // Mémorise l'échange pour le joueur en cours (limite par joueur, persistée en NBT).
-        Player player = this.tradingPlayer;
-        if (player == null) {
-            return;
-        }
-        int idx = this.offers.indexOf(offer);
-        if (idx < 0 || idx >= this.offerIds.size()) {
-            return;
-        }
-        String offerId = this.offerIds.get(idx);
-        if ("race".equals(this.shopKind)) {
-            // Course : compteur GLOBAL partagé — une fois la limite atteinte, bloqué pour tous.
-            this.raceCounts.merge(offerId, 1, Integer::sum);
-            return;
-        }
-        int count = this.tradeCounts
-                .computeIfAbsent(player.getUUID(), k -> new HashMap<>())
-                .merge(offerId, 1, Integer::sum);
-        // Publie le compteur dans Firebase (SERVEUR uniquement) pour l'affichage launcher.
-        if (!this.level().isClientSide) {
-            String secret = ServerConfig.firebaseSecret();
-            if (secret != null) {
-                FirebaseClient.putTradeCount(secret, player.getGameProfile().getName(), offerId, count);
-            }
-        }
-    }
-
-    @Override
-    public void notifyTradeUpdated(ItemStack stack) {
-        // rien
-    }
-
-    @Override
-    public int getVillagerXp() {
-        return 0;
-    }
-
-    @Override
-    public void overrideXp(int xp) {
-        // pas d'XP
-    }
-
-    @Override
-    public boolean showProgressBar() {
-        return false;
-    }
-
-    @Override
-    public SoundEvent getNotifyTradeSound() {
-        return SoundEvents.VILLAGER_YES;
-    }
-
-    @Override
-    public boolean isClientSide() {
-        return this.level().isClientSide;
     }
 }
