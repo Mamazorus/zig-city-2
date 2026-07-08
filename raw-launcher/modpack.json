@@ -37,6 +37,12 @@
         "byDefault": "byDefault = false",
         "ArmorDamage": "ArmorDamage = false"
       }
+    },
+    {
+      "path": "config/armourers_workshop-client.toml",
+      "setLines": {
+        "texturePaintingType": "texturePaintingType = -1"
+      }
     }
   ],
   "shaders": [
