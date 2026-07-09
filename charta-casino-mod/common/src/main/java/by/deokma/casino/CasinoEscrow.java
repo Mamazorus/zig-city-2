@@ -27,7 +27,7 @@ public class CasinoEscrow extends SavedData {
     public static CasinoEscrow of(ServerPlayer player) {
         ServerLevel overworld = player.getServer().overworld();
         return overworld.getDataStorage().computeIfAbsent(
-                new SavedData.Factory<CasinoEscrow>(CasinoEscrow::new, CasinoEscrow::load), NAME);
+                new SavedData.Factory<CasinoEscrow>(CasinoEscrow::new, CasinoEscrow::load, null), NAME);
     }
 
     public int get(UUID id) {
