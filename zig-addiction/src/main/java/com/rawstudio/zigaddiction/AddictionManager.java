@@ -29,7 +29,7 @@ public final class AddictionManager {
     private AddictionManager() {}
 
     /** Ticks par minute de jeu (20 tick/s × 60 s). */
-    static final long TPM = 20L * 60L;
+    public static final long TPM = 20L * 60L;
     /** Palier de manque maximal (plafond de l'escalade). */
     static final int MAX_STAGE = 5;
     /** Durée d'une (ré)application d'effet, renouvelée chaque seconde ⇒ continu, sans clignotement. */
@@ -139,7 +139,7 @@ public final class AddictionManager {
     }
 
     /** Palier de manque correspondant à un temps de jeu donné (depuis la dernière taffe). */
-    static int targetStage(long onlineTicks) {
+    public static int targetStage(long onlineTicks) {
         long craving = (long) AddictionConfig.cravingMinutes() * TPM;
         long poisonStart = craving + (long) AddictionConfig.poisonDelayMinutes() * TPM;
         long step = Math.max(1L, (long) AddictionConfig.escalationStepMinutes() * TPM);
