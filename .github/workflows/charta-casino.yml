@@ -1,0 +1,67 @@
+name: Build Charta Casino (Zig City fork)
+
+# Compile le fork maison de l'addon Charta Casino (buy-in/cash-out en gold_coin,
+# UX de mise) et depose le .jar sur la branche mod-jars, d'ou le launcher le telecharge.
+# Se declenche sur push main touchant le mod, et manuellement.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'charta-casino-mod/**'
+      - '.github/workflows/charta-casino.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Gradle 9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.0.0'
+
+      - name: Build (neoforge)
+        working-directory: charta-casino-mod
+        run: gradle :neoforge:build --no-daemon --stacktrace
+
+      - name: Publier le .jar (artefact, filet de secours)
+        uses: actions/upload-artifact@v4
+        with:
+          name: charta-casino-jar
+          path: charta-casino-mod/neoforge/build/libs/*.jar
+          if-no-files-found: error
+
+      # Depose le .jar principal (hors -sources / -javadoc) sur la branche mod-jars.
+      - name: Deposer le .jar sur la branche mod-jars
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          JAR=$(ls charta-casino-mod/neoforge/build/libs/charta_casino-*.jar | grep -v -- '-sources' | grep -v -- '-javadoc' | head -1)
+          test -n "$JAR" || { echo "::error::jar introuvable dans neoforge/build/libs"; exit 1; }
+          NAME=$(basename "$JAR")
+          echo "Depot de $NAME sur mod-jars"
+          cp "$JAR" "$RUNNER_TEMP/$NAME"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin mod-jars:mod-jars
+          git checkout mod-jars
+          cp "$RUNNER_TEMP/$NAME" "./$NAME"
+          git add -f "$NAME"
+          if git diff --cached --quiet; then
+            echo "Aucun changement ($NAME deja present) - rien a pousser."
+          else
+            git commit -m "build: $NAME (CI)"
+            git push origin mod-jars
+          fi

@@ -1,0 +1,42 @@
+plugins {
+    id 'multiloader-loader'
+    id 'net.neoforged.moddev'
+}
+
+repositories {
+    maven {
+        name = 'BlameJared'
+        url = 'https://maven.blamejared.com'
+    }
+}
+
+neoForge {
+    version = neoforge_version
+    parchment {
+        minecraftVersion = parchment_minecraft
+        mappingsVersion = parchment_version
+    }
+    runs {
+        configureEach {
+            ideName = "NeoForge ${it.name.capitalize()} (${project.path})"
+        }
+        client { client() }
+        server { server() }
+    }
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+dependencies {
+    implementation "dev.lucaargolo:charta-neoforge-1.21.1:${charta_version}"
+
+    compileOnly("mezz.jei:jei-${minecraft_version}-common-api:${jei_version}")
+    compileOnly("mezz.jei:jei-${minecraft_version}-neoforge-api:${jei_version}")
+    runtimeOnly("mezz.jei:jei-${minecraft_version}-neoforge:${jei_version}")
+
+    compileOnly("me.shedaniel:RoughlyEnoughItems-api-neoforge:${rei_version}")
+    runtimeOnly("me.shedaniel:RoughlyEnoughItems-neoforge:${rei_version}")
+}

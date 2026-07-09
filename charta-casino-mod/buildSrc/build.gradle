@@ -1,0 +1,21 @@
+plugins {
+    id 'groovy-gradle-plugin'
+}
+
+def targetJava = providers.gradleProperty("java_version")
+    .map(Integer.&parseInt)
+    .getOrElse(21)
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(targetJava)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = targetJava
+}
+
+tasks.withType(GroovyCompile).configureEach {
+    options.release = targetJava
+}

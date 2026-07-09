@@ -1,0 +1,80 @@
+plugins {
+    id 'multiloader-common'
+    id 'net.neoforged.moddev'
+}
+
+neoForge {
+    neoFormVersion = neo_form_version
+    parchment {
+        minecraftVersion = parchment_minecraft
+        mappingsVersion = parchment_version
+    }
+}
+
+// ModDev creates extra variants without capabilities — patch them all
+afterEvaluate {
+    configurations.each { config ->
+        if (config.canBeConsumed) {
+            try { config.outgoing.capability("$group:$mod_id:$version") } catch (ignored) {}
+        }
+    }
+}
+
+dependencies {
+    compileOnly group: 'org.spongepowered', name: 'mixin', version: '0.8.5'
+    compileOnly group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.3.5'
+    annotationProcessor group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.3.5'
+
+    implementation "dev.lucaargolo:charta-common-1.21.1:${charta_version}"
+
+    // JEI common API — needed to register IScreenHandler for our game screens
+    compileOnly("mezz.jei:jei-${minecraft_version}-common-api:${jei_version}")
+    
+    // REI common API — needed for REI integration
+    compileOnly("me.shedaniel:RoughlyEnoughItems-api:${rei_version}")
+    
+    // Test dependencies
+    testImplementation platform("org.junit:junit-bom:5.10.0")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testImplementation "org.mockito:mockito-core:5.11.0"
+    testImplementation "org.assertj:assertj-core:3.25.3"
+}
+
+configurations {
+    commonJava {
+        canBeResolved = false
+        canBeConsumed = true
+    }
+    commonResources {
+        canBeResolved = false
+        canBeConsumed = true
+    }
+}
+
+// Configure test source set
+sourceSets {
+    test {
+        java {
+            srcDir 'src/test/java'
+        }
+        resources {
+            srcDir 'src/test/resources'
+        }
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+artifacts {
+    commonJava sourceSets.main.java.sourceDirectories.singleFile
+    commonResources sourceSets.main.resources.sourceDirectories.singleFile
+}
+
+// Configure test task
+test {
+    useJUnitPlatform()
+    testLogging {
+        events "passed", "skipped", "failed"
+        showStandardStreams = true
+    }
+}
