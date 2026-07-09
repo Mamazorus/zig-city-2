@@ -1,0 +1,37 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+authors="${mod_authors}"
+description='''
+${mod_description}
+'''
+
+[[dependencies.${mod_id}]]
+    modId="neoforge"
+    type="required"
+    versionRange="[${neo_version},)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    type="required"
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+# Nirvana fournit le joint (nirvana:joint). Dependance OPTIONNELLE : si Nirvana est absent,
+# zigaddiction ne fait simplement rien (personne ne peut fumer) et ne plante pas.
+# ordering=AFTER : Nirvana enregistre ses items avant nous. On ne reference l'item que par
+# son identifiant (chaine "nirvana:joint"), jamais par sa classe -> aucun lien de compilation.
+[[dependencies.${mod_id}]]
+    modId="nirvana"
+    type="optional"
+    versionRange="[2.0,)"
+    ordering="AFTER"
+    side="BOTH"
