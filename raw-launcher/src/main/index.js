@@ -10,6 +10,8 @@ const os = require('os')
 const crypto = require('crypto')
 const { spawn } = require('child_process')
 const AdmZip = require('adm-zip')
+const { PNG } = require('pngjs')
+const { STEVE_SKIN_B64 } = require('./default-skins')
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 const MODPACK = require('../../modpack.json')
@@ -3763,6 +3765,71 @@ async function uploadImageToStorage(objectPath, buffer, contentType) {
   }
 }
 
+// ─── RÉPARATION DE SKIN : couche de base toujours opaque ───────────────────────
+// Un skin dont la 1ʳᵉ couche (corps, PAS l'overlay) contient des pixels TRANSPARENTS est
+// rendu en NOIR par Minecraft (et par tout mod de rendu) — cause avérée de « têtes/membres
+// noirs » sur des skins produits par l'éditeur du launcher (ex. une tête entièrement vide).
+// On compose donc le skin de l'utilisateur PAR-DESSUS un Steve opaque : là où Steve est
+// opaque (toutes les faces de la 1ʳᵉ couche) le résultat devient opaque (le pixel du joueur
+// s'il est plein, sinon le pixel de Steve — jamais du noir) ; là où Steve est transparent
+// (la 2ᵉ couche/overlay) on garde le pixel du joueur tel quel (l'overlay reste transparent,
+// donc les couches 3D fonctionnent toujours). Les skins bien formés (base déjà opaque) sont
+// INCHANGÉS (les pixels opaques sont ignorés). No-op si le PNG n'est pas 64×64 ou en cas
+// d'erreur : on ne bloque JAMAIS un changement de skin. cf. feature-offline-skins (mémoire).
+let _steveBasePng = null
+function steveBasePng() {
+  if (!_steveBasePng) _steveBasePng = PNG.sync.read(Buffer.from(STEVE_SKIN_B64, 'base64'))
+  return _steveBasePng
+}
+
+// Rectangles de la 1ʳᵉ couche (BASE = corps) dans l'atlas 64×64 — cf. UV map Minecraft.
+// On ne répare QUE ces zones : on ne touche JAMAIS la 2ᵉ couche (overlay : chapeau, veste,
+// manches, jambières), qui DOIT rester transparente là où le joueur ne l'a pas dessinée.
+// (Steve lui-même a quelques pixels opaques dans ses manches overlay : composer sur Steve
+// SANS ce filtrage ajouterait des « manches Steve » parasites aux skins normaux.)
+const SKIN_BASE_RECTS = [
+  [0, 0, 32, 16],    // tête
+  [16, 16, 40, 32],  // torse
+  [40, 16, 56, 32],  // bras droit
+  [32, 48, 48, 64],  // bras gauche
+  [0, 16, 16, 32],   // jambe droite
+  [16, 48, 32, 64],  // jambe gauche
+]
+
+function repairSkinBaseOpaque(buf) {
+  try {
+    const skin = PNG.sync.read(buf)
+    if (skin.width !== 64 || skin.height !== 64) return buf   // format inattendu → on ne touche pas
+    const base = steveBasePng()
+    const d = skin.data, b = base.data
+    if (d.length !== b.length) return buf
+    let changed = false
+    for (const [x0, y0, x1, y1] of SKIN_BASE_RECTS) {
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const i = (64 * y + x) * 4
+          const ua = d[i + 3]
+          if (ua === 255) continue         // pixel joueur déjà opaque → inchangé (cas normal)
+          const ba = b[i + 3]
+          if (ba === 0) continue           // Steve transparent ici (coins non-rendus) → on garde le joueur
+          // Composition « joueur AU-DESSUS de Steve » ; Steve opaque ⇒ sortie opaque, jamais noire.
+          const uaf = ua / 255
+          const outA = ua + ba * (1 - uaf)
+          for (let c = 0; c < 3; c++) {
+            d[i + c] = Math.round((d[i + c] * ua + b[i + c] * ba * (1 - uaf)) / outA)
+          }
+          d[i + 3] = Math.round(outA)
+          changed = true
+        }
+      }
+    }
+    return changed ? PNG.sync.write(skin) : buf
+  } catch (e) {
+    console.warn('[skin] Réparation (base opaque) ignorée :', e.message)
+    return buf
+  }
+}
+
 // Génère une texture Minecraft SIGNÉE à partir des OCTETS d'un skin, via MineSkin.
 // 🔴 Pourquoi ici et pas au join côté serveur : le provider « web » de SkinRestorer
 // demande à MineSkin de TÉLÉCHARGER l'URL de l'image ; or les serveurs de MineSkin
@@ -3831,6 +3898,10 @@ async function publishSkinToFirebase(name, variant, buf) {
   }
   if (!isValidPlayerName(name)) return { success: false, error: 'Pseudo invalide.' }
   try {
+    // 0) Réparation anti-« skin noir » : garantit une couche de base opaque avant de publier
+    //    (aussi bien l'image hébergée que la texture MineSkin utiliseront le PNG réparé).
+    buf = repairSkinBaseOpaque(buf)
+
     // 1) Héberge le PNG sur Firebase Storage (source éditable + affichage carrousels).
     //    Nom d'objet PLAT (sans dossier) → URL de téléchargement propre.
     const objectPath = `skin_${name}_${Date.now()}.png`
