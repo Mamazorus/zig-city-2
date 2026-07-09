@@ -548,7 +548,9 @@ public class TexasHoldemGame extends Game<TexasHoldemGame, TexasHoldemMenu> {
         isGameOver = true;
         refundRemainingPot(); pendingActors.clear(); scheduledActions.clear();
         players.forEach(p -> p.play(null));
-        announceSessionWinner();
+        // Cash-game : pas de « vainqueur de la partie ». Titre de fin de partie
+        // « You won! / You lost! » retiré volontairement (fork ZigCity).
+        ensureCurrentPlayer();
         // Cash-out (cave auto): return each player's remaining chips as gold coins, 1:1.
         for (int i = 0; i < players.size(); i++) {
             if (players.get(i).getEntity() instanceof ServerPlayer sp) CasinoBank.cashOut(sp, Math.max(0, chips[i]));
@@ -560,20 +562,6 @@ public class TexasHoldemGame extends Game<TexasHoldemGame, TexasHoldemMenu> {
         if (pot <= 0) return;
         for (int i = 0; i < players.size(); i++) {
             if (!folded[i]) { chips[i] += pot; play(players.get(i), Component.translatable("message.charta_casino.texas_holdem.wins_pot", pot)); pot = 0; return; }
-        }
-    }
-
-    private void announceSessionWinner() {
-        int winnerIdx = -1, maxChips = 0;
-        for (int i = 0; i < players.size(); i++) if (chips[i] > maxChips) { maxChips = chips[i]; winnerIdx = i; }
-        ensureCurrentPlayer();
-        if (winnerIdx >= 0) {
-            CardPlayer winner = players.get(winnerIdx);
-            winner.sendTitle(Component.translatable("message.charta.you_won").withStyle(ChatFormatting.GREEN), Component.translatable("message.charta.congratulations"));
-            for (CardPlayer p : players) if (p != winner) p.sendTitle(Component.translatable("message.charta.you_lost").withStyle(ChatFormatting.RED), Component.translatable("message.charta.won_the_match", winner.getName()));
-            table(Component.translatable("message.charta.won_the_match", winner.getColoredName()));
-        } else {
-            players.forEach(p -> p.sendTitle(Component.translatable("message.charta.draw").withStyle(ChatFormatting.YELLOW), Component.translatable("message.charta.no_winner")));
         }
     }
 

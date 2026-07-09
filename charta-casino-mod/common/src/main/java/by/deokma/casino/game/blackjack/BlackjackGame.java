@@ -502,22 +502,10 @@ public class BlackjackGame extends Game<BlackjackGame, BlackjackMenu> {
     public void endGame() {
         if (isGameOver) return;
         isGameOver = true;
-        int best = -1, bestChips = 0;
-        for (int i = 0; i < players.size(); i++) {
-            if (chips[i] > bestChips) { bestChips = chips[i]; best = i; }
-        }
         ensureCurrentPlayer();
-        if (best >= 0) {
-            CardPlayer winner = players.get(best);
-            winner.sendTitle(
-                    Component.translatable("message.charta.you_won").withStyle(ChatFormatting.GREEN),
-                    Component.translatable("message.charta.congratulations"));
-            for (int i = 0; i < players.size(); i++) {
-                if (i != best) players.get(i).sendTitle(
-                        Component.translatable("message.charta.you_lost").withStyle(ChatFormatting.RED),
-                        Component.translatable("message.charta.won_the_match", winner.getName()));
-            }
-        }
+        // Cash-game : pas de « vainqueur de la partie » (chacun repart avec sa cave).
+        // Le titre plein écran « You won! / You lost! » de fin de partie est retiré
+        // volontairement (fork ZigCity) : il n'a pas de sens en jeu d'argent réel.
         // Cash-out (cave auto): return each player's remaining chips as gold coins, 1:1.
         for (int i = 0; i < players.size(); i++) {
             if (players.get(i).getEntity() instanceof ServerPlayer sp) {

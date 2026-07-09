@@ -445,20 +445,8 @@ public class DurakGame extends Game<DurakGame, DurakMenu> {
         phaseOrd   = Phase.GAME_OVER.ordinal();
         scheduledActions.clear();
         players.forEach(p -> p.play(null));
-
-        if (durakIdx >= 0 && durakIdx < players.size()) {
-            CardPlayer durak = players.get(durakIdx);
-            durak.sendTitle(
-                    Component.translatable("message.charta_casino.durak.you_are_durak").withStyle(ChatFormatting.RED),
-                    Component.translatable("message.charta_casino.durak.durak_subtitle"));
-            for (int i = 0; i < players.size(); i++) {
-                if (i != durakIdx) players.get(i).sendTitle(
-                        Component.literal("You won!").withStyle(ChatFormatting.GREEN),
-                        Component.translatable("message.charta_casino.durak.not_durak", durak.getName()));
-            }
-            table(Component.translatable("message.charta_casino.durak.durak_is", durak.getColoredName())
-                    .withStyle(ChatFormatting.RED));
-        }
+        // Cash-game : verdict de fin de partie « DURAK! / You won! » retiré
+        // volontairement (fork ZigCity).
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
