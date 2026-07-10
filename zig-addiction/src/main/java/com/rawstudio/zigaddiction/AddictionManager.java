@@ -68,6 +68,29 @@ public final class AddictionManager {
         }
     }
 
+    /**
+     * Guérit TOTALEMENT la dépendance : le joueur n'est plus suivi (il redevient « propre »
+     * jusqu'à sa prochaine taffe) et ses effets de manque en cours sont dissipés. C'est
+     * l'équivalent de {@code /zigaddiction reset}, mais déclenché en jeu par le remède
+     * consommable ({@link com.rawstudio.zigaddiction.item.DetoxItem}).
+     *
+     * <p>Note : contrairement à {@link #onSmoke} (qui remet le compteur à zéro mais laisse
+     * le joueur accro), la cure supprime l'addiction elle-même.
+     *
+     * @return {@code true} si le joueur était réellement dépendant (le remède a donc agi) ;
+     *         {@code false} s'il n'y avait rien à soigner.
+     */
+    public static boolean cure(ServerPlayer player) {
+        AddictionData data = AddictionData.get(player.getServer());
+        AddictionData.Entry e = data.get(player.getUUID());
+        clearWithdrawalEffects(player);
+        if (e == null || !e.addicted) {
+            return false;
+        }
+        data.clear(player.getUUID());
+        return true;
+    }
+
     /** Appelé chaque tick serveur pour chaque joueur en ligne. */
     public static void onServerPlayerTick(ServerPlayer player) {
         if (!AddictionConfig.enabled()) {

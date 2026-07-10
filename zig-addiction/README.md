@@ -2,7 +2,9 @@
 
 Système d'**addiction RP** au joint du mod [Nirvana](https://modrinth.com/mod/nirvana-mod)
 pour le serveur Zig City 2. Fumer entretient une dépendance : le manque frappe, s'aggrave,
-et le seul remède est de **refumer** — ce qui crée une vraie demande pour les vendeurs.
+et pour le calmer il faut **refumer** — ce qui crée une vraie demande pour les vendeurs.
+Pour en sortir *vraiment*, un objet dédié — la **Cure de sevrage** — met fin à la
+dépendance (cf. [Le remède](#le-remède)).
 
 ## Le cycle
 
@@ -24,11 +26,24 @@ et le seul remède est de **refumer** — ce qui crée une vraie demande pour le
    Avant 2 h 30, le manque **ne tue jamais** (le poison plafonne à 1 cœur, la famine est
    bloquée) : la seule mort est le palier terminal à 2 h 30. Après cette mort, le joueur
    ressuscite en manque critique (pas de boucle de morts, et mourir ne « soigne » pas).
-4. Refumer un joint → **soulagement immédiat**, compteur remis à zéro. Le seul remède.
+4. Refumer un joint → **soulagement immédiat**, compteur remis à zéro — mais le joueur
+   **reste dépendant** (le manque reviendra). Pour rompre la dépendance, voir *Le remède*.
 
 > Un joueur n'est suivi qu'**après sa première taffe**. Les non-fumeurs ne subissent rien.
 > L'état survit à la mort, à la déconnexion et au redémarrage (persisté par UUID dans les
 > données du monde).
+
+## Le remède
+
+Refumer ne fait que repousser le manque : le joueur reste accro à vie. Le seul moyen d'en
+**sortir définitivement** est la **Cure de sevrage** (`zigaddiction:detox`), un objet
+consommable : clic droit → la dépendance est retirée (effets de manque dissipés, joueur
+« propre » jusqu'à sa prochaine taffe). Sans effet — et non consommé — si le joueur n'est
+pas dépendant. Équivaut, côté joueur, à `/zigaddiction reset`.
+
+**Non craftable** : l'objet s'obtient par le canal choisi côté contenu — vente à l'Échoppe
+(puits économique), don par un PNJ, ou `/give @p zigaddiction:detox`. Sa clé de traduction
+le rend automatiquement visible dans le sélecteur d'items de l'admin du shop.
 
 ## Configuration
 
@@ -59,16 +74,18 @@ Test rapide : `/zigaddiction advance 60` (→ message de manque), puis `/zigaddi
 
 ## Architecture
 
-Mod **autonome** : aucun item/entité, aucune dépendance de compilation à Nirvana — le joint
-est repéré par son **identifiant** (`nirvana:joint`, configurable). Nirvana est déclaré en
-dépendance *optionnelle* : absent, le mod ne fait rien (pas de crash). Toute la logique est
-**serveur** ; le jar reste `BOTH` uniquement pour la négociation client/serveur NeoForge.
+Mod **autonome** : un seul item custom (la Cure de sevrage), aucune dépendance de
+compilation à Nirvana — le joint est repéré par son **identifiant** (`nirvana:joint`,
+configurable). Nirvana est déclaré en dépendance *optionnelle* : absent, le mod ne fait
+rien (pas de crash). Toute la logique de gameplay est **serveur** ; le jar reste `BOTH` (la
+Cure ajoute un objet au registre, qui doit être présent des deux côtés).
 
-- `ZigAddiction` — point d'entrée.
+- `ZigAddiction` — point d'entrée (enregistre l'item sur le bus du mod).
 - `AddictionEvents` — écoute (fin de consommation, tick joueur, connexion, commandes).
-- `AddictionManager` — cœur : détection, compteur, escalade, effets, messages.
+- `AddictionManager` — cœur : détection, compteur, escalade, effets, messages, `cure`.
 - `AddictionData` — persistance (SavedData indexée par UUID).
 - `AddictionConfig` — `config/zigaddiction-server.properties`.
+- `item.ModItems` / `item.DetoxItem` — la Cure de sevrage (remède anti-dépendance).
 
 ## Compilation
 
