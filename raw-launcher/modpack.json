@@ -985,6 +985,14 @@
     {
       "name": "create-enchantment-industry-2.4.2.jar",
       "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/create-enchantment-industry-2.4.2.jar"
+    },
+    {
+      "name": "railways-0.2.0+neoforge-mc1.21.1.jar",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/railways-0.2.0%2Bneoforge-mc1.21.1.jar"
+    },
+    {
+      "name": "create_connected-1.3.2-mc1.21.1.jar",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/create_connected-1.3.2-mc1.21.1.jar"
     }
   ]
 }
