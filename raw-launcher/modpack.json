@@ -607,8 +607,12 @@
       "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/nirvana-forge-2.0.11.jar"
     },
     {
-      "name": "zigaddiction-0.1.1.jar",
-      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/zigaddiction-0.1.1.jar"
+      "name": "zigaddiction-0.1.2.jar",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/zigaddiction-0.1.2.jar"
+    },
+    {
+      "name": "thedirtystuff-2.2.1.jar",
+      "url": "https://raw.githubusercontent.com/Mamazorus/zig-city-2/mod-jars/thedirtystuff-2.2.1.jar"
     },
     {
       "name": "no-tnt-griefing-1.21.1-1.0.1.jar",
