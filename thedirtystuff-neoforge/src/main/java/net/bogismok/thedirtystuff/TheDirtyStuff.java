@@ -9,9 +9,7 @@ import net.bogismok.thedirtystuff.init.ModItemProperties;
 import net.bogismok.thedirtystuff.item.ModItems;
 import net.bogismok.thedirtystuff.recipe.ModRecipes;
 import net.bogismok.thedirtystuff.screen.ModMenuTypes;
-import net.bogismok.thedirtystuff.screen.custom.DryingRackMenu;
 import net.bogismok.thedirtystuff.screen.custom.DryingRackScreen;
-import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraft.world.level.block.ComposterBlock;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
@@ -21,6 +19,7 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
 
 import org.slf4j.Logger;
 
@@ -56,8 +55,12 @@ public class TheDirtyStuff {
     @EventBusSubscriber(modid = MOD_ID, bus = EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
     public static class ClientModEvents {
         @SubscribeEvent
+        public static void onRegisterMenuScreens(RegisterMenuScreensEvent event) {
+            event.register(ModMenuTypes.DRYING_RACK_MENU.get(), DryingRackScreen::new);
+        }
+
+        @SubscribeEvent
         public static void onClientSetup(FMLClientSetupEvent event) {
-            MenuScreens.<DryingRackMenu, DryingRackScreen>register(ModMenuTypes.DRYING_RACK_MENU.get(), DryingRackScreen::new);
             ModItemProperties.addCustomItemProperties();
         }
     }
