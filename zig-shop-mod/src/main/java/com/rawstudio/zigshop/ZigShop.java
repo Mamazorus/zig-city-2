@@ -27,6 +27,7 @@ public class ZigShop {
         // Registres sur le bus du MOD.
         ModEntities.ENTITIES.register(modEventBus);
         modEventBus.addListener(this::onRegisterAttributes);
+        modEventBus.addListener(FoodBalance::onModifyDefaultComponents);
         // RegisterCommandsEvent est diffusé sur le bus de JEU (NeoForge.EVENT_BUS).
         NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
     }
