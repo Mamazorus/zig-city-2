@@ -21,14 +21,16 @@ import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 public final class AddictionEvents {
     private AddictionEvents() {}
 
-    // ─── Fin de consommation : si c'est le joint, (re)démarre le cycle ────────
+    // ─── Fin de consommation : joint OU tabac, (re)démarre le cycle correspondant ─────────────
     @SubscribeEvent
     public static void onFinishUsing(LivingEntityUseItemEvent.Finish event) {
         if (!(event.getEntity() instanceof ServerPlayer player) || player instanceof FakePlayer) {
             return; // vrais joueurs serveur uniquement (exclut distributeur / fake player)
         }
         if (AddictionManager.isConfiguredJoint(event.getItem())) {
-            AddictionManager.onSmoke(player);
+            AddictionManager.onSmoke(player, AddictionData.Substance.JOINT);
+        } else if (AddictionManager.isConfiguredTobacco(event.getItem())) {
+            AddictionManager.onSmoke(player, AddictionData.Substance.TOBACCO);
         }
     }
 

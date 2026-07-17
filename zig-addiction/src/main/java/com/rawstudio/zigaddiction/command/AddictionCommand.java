@@ -72,17 +72,17 @@ public final class AddictionCommand {
             return 1;
         }
         long minutes = e.onlineTicks / AddictionManager.TPM;
-        int computed = AddictionManager.targetStage(e.onlineTicks);
+        int computed = AddictionManager.targetStage(e.onlineTicks, e.substance);
         ctx.getSource().sendSuccess(() -> Component.literal(String.format(
-                "§7%s — accro, temps de jeu depuis la taffe=§f%d min§7, palier=§f%d§7 (calculé=%d), manque annoncé=%b",
-                name(target), minutes, e.stage, computed, e.cravingSent)), false);
+                "§7%s — accro (%s), temps de jeu depuis la taffe=§f%d min§7, palier=§f%d§7 (calculé=%d), manque annoncé=%b",
+                name(target), e.substance, minutes, e.stage, computed, e.cravingSent)), false);
         return 1;
     }
 
     private static int smoke(CommandContext<CommandSourceStack> ctx, ServerPlayer target) {
-        AddictionManager.onSmoke(target);
+        AddictionManager.onSmoke(target, AddictionData.Substance.JOINT);
         ctx.getSource().sendSuccess(
-                () -> Component.literal("§a[ZigAddiction] Taffe simulée pour " + name(target) + " (compteur remis à zéro)."), true);
+                () -> Component.literal("§a[ZigAddiction] Taffe de joint simulée pour " + name(target) + " (compteur remis à zéro)."), true);
         return 1;
     }
 

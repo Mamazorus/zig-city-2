@@ -35,3 +35,12 @@ ${mod_description}
     versionRange="[2.0,)"
     ordering="AFTER"
     side="BOTH"
+
+# thedirtystuff fournit le tabac (thedirtystuff:cigar / thedirtystuff:cigarette). Meme principe :
+# dependance OPTIONNELLE, items references uniquement par identifiant (config tobacco_item_ids).
+[[dependencies.${mod_id}]]
+    modId="thedirtystuff"
+    type="optional"
+    versionRange="[2.2.1,)"
+    ordering="AFTER"
+    side="BOTH"

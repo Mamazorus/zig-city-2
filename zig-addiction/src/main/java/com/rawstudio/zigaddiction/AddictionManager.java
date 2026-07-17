@@ -1,5 +1,7 @@
 package com.rawstudio.zigaddiction;
 
+import com.rawstudio.zigaddiction.AddictionData.Substance;
+
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -9,6 +11,10 @@ import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.item.ItemStack;
+
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Cœur du système d'addiction. Sans état propre : tout vit dans {@link AddictionData}
@@ -42,17 +48,29 @@ public final class AddictionManager {
 
     // ─── Événements de gameplay ───────────────────────────────────────────────
 
-    /** Le joueur a fini de fumer le joint : (re)démarre le cycle et dissipe le manque. */
-    public static void onSmoke(ServerPlayer player) {
+    /**
+     * Le joueur a fini de fumer (joint ou tabac) : (re)démarre le cycle et dissipe le manque.
+     *
+     * <p><b>Règle de dominance</b> : un joueur n'est JAMAIS suivi sur les deux substances à la
+     * fois. Le joint (plus agressif) l'emporte toujours — s'il est déjà accro au joint, fumer
+     * une cigarette/un cigare n'a AUCUN effet sur l'addiction (juste l'effet vanilla de l'item).
+     * En revanche fumer un joint reprend toujours la main, même en pleine addiction au tabac.
+     */
+    public static void onSmoke(ServerPlayer player, Substance substance) {
         if (!AddictionConfig.enabled()) {
             return;
         }
         AddictionData data = AddictionData.get(player.getServer());
         AddictionData.Entry e = data.getOrCreate(player.getUUID());
 
+        if (e.addicted && e.substance == Substance.JOINT && substance == Substance.TOBACCO) {
+            return; // déjà accro au joint, plus agressif : le tabac ne prend pas le dessus
+        }
+
         boolean wasSuffering = e.cravingSent || e.stage >= 1;
         boolean wasPoisoned = e.stage >= 2;
 
+        e.substance = substance;
         e.onlineTicks = 0L;
         e.addicted = true;
         e.cravingSent = false;
@@ -117,15 +135,16 @@ public final class AddictionManager {
         AddictionData.Entry e = AddictionData.get(player.getServer()).get(player.getUUID());
         if (e != null && e.addicted && e.stage >= 1) {
             player.sendSystemMessage(Component.literal(
-                    "§8[§2Zig City§8] §7Le manque vous tenaille toujours... §oil vous faudrait un joint."));
+                    "§8[§2Zig City§8] §7Le manque vous tenaille toujours... §oil vous faudrait " + craveItem(e.substance) + "."));
         }
     }
 
     // ─── Évaluation périodique (1×/s) ─────────────────────────────────────────
 
     private static void evaluate(ServerPlayer player, AddictionData data, AddictionData.Entry e) {
+        Substance sub = e.substance;
         // Point culminant : la mort par overdose de manque (configurable, 0 = jamais létal).
-        long deathTicks = (long) AddictionConfig.deathMinutes() * TPM;
+        long deathTicks = (long) AddictionConfig.deathMinutes(sub) * TPM;
         if (deathTicks > 0L) {
             long warnAt = deathTicks - WARN_BEFORE_DEATH;
             if (e.onlineTicks >= warnAt && e.onlineTicks < warnAt + 20L && e.onlineTicks < deathTicks) {
@@ -138,17 +157,17 @@ public final class AddictionManager {
             }
         }
 
-        int target = targetStage(e.onlineTicks);
+        int target = targetStage(e.onlineTicks, sub);
 
         // Palier 1 : message de manque, une seule fois par cycle.
         if (target >= 1 && !e.cravingSent) {
             e.cravingSent = true;
-            player.sendSystemMessage(message(1));
+            player.sendSystemMessage(message(1, sub));
         }
         // Aggravation : message à chaque nouveau palier franchi (≥ 2).
         if (target > e.stage) {
             if (target >= 2) {
-                player.sendSystemMessage(message(target));
+                player.sendSystemMessage(message(target, sub));
             }
             e.stage = target;
         } else if (target < e.stage) {
@@ -161,11 +180,11 @@ public final class AddictionManager {
         }
     }
 
-    /** Palier de manque correspondant à un temps de jeu donné (depuis la dernière taffe). */
-    public static int targetStage(long onlineTicks) {
-        long craving = (long) AddictionConfig.cravingMinutes() * TPM;
-        long poisonStart = craving + (long) AddictionConfig.poisonDelayMinutes() * TPM;
-        long step = Math.max(1L, (long) AddictionConfig.escalationStepMinutes() * TPM);
+    /** Palier de manque correspondant à un temps de jeu donné (depuis la dernière taffe), pour une substance donnée. */
+    public static int targetStage(long onlineTicks, Substance sub) {
+        long craving = (long) AddictionConfig.cravingMinutes(sub) * TPM;
+        long poisonStart = craving + (long) AddictionConfig.poisonDelayMinutes(sub) * TPM;
+        long step = Math.max(1L, (long) AddictionConfig.escalationStepMinutes(sub) * TPM);
         if (onlineTicks < craving) {
             return 0;
         }
@@ -176,14 +195,24 @@ public final class AddictionManager {
         return Math.min(stage, MAX_STAGE);
     }
 
-    private static Component message(int stage) {
+    /** Désignation de la substance dans les messages en jeu ("un joint" / "une cigarette"). */
+    private static String craveItem(Substance sub) {
+        return sub == Substance.TOBACCO ? "une cigarette" : "un joint";
+    }
+
+    private static Component message(int stage, Substance sub) {
+        String item = craveItem(sub);
         return switch (stage) {
-            case 1 -> Component.literal("§8[§2Zig City§8] §7Vous ne vous sentez pas très bien... §oune envie pressante de tirer sur un joint vous tenaille.");
-            case 2 -> Component.literal("§8[§2Zig City§8] §cLe manque vous ronge — votre corps réclame sa dose. §7Trouvez un joint, et vite.");
+            case 1 -> Component.literal("§8[§2Zig City§8] §7Vous ne vous sentez pas très bien... §oune envie pressante de fumer " + item + " vous tenaille.");
+            case 2 -> Component.literal("§8[§2Zig City§8] §cLe manque vous ronge — votre corps réclame sa dose. §7Trouvez " + item + ", et vite.");
             case 3 -> Component.literal("§8[§2Zig City§8] §cÇa empire... §7la tête vous tourne et l'estomac se noue.");
-            case 4 -> Component.literal("§8[§2Zig City§8] §4En pleine descente. §cTremblements et nausées vous submergent — il vous faut un joint.");
-            default -> Component.literal("§8[§2Zig City§8] §4§lMANQUE CRITIQUE. §r§cVotre corps vous lâche. Un joint. Tout de suite.");
+            case 4 -> Component.literal("§8[§2Zig City§8] §4En pleine descente. §cTremblements et nausées vous submergent — il vous faut " + item + ".");
+            default -> Component.literal("§8[§2Zig City§8] §4§lMANQUE CRITIQUE. §r§c" + capitalize(item) + ". Tout de suite.");
         };
+    }
+
+    private static String capitalize(String s) {
+        return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
     }
 
     /**
@@ -192,10 +221,10 @@ public final class AddictionManager {
      * avec un sursis avant la prochaine échéance (la mort ne « soigne » donc pas l'addiction).
      */
     private static void killFromWithdrawal(ServerPlayer player, AddictionData data, AddictionData.Entry e) {
-        long deathTicks = (long) AddictionConfig.deathMinutes() * TPM;
-        long relief = (long) AddictionConfig.escalationStepMinutes() * TPM;
+        long deathTicks = (long) AddictionConfig.deathMinutes(e.substance) * TPM;
+        long relief = (long) AddictionConfig.escalationStepMinutes(e.substance) * TPM;
         e.onlineTicks = Math.max(0L, deathTicks - relief);
-        e.stage = targetStage(e.onlineTicks);
+        e.stage = targetStage(e.onlineTicks, e.substance);
         data.setDirty();
         player.sendSystemMessage(Component.literal(
                 "§8[§2Zig City§8] §4§lLe manque a eu raison de vous. §r§7Votre corps s'effondre."));
@@ -252,5 +281,25 @@ public final class AddictionManager {
         }
         ResourceLocation key = BuiltInRegistries.ITEM.getKey(stack.getItem());
         return key != null && key.toString().equals(AddictionConfig.jointItemId());
+    }
+
+    /** L'item consommé est-il un des items tabac configurés (par défaut cigare/cigarette) ? */
+    public static boolean isConfiguredTobacco(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        ResourceLocation key = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        if (key == null) {
+            return false;
+        }
+        String id = key.toString();
+        return tobaccoItemIds().contains(id);
+    }
+
+    private static Set<String> tobaccoItemIds() {
+        return Stream.of(AddictionConfig.tobaccoItemIds().split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toSet());
     }
 }

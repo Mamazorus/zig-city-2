@@ -30,6 +30,13 @@ public final class AddictionData extends SavedData {
     /** Nom du fichier {@code .dat} sous {@code <world>/data/}. */
     public static final String FILE_ID = "zigaddiction";
 
+    /**
+     * Substance responsable du cycle d'addiction en cours. Un joueur n'est JAMAIS suivi sur
+     * les deux à la fois : le joint (plus agressif) domine toujours le tabac — cf.
+     * {@link AddictionManager#onSmoke}.
+     */
+    public enum Substance { JOINT, TOBACCO }
+
     /** État mutable d'un joueur. Créé à la PREMIÈRE taffe (avant, le joueur n'est pas suivi). */
     public static final class Entry {
         /** Temps de JEU CONNECTÉ écoulé depuis la dernière taffe, en ticks (20/s). */
@@ -40,6 +47,8 @@ public final class AddictionData extends SavedData {
         public boolean cravingSent = false;
         /** Palier de manque courant (0 = rien, 1 = malaise sans poison, ≥2 = poison croissant). */
         public int stage = 0;
+        /** Substance à l'origine du cycle courant (joint par défaut : retrocompatibilité NBT). */
+        public Substance substance = Substance.JOINT;
     }
 
     private final Map<UUID, Entry> players = new HashMap<>();
@@ -85,6 +94,7 @@ public final class AddictionData extends SavedData {
             c.putBoolean("addicted", st.addicted);
             c.putBoolean("craving", st.cravingSent);
             c.putInt("stage", st.stage);
+            c.putString("substance", st.substance.name());
             list.add(c);
         }
         tag.put("players", list);
@@ -102,6 +112,11 @@ public final class AddictionData extends SavedData {
             st.addicted = c.getBoolean("addicted");
             st.cravingSent = c.getBoolean("craving");
             st.stage = c.getInt("stage");
+            try {
+                st.substance = Substance.valueOf(c.getString("substance"));
+            } catch (IllegalArgumentException ignored) {
+                st.substance = Substance.JOINT; // sauvegarde pré-tabac : le joint reste le defaut
+            }
             data.players.put(c.getUUID("id"), st);
         }
         return data;

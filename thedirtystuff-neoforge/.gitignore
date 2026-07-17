@@ -1,0 +1,18 @@
+# Gradle / build
+.gradle/
+build/
+run/
+runs/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+eclipse/
+.settings/
+.classpath
+.project
+
+# Logs
+*.log
