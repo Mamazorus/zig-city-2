@@ -9,6 +9,7 @@ import net.bogismok.thedirtystuff.init.ModItemProperties;
 import net.bogismok.thedirtystuff.item.ModItems;
 import net.bogismok.thedirtystuff.recipe.ModRecipes;
 import net.bogismok.thedirtystuff.screen.ModMenuTypes;
+import net.bogismok.thedirtystuff.screen.custom.DryingRackMenu;
 import net.bogismok.thedirtystuff.screen.custom.DryingRackScreen;
 import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraft.world.level.block.ComposterBlock;
@@ -56,7 +57,7 @@ public class TheDirtyStuff {
     public static class ClientModEvents {
         @SubscribeEvent
         public static void onClientSetup(FMLClientSetupEvent event) {
-            MenuScreens.register(ModMenuTypes.DRYING_RACK_MENU.get(), DryingRackScreen::new);
+            MenuScreens.<DryingRackMenu, DryingRackScreen>register(ModMenuTypes.DRYING_RACK_MENU.get(), DryingRackScreen::new);
             ModItemProperties.addCustomItemProperties();
         }
     }
