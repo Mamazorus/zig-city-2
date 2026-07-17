@@ -1,11 +1,11 @@
 package com.rawstudio.zigshop;
 
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.FoodProperties;
+import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.component.DataComponents;
 import net.neoforged.neoforge.event.ModifyDefaultComponentsEvent;
 
 /**
