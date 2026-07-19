@@ -561,8 +561,12 @@ public class TexasHoldemGame extends Game<TexasHoldemGame, TexasHoldemMenu> {
     private void refundRemainingPot() {
         if (pot <= 0) return;
         for (int i = 0; i < players.size(); i++) {
-            if (!folded[i]) { chips[i] += pot; play(players.get(i), Component.translatable("message.charta_casino.texas_holdem.wins_pot", pot)); pot = 0; return; }
+            if (totalCommitted[i] > 0) {
+                chips[i] += totalCommitted[i];
+                play(players.get(i), Component.translatable("message.charta_casino.texas_holdem.refunded", totalCommitted[i]));
+            }
         }
+        pot = 0;
     }
 
     @Override
