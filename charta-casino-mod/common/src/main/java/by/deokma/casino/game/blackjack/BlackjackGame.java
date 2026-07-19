@@ -482,6 +482,10 @@ public class BlackjackGame extends Game<BlackjackGame, BlackjackMenu> {
 
     public void onPlayerLeft(int idx) {
         if (idx < 0 || idx >= players.size()) return;
+        int refund = chips[idx] + Math.max(0, bets[idx]);
+        if (refund > 0 && players.get(idx).getEntity() instanceof ServerPlayer sp) {
+            CasinoBank.cashOut(sp, refund);
+        }
         busted[idx] = true;
         chips[idx]  = 0;
         bets[idx]   = -1;
@@ -506,6 +510,10 @@ public class BlackjackGame extends Game<BlackjackGame, BlackjackMenu> {
         // Cash-game : pas de « vainqueur de la partie » (chacun repart avec sa cave).
         // Le titre plein écran « You won! / You lost! » de fin de partie est retiré
         // volontairement (fork ZigCity) : il n'a pas de sens en jeu d'argent réel.
+        // Rembourse toute mise engagee mais non resolue (partie annulee en cours de manche).
+        for (int i = 0; i < players.size(); i++) {
+            if (bets[i] > 0) { chips[i] += bets[i]; bets[i] = 0; }
+        }
         // Cash-out (cave auto): return each player's remaining chips as gold coins, 1:1.
         for (int i = 0; i < players.size(); i++) {
             if (players.get(i).getEntity() instanceof ServerPlayer sp) {
