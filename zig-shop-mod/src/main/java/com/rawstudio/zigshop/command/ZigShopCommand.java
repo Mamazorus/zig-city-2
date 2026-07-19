@@ -3,17 +3,21 @@ package com.rawstudio.zigshop.command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 import com.rawstudio.zigshop.FirebaseClient;
 import com.rawstudio.zigshop.MerchantEntity;
 import com.rawstudio.zigshop.MerchantSkins;
 import com.rawstudio.zigshop.ModEntities;
+import com.rawstudio.zigshop.QuestServerHandler;
+import com.rawstudio.zigshop.QuestState;
 import com.rawstudio.zigshop.ShopOffer;
 import com.rawstudio.zigshop.ZigShopDate;
 
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -51,6 +55,11 @@ public final class ZigShopCommand {
                 .then(Commands.literal("npc")
                         .then(Commands.argument("id", StringArgumentType.word())
                                 .executes(ZigShopCommand::spawnNpc)))
+                .then(Commands.literal("quest")
+                        .then(Commands.literal("reset")
+                                .then(Commands.argument("joueur", EntityArgument.player())
+                                        .then(Commands.argument("questId", StringArgumentType.word())
+                                                .executes(ZigShopCommand::resetQuest)))))
                 .then(Commands.literal("skin")
                         .then(Commands.argument("nom", StringArgumentType.word())
                                 .suggests(SKIN_SUGGESTIONS)
@@ -110,6 +119,30 @@ public final class ZigShopCommand {
             }
             src.sendSuccess(() -> Component.literal("§a[Zig Shop] PNJ \"" + npcId + "\" (" + cfg.role() + ") cree. Clique dessus."), true);
         }));
+        return 1;
+    }
+
+    /**
+     * /zigshop quest reset &lt;joueur&gt; &lt;questId&gt; : soupape de secours ADMIN — supprime la
+     * quête {@code questId} de l'état de {@code joueur} quel que soit son statut actuel (en
+     * cours, terminée en attente de réclamation, etc.) et resynchronise son journal. Utile pour
+     * débloquer manuellement un cas non prévu (le nettoyage automatique des quêtes uniques
+     * perdues, cf. {@link QuestState#resolveLostUniques}, couvre déjà le cas courant).
+     */
+    private static int resetQuest(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        CommandSourceStack src = ctx.getSource();
+        ServerPlayer target = EntityArgument.getPlayer(ctx, "joueur");
+        String questId = StringArgumentType.getString(ctx, "questId");
+        boolean removed = QuestState.adminReset(target, questId);
+        if (!removed) {
+            src.sendFailure(Component.literal("[Zig Shop] " + target.getGameProfile().getName()
+                    + " n'a aucune trace de la quete \"" + questId + "\"."));
+            return 0;
+        }
+        QuestServerHandler.syncActive(target);
+        src.sendSuccess(() -> Component.literal("§a[Zig Shop] Quete \"" + questId + "\" reinitialisee pour "
+                + target.getGameProfile().getName() + "."), true);
+        target.sendSystemMessage(Component.literal("§7[Zig Shop] Un admin a reinitialise une de tes quetes bloquees."));
         return 1;
     }
 

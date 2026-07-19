@@ -55,8 +55,16 @@ public final class QuestServerHandler {
      * Pousse au client la liste des quêtes ACTIVES du joueur (journal d'inventaire + suivi
      * permanent). À rappeler après toute modification d'état (accept/annule/réclame/progression)
      * et à la connexion — c'est ce qui permet au client de connaître ses quêtes HORS de l'écran PNJ.
+     *
+     * <p>Résout d'abord les quêtes uniques perdues (cf. {@link QuestState#resolveLostUniques}) :
+     * comme cette méthode est appelée à la connexion et à CHAQUE progression d'objectif, c'est le
+     * point de passage qui garantit l'auto-guérison des joueurs déjà bloqués par ce cas.
      */
     public static void syncActive(ServerPlayer player) {
+        MinecraftServer server = player.getServer();
+        if (server != null) {
+            QuestState.resolveLostUniques(player, QuestWinnersData.get(server));
+        }
         PacketDistributor.sendToPlayer(player, new SyncActiveQuestsPayload(QuestState.activeQuestsJson(player)));
     }
 
@@ -65,6 +73,7 @@ public final class QuestServerHandler {
         long now = System.currentTimeMillis();
         MinecraftServer server = player.getServer();
         QuestWinnersData winners = server != null ? QuestWinnersData.get(server) : null;
+        QuestState.resolveLostUniques(player, winners); // nettoie AVANT de lire le statut de ce joueur
 
         JsonArray arr = new JsonArray();
         if (quests != null) {

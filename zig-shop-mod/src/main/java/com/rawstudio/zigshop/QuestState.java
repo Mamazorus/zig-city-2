@@ -25,7 +25,10 @@ import net.minecraft.world.entity.player.Player;
  *       redevient {@code AVAILABLE}.</li>
  *   <li>{@code daily} : réclamable une fois par tranche de 24 h glissantes.</li>
  *   <li>{@code unique} : traité comme {@code once} ici ; le verrou « 1 seul gagnant sur
- *       tout le serveur » est géré à part (cf. {@link QuestWinnersData}).</li>
+ *       tout le serveur » est géré à part (cf. {@link QuestWinnersData}). Les « perdants »
+ *       (ACCEPTED/COMPLETED quand un autre joueur a déjà gagné) sont basculés en
+ *       {@code CLAIMED} par {@link #resolveLostUniques}, sans quoi ils resteraient bloqués
+ *       indéfiniment (aucun bouton ne leur est plus proposé côté client).</li>
  * </ul>
  * Une quête sans {@code type}/{@code mode} dans le NBT (acceptée avant cette mise à jour)
  * vaut « kill » / « once » — rétrocompat.
@@ -162,6 +165,78 @@ public final class QuestState {
         }
         t.putString("status", AVAILABLE);
         t.putInt("progress", 0);
+        player.getPersistentData().put(ROOT, r);
+        return true;
+    }
+
+    /**
+     * Résout les quêtes {@code unique} que ce joueur a encore ACCEPTED/COMPLETED alors qu'un
+     * AUTRE joueur les a déjà remportées (verrou global, cf. {@link QuestWinnersData}).
+     *
+     * <p>Sans ce nettoyage, un « perdant » reste bloqué indéfiniment : dès qu'un gagnant existe,
+     * l'écran du PNJ masque TOUT bouton pour cette quête (y compris « Annuler ») quel que soit
+     * le statut de ce joueur — {@code claim()}/{@code cancel()} ne sont donc plus jamais
+     * ré-appelables pour lui. Ici on bascule directement vers {@code CLAIMED} (terminal, sans
+     * récompense) : la quête disparaît du journal ({@link #activeQuestsJson}) et libère
+     * l'emplacement qu'elle occupait (cf. {@link #countActive}) si elle était ACCEPTED.
+     *
+     * <p>Appelée depuis {@code QuestServerHandler.syncActive}/{@code buildJson} — donc à la
+     * connexion, à chaque progression d'objectif et à chaque écran PNJ : les joueurs déjà
+     * bloqués par ce bug se débloquent automatiquement dès leur prochaine action, sans
+     * intervention manuelle.
+     */
+    public static void resolveLostUniques(ServerPlayer player, QuestWinnersData winners) {
+        if (winners == null) {
+            return;
+        }
+        CompoundTag r = root(player);
+        String myUuid = player.getUUID().toString();
+        boolean changed = false;
+        for (String id : r.getAllKeys()) {
+            CompoundTag t = r.getCompound(id);
+            String status = t.getString("status");
+            if (!ACCEPTED.equals(status) && !COMPLETED.equals(status)) {
+                continue; // déjà terminale (claimed) ou jamais commencée : rien à résoudre
+            }
+            if (!"unique".equals(normMode(t.getString("mode")))) {
+                continue;
+            }
+            QuestWinnersData.Winner w = winners.winner(id);
+            if (w == null || myUuid.equals(w.uuid())) {
+                continue; // pas encore de gagnant, ou gagnant = ce joueur lui-même
+            }
+            t.putString("status", CLAIMED);
+            t.putInt("progress", 0);
+            changed = true;
+            notifyLost(player, t.getString("title"), w.name());
+        }
+        if (changed) {
+            player.getPersistentData().put(ROOT, r);
+        }
+    }
+
+    /** Message chat quand une quête unique est retirée du joueur car remportée par quelqu'un d'autre. */
+    private static void notifyLost(ServerPlayer player, String title, String winnerName) {
+        String label = (title == null || title.isBlank()) ? "Une quete unique" : title;
+        player.sendSystemMessage(Component.literal("§c" + label + " §7a deja ete remportee par §f"
+                + winnerName + "§7 : retiree de ton journal."));
+    }
+
+    /**
+     * Réinitialisation ADMIN (soupape de secours) : supprime l'entrée de {@code questId} pour ce
+     * joueur quel que soit son statut actuel — contrairement à {@link #cancel}, qui ne touche
+     * que les quêtes ACCEPTED. La quête redevient AVAILABLE (comme si jamais commencée) et tout
+     * emplacement qu'elle occupait est libéré. Prévu pour {@code /zigshop quest reset}, en dernier
+     * recours sur un état bloqué imprévu.
+     *
+     * @return true si une entrée existait et a été supprimée.
+     */
+    public static boolean adminReset(ServerPlayer player, String questId) {
+        CompoundTag r = root(player);
+        if (!r.contains(questId)) {
+            return false;
+        }
+        r.remove(questId);
         player.getPersistentData().put(ROOT, r);
         return true;
     }
