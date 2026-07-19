@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo, type KeyboardEvent as ReactKeyboardEvent, type CSSProperties } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type CSSProperties } from 'react'
 import { NEWS_CATEGORIES, CATEGORY_ORDER, resolveCategory, CategoryBadge, NewsFallback, NEWS_BANNER_RATIO, type NewsCategory } from './news'
 import { Avatar, RemoteNewsImage } from './remote-image'
 import { ItemIcon } from './item-icon'
@@ -137,6 +137,31 @@ function NpcSkinHead({ skinUrl, size = 40 }: { skinUrl?: string | null; size?: n
       <div style={layer(8, 8, 1)} />
       <div style={layer(40, 8, 2)} />
     </div>
+  )
+}
+
+// Petit bouton « copier » générique pour une commande en jeu (ex. /zigshop npc <slug>).
+function CopyCommandButton({ command, className = '' }: { command: string; className?: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = (e: ReactMouseEvent) => {
+    e.stopPropagation()
+    navigator.clipboard?.writeText(command)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      title={copied ? 'Copié !' : `Copier « ${command} »`}
+      className={`flex items-center justify-center rounded-[8px] text-white/35 hover:text-[rgba(0,255,225,0.9)] hover:bg-[rgba(0,255,225,0.12)] transition-colors shrink-0 ${className}`}
+    >
+      {copied ? (
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><rect x="4.5" y="4.5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.3" /><path d="M2.5 9.5V2.5A1 1 0 0 1 3.5 1.5H9.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>
+      )}
+    </button>
   )
 }
 
@@ -2012,6 +2037,7 @@ export default function AdminDashboard({
                         <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px] truncate">{NPC_ROLE_LABEL[n.role]} · /zigshop npc {n.id}</p>
                       </div>
                     </button>
+                    <CopyCommandButton command={`/zigshop npc ${n.id}`} className="size-[34px] opacity-0 group-hover:opacity-100" />
                     {confirmDeleteNpc === n.id ? (
                       <div className="flex gap-[6px] items-center shrink-0">
                         <span className="font-ui text-[14px] text-white/40">Supprimer ?</span>
@@ -2037,7 +2063,10 @@ export default function AdminDashboard({
             <NpcSkinHead skinUrl={selectedNpc.skinUrl} size={40} />
             <div className="flex flex-col min-w-0 flex-1">
               <p className="font-ui font-semibold text-[15px] text-white tracking-[-0.4px] truncate">{selectedNpc.name}</p>
-              <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px] truncate">{NPC_ROLE_LABEL[selectedNpc.role]} · /zigshop npc {selectedNpc.id}</p>
+              <div className="flex items-center gap-[6px] min-w-0">
+                <p className="font-ui text-[13px] text-white/40 tracking-[-0.3px] truncate">{NPC_ROLE_LABEL[selectedNpc.role]} · /zigshop npc {selectedNpc.id}</p>
+                <CopyCommandButton command={`/zigshop npc ${selectedNpc.id}`} className="size-[22px]" />
+              </div>
             </div>
             {onEditNpcSkin && (
               <button
