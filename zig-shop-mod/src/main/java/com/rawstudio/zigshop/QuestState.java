@@ -8,6 +8,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 
+import java.util.List;
+
 /**
  * État des quêtes PAR JOUEUR, persisté dans les données du joueur
  * ({@code ServerPlayer.getPersistentData()} → sous-tag {@code ZigShopQuests}).
@@ -220,6 +222,63 @@ public final class QuestState {
         String label = (title == null || title.isBlank()) ? "Une quete unique" : title;
         player.sendSystemMessage(Component.literal("§c" + label + " §7a deja ete remportee par §f"
                 + winnerName + "§7 : retiree de ton journal."));
+    }
+
+    /**
+     * Résout les quêtes que ce joueur a encore ACCEPTED/COMPLETED mais qui n'existent PLUS dans
+     * {@code catalog} (le PNJ ou la quête a été supprimé côté admin, cf. dashboard). Même famille
+     * de bug que {@link #resolveLostUniques} : si le PNJ propriétaire a disparu, le joueur n'a
+     * plus AUCUN moyen d'atteindre un écran qui lui permettrait de l'annuler (une quête liée à un
+     * {@code npc} n'apparaît que sur l'écran de CE PNJ) — on la bascule donc directement en
+     * {@code CLAIMED} (libère l'emplacement, disparaît du journal).
+     *
+     * <p>🔴 Garde de sécurité : {@code catalog} vide = no-op. Un catalogue Firebase VRAIMENT vide
+     * (toutes les quêtes supprimées) est indiscernable d'un aléa réseau/Firebase ayant renvoyé une
+     * réponse vide — dans le doute, on préfère laisser une quête bloquée (comme avant ce correctif)
+     * plutôt que d'annuler par erreur les quêtes en cours de TOUS les joueurs du serveur.
+     *
+     * <p>Contrairement à {@link #resolveLostUniques} (lecture d'une SavedData locale, appelable à
+     * chaque tick), ceci a besoin du catalogue Firebase À JOUR (paramètre déjà présent partout où
+     * c'est appelé) — jamais sur le chemin chaud de {@code addProgress}/{@code syncActive}.
+     */
+    public static void resolveOrphaned(ServerPlayer player, List<QuestDef> catalog) {
+        if (catalog == null || catalog.isEmpty()) {
+            return;
+        }
+        CompoundTag r = root(player);
+        boolean changed = false;
+        for (String id : r.getAllKeys()) {
+            CompoundTag t = r.getCompound(id);
+            String status = t.getString("status");
+            if (!ACCEPTED.equals(status) && !COMPLETED.equals(status)) {
+                continue; // déjà terminale ou jamais commencée : rien à résoudre
+            }
+            if (catalogContains(catalog, id)) {
+                continue; // toujours dans le catalogue : rien à résoudre
+            }
+            t.putString("status", CLAIMED);
+            t.putInt("progress", 0);
+            changed = true;
+            notifyRemoved(player, t.getString("title"));
+        }
+        if (changed) {
+            player.getPersistentData().put(ROOT, r);
+        }
+    }
+
+    private static boolean catalogContains(List<QuestDef> catalog, String questId) {
+        for (QuestDef q : catalog) {
+            if (q.id().equals(questId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Message chat quand une quête est retirée du joueur car supprimée du catalogue (PNJ effacé). */
+    private static void notifyRemoved(ServerPlayer player, String title) {
+        String label = (title == null || title.isBlank()) ? "Une de tes quetes" : title;
+        player.sendSystemMessage(Component.literal("§7" + label + " a ete retiree par un admin : abandonnee automatiquement."));
     }
 
     /**

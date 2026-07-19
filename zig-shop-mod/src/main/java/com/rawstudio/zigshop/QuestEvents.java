@@ -123,11 +123,14 @@ public final class QuestEvents {
     // ─── Connexion / respawn / changement de dimension : (re)pousser le journal au client ─────
     // Le client ne persiste PAS l'état des quêtes (il ne le reçoit que par réseau) : à chaque fois
     // qu'un joueur (re)prend le contrôle de son entité, on lui renvoie ses quêtes actives, sinon
-    // l'onglet quêtes resterait vide tant qu'il n'a pas reparlé à un PNJ.
+    // l'onglet quêtes resterait vide tant qu'il n'a pas reparlé à un PNJ. La CONNEXION utilise en
+    // plus syncActiveOnLogin (re-fetch Firebase) pour purger les quêtes dont le PNJ a été supprimé
+    // pendant l'absence du joueur (cf. QuestState.resolveOrphaned) — trop coûteux pour respawn/
+    // changement de dimension, qui se contentent du resync léger local.
     @SubscribeEvent
     public static void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            QuestServerHandler.syncActive(player);
+            QuestServerHandler.syncActiveOnLogin(player);
         }
     }
 

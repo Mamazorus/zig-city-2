@@ -68,12 +68,30 @@ public final class QuestServerHandler {
         PacketDistributor.sendToPlayer(player, new SyncActiveQuestsPayload(QuestState.activeQuestsJson(player)));
     }
 
+    /**
+     * Variante de {@link #syncActive} pour la CONNEXION uniquement : va aussi chercher le
+     * catalogue Firebase pour purger les quêtes dont le PNJ/la définition a été supprimé pendant
+     * l'absence du joueur (cf. {@link QuestState#resolveOrphaned}). Volontairement PAS appelée à
+     * chaque progression (contrairement à {@link #resolveLostUniques}, cette résolution a besoin
+     * d'un aller-retour Firebase — trop coûteux sur le chemin chaud de chaque kill/craft/etc.) ;
+     * l'ouverture d'un écran PNJ (cf. {@link #buildJson}) couvre le reste des cas.
+     */
+    public static void syncActiveOnLogin(ServerPlayer player) {
+        FirebaseClient.fetchQuests().whenComplete((list, err) -> player.getServer().execute(() -> {
+            if (err == null && list != null) {
+                QuestState.resolveOrphaned(player, list);
+            }
+            syncActive(player);
+        }));
+    }
+
     /** Sérialise les quêtes (filtrées par PNJ + mode) + l'état du joueur en JSON pour l'écran. */
     public static String buildJson(ServerPlayer player, List<QuestDef> quests, boolean uniqueOnly, @Nullable String npcId) {
         long now = System.currentTimeMillis();
         MinecraftServer server = player.getServer();
         QuestWinnersData winners = server != null ? QuestWinnersData.get(server) : null;
         QuestState.resolveLostUniques(player, winners); // nettoie AVANT de lire le statut de ce joueur
+        QuestState.resolveOrphaned(player, quests);      // idem pour les quêtes retirées du catalogue (PNJ supprimé)
 
         JsonArray arr = new JsonArray();
         if (quests != null) {
