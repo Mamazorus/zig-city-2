@@ -103,6 +103,60 @@ public final class FirebaseClient {
         return new NpcConfig(role, str(o, "name"), str(o, "skinUrl"), "slim".equals(str(o, "skinVariant")));
     }
 
+    /**
+     * Réglages de la BANQUE ({@code /bank/config}), édités via {@code economie/bank-config.json}
+     * (pas encore d'UI dashboard dédiée — cf. {@code push-economie.mjs}).
+     *
+     * <p>{@code savingsRatePct}/{@code savingsCap} : le compte ÉPARGNE rapporte {@code savingsRatePct}
+     * %/jour, calculé UNIQUEMENT sur {@code min(solde, savingsCap)} (le surplus ne fructifie pas).
+     * {@code riskyMinPct}/{@code riskyMaxPct}/{@code riskyAvgPct} : le compte RISQUÉ tire chaque jour
+     * un pourcentage aléatoire dans [{@code riskyMinPct}, {@code riskyMaxPct}], dont la MOYENNE est
+     * pilotée vers {@code riskyAvgPct} (cf. {@code BankAccountData#rollRisky} pour la formule).
+     * {@code withdrawFeePct} : prélevé à CHAQUE retrait (les deux comptes), reversé à
+     * {@code feeRecipient} (pseudo). Anti-abus « dépôt juste avant / retrait juste après » : un
+     * dépôt ne fructifie/tire qu'à partir du PROCHAIN passage du job quotidien (délai structurel,
+     * entre 0 et 24 h selon le moment du dépôt dans la journée — pas un réglage en heures, cf.
+     * {@code BankAccountData} champs {@code *Pending}).
+     */
+    public record BankConfig(String currencyItem, double savingsRatePct, long savingsCap,
+                              double riskyMinPct, double riskyMaxPct, double riskyAvgPct,
+                              double withdrawFeePct, String feeRecipient) {
+        /** Valeurs de repli si {@code /bank/config} est absent/injoignable (le jeu reste jouable). */
+        public static final BankConfig DEFAULT = new BankConfig(
+                "crazythings:crazy_coin", 0.5, 10_000L, -8.0, 10.0, -1.0, 3.0, "");
+    }
+
+    /** Lit la config de la banque ({@code /bank/config}). {@link BankConfig#DEFAULT} si absente. */
+    public static CompletableFuture<BankConfig> fetchBankConfig() {
+        return getJson("/bank/config").thenApply(FirebaseClient::parseBankConfig);
+    }
+
+    private static BankConfig parseBankConfig(String body) {
+        if (body == null || body.isBlank()) return BankConfig.DEFAULT;
+        JsonElement root = JsonParser.parseString(body);
+        if (root == null || !root.isJsonObject()) return BankConfig.DEFAULT;
+        JsonObject o = root.getAsJsonObject();
+        BankConfig d = BankConfig.DEFAULT;
+        return new BankConfig(
+                strOr(o, "currencyItem", d.currencyItem()),
+                dblOr(o, "savingsRatePct", d.savingsRatePct()),
+                (long) dblOr(o, "savingsCap", d.savingsCap()),
+                dblOr(o, "riskyMinPct", d.riskyMinPct()),
+                dblOr(o, "riskyMaxPct", d.riskyMaxPct()),
+                dblOr(o, "riskyAvgPct", d.riskyAvgPct()),
+                dblOr(o, "withdrawFeePct", d.withdrawFeePct()),
+                strOr(o, "feeRecipient", d.feeRecipient()));
+    }
+
+    /** Nombre à virgule, ou {@code def} si absent/invalide. */
+    private static double dblOr(JsonObject o, String key, double def) {
+        try {
+            return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsDouble() : def;
+        } catch (RuntimeException ex) {
+            return def;
+        }
+    }
+
     private static List<QuestDef> parseQuests(String body) {
         List<QuestDef> out = new ArrayList<>();
         if (body == null || body.isBlank()) return out;

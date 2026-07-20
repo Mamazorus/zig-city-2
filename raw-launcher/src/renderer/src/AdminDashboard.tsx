@@ -91,10 +91,10 @@ type QuestForm = { title: string; description: string; type: QuestType; target: 
 const EMPTY_QUEST: QuestForm = { title: '', description: '', type: 'kill', target: '', amount: 1, mode: 'once', maxClaims: 10, rewardItem: '', rewardQty: 1, npc: '' }
 
 // ── PNJ configurables (miroirs de window.d.ts) ──
-type NpcRole = 'quest' | 'daily' | 'store' | 'race'
+type NpcRole = 'quest' | 'daily' | 'store' | 'race' | 'bank'
 interface NpcDef { id: string; name: string; role: NpcRole; createdAt?: number; skinUrl?: string | null; skinVariant?: 'classic' | 'slim' }
 type NpcForm = { id: string; name: string; role: NpcRole }
-const NPC_ROLE_LABEL: Record<NpcRole, string> = { quest: 'Quêtes', daily: 'Shop du jour', store: 'Boutique', race: 'Course' }
+const NPC_ROLE_LABEL: Record<NpcRole, string> = { quest: 'Quêtes', daily: 'Shop du jour', store: 'Boutique', race: 'Course', bank: 'Banque' }
 
 // Aperçu « tête » d'un skin de PNJ (image 64×64 hébergée), rendu par crop CSS des régions
 // tête + calque, comme un avatar Minecraft. Passe par le main (fetchImage) pour contourner le
@@ -538,7 +538,7 @@ export default function AdminDashboard({
       }
     } finally { setShopLoading(false) }
   }, [dayOffset, shopCat])
-  useEffect(() => { if (tab === 'shop' || (tab === 'npcs' && selectedNpc && selectedNpc.role !== 'quest')) loadShopDay() }, [tab, selectedNpc, loadShopDay])
+  useEffect(() => { if (tab === 'shop' || (tab === 'npcs' && selectedNpc && selectedNpc.role !== 'quest' && selectedNpc.role !== 'bank')) loadShopDay() }, [tab, selectedNpc, loadShopDay])
 
   // Icônes des items en cours de saisie dans le formulaire (aperçu live, debouncé).
   const [offerIcons, setOfferIcons] = useState<Record<string, ItemIconDesc | ''>>({})
@@ -1089,7 +1089,7 @@ export default function AdminDashboard({
   const openNpc = (npc: NpcDef) => {
     setSelectedNpc(npc); setShowNpcForm(false); setNpcMsg(null)
     setShowQuestForm(false); setShowOfferForm(false); setShowLibrary(false)
-    if (npc.role !== 'quest') setShopCat(npc.role as 'daily' | 'store' | 'race')
+    if (npc.role !== 'quest' && npc.role !== 'bank') setShopCat(npc.role as 'daily' | 'store' | 'race')
   }
   const closeNpc = () => { setSelectedNpc(null); setShowQuestForm(false); setShowOfferForm(false) }
   const saveNpc = async () => {
@@ -1998,7 +1998,7 @@ export default function AdminDashboard({
                 <div className="flex flex-col">
                   <p className={labelCls}>Rôle</p>
                   <div className="flex flex-wrap gap-[4px] p-[3px] rounded-[12px] bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.06)] w-fit">
-                    {(['quest', 'daily', 'store', 'race'] as NpcRole[]).map(r => (
+                    {(['quest', 'daily', 'store', 'race', 'bank'] as NpcRole[]).map(r => (
                       <button key={r} type="button" onClick={() => setNpcForm(f => ({ ...f, role: r }))}
                         className={`font-ui text-[13px] tracking-[-0.3px] px-[12px] h-[30px] rounded-[9px] transition-colors ${npcForm.role === r ? 'bg-white text-[#0e0b16] font-semibold' : 'text-white/55 hover:text-white hover:bg-[rgba(255,255,255,0.06)]'}`}>
                         {NPC_ROLE_LABEL[r]}
@@ -2084,7 +2084,7 @@ export default function AdminDashboard({
           </div>
         )}
 
-        {(tab === 'shop' || (tab === 'npcs' && selectedNpc != null && selectedNpc.role !== 'quest')) && (
+        {(tab === 'shop' || (tab === 'npcs' && selectedNpc != null && selectedNpc.role !== 'quest' && selectedNpc.role !== 'bank')) && (
           <div className="flex flex-col gap-[14px]">
 
             {/* Réglages : la monnaie */}

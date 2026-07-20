@@ -2899,7 +2899,7 @@ ipcMain.handle('delete-quest', async (_, id) => {
 // Un PNJ nommé, spawné en jeu par `/zigshop npc <slug>`, n'affiche que le contenu
 // (quêtes/offres) tagué `npc == slug`. Le slug est la CLÉ Firebase ET l'argument de
 // la commande → on l'écrit en PUT sur /npcs/{slug} (pas un push id).
-const NPC_ROLES = new Set(['quest', 'daily', 'store', 'race'])
+const NPC_ROLES = new Set(['quest', 'daily', 'store', 'race', 'bank'])
 function sanitizeNpcSlug(v) {
   return String(v ?? '').trim().toLowerCase().slice(0, 32).replace(/[^a-z0-9-]/g, '')
 }

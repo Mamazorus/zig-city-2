@@ -130,13 +130,13 @@ public class MerchantEntity extends PathfinderMob {
         return false;
     }
 
-    /** Définit le type de PNJ (daily/store/race/quest/questspecial). Appelé à la création via la commande. */
+    /** Définit le type de PNJ (daily/store/race/quest/questspecial/bank). Appelé à la création via la commande. */
     public void setShopKind(String kind) {
         this.shopKind = ("store".equals(kind) || "race".equals(kind) || "quest".equals(kind)
-                || "questspecial".equals(kind)) ? kind : "daily";
+                || "questspecial".equals(kind) || "bank".equals(kind)) ? kind : "daily";
     }
 
-    /** Type de PNJ courant (daily/store/race/quest/questspecial). */
+    /** Type de PNJ courant (daily/store/race/quest/questspecial/bank). */
     public String getShopKind() {
         return this.shopKind;
     }
@@ -279,6 +279,19 @@ public class MerchantEntity extends PathfinderMob {
                         return;
                     }
                     QuestServerHandler.openFor(sp, list, uniqueOnly, this.getNpcId());
+                }));
+            }
+            return InteractionResult.CONSUME;
+        }
+        // PNJ banquier : ouvre directement l'écran de banque (pas d'offres à lire, juste la config).
+        if ("bank".equals(this.shopKind)) {
+            if (player instanceof ServerPlayer sp) {
+                FirebaseClient.fetchBankConfig().whenComplete((cfg, err) -> server.execute(() -> {
+                    if (this.isRemoved() || !sp.isAlive()) {
+                        return;
+                    }
+                    FirebaseClient.BankConfig c = (err != null || cfg == null) ? FirebaseClient.BankConfig.DEFAULT : cfg;
+                    BankServerHandler.open(sp, this.getId(), c);
                 }));
             }
             return InteractionResult.CONSUME;

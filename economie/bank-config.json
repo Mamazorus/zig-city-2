@@ -1,0 +1,10 @@
+{
+  "currencyItem": "crazythings:crazy_coin",
+  "savingsRatePct": 0.5,
+  "savingsCap": 10000,
+  "riskyMinPct": -8,
+  "riskyMaxPct": 10,
+  "riskyAvgPct": -1,
+  "withdrawFeePct": 3,
+  "feeRecipient": "Mamazorus"
+}

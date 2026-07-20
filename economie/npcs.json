@@ -1,0 +1,13 @@
+{
+  "chasseur": { "name": "Le Chasseur de primes", "role": "quest", "createdAt": 1751500000000 },
+  "guilde": { "name": "La Guilde des aventuriers", "role": "quest", "createdAt": 1751500000001 },
+  "forgeron": { "name": "Le Forgeron", "role": "quest", "createdAt": 1751500000002 },
+  "receleur": { "name": "Le Receleur", "role": "daily", "createdAt": 1751500000003 },
+  "bazar": { "name": "Le Bazar", "role": "daily", "createdAt": 1751500000004 },
+  "echoppe": { "name": "L'Echoppe", "role": "daily", "createdAt": 1751500000005 },
+  "bucheron": { "name": "Le Bucheron", "role": "quest", "createdAt": 1753100000000 },
+  "antiquaire": { "name": "L'Antiquaire", "role": "daily", "createdAt": 1753100000001 },
+  "disquaire": { "name": "Le Disquaire", "role": "daily", "createdAt": 1753100000002 },
+  "troc": { "name": "Le Troc", "role": "daily", "createdAt": 1753100000003 },
+  "banquier": { "name": "Le Banquier", "role": "bank", "createdAt": 1753100000004 }
+}

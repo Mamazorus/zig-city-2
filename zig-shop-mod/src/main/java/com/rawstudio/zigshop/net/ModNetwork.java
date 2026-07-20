@@ -1,5 +1,6 @@
 package com.rawstudio.zigshop.net;
 
+import com.rawstudio.zigshop.BankServerHandler;
 import com.rawstudio.zigshop.QuestServerHandler;
 import com.rawstudio.zigshop.ShopServerHandler;
 import com.rawstudio.zigshop.ZigShop;
@@ -43,5 +44,11 @@ public final class ModNetwork {
                         com.rawstudio.zigshop.client.ShopClientHandler.open(payload.json())));
         registrar.playToServer(BuyOfferPayload.TYPE, BuyOfferPayload.CODEC,
                 (payload, context) -> ShopServerHandler.buy(context, payload.entityId(), payload.offerId()));
+        // Banque : ouverture (S→C) + dépôt/retrait/fermeture (C→S).
+        registrar.playToClient(OpenBankPayload.TYPE, OpenBankPayload.CODEC,
+                (payload, context) -> context.enqueueWork(() ->
+                        com.rawstudio.zigshop.client.BankClientHandler.open(payload.json())));
+        registrar.playToServer(BankActionPayload.TYPE, BankActionPayload.CODEC,
+                (payload, context) -> BankServerHandler.handle(context, payload.entityId(), payload.action(), payload.accountType(), payload.amount()));
     }
 }

@@ -1,0 +1,235 @@
+{
+  "q-nettoyage-nocturne": {
+    "title": "Nettoyage nocturne",
+    "description": "Elimine 15 zombies pour toucher ta prime.",
+    "type": "kill", "target": "minecraft:zombie", "amount": 15,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 3,
+    "mode": "daily", "npc": "chasseur", "createdAt": 1751500001000
+  },
+  "q-chasse-creeper": {
+    "title": "Chasse dangereuse",
+    "description": "Fais exploser 8 creepers... avant qu'ils ne t'explosent.",
+    "type": "kill", "target": "minecraft:creeper", "amount": 8,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 5,
+    "mode": "daily", "npc": "chasseur", "createdAt": 1751500001001
+  },
+  "q-purge-nether": {
+    "title": "Purge du Nether",
+    "description": "Elimine 10 blazes dans une forteresse du Nether.",
+    "type": "kill", "target": "minecraft:blaze", "amount": 10,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 8,
+    "mode": "daily", "npc": "chasseur", "createdAt": 1751500001002
+  },
+  "q-araignees": {
+    "title": "Dératisation",
+    "description": "Elimine 15 araignées.",
+    "type": "kill", "target": "minecraft:spider", "amount": 15,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 3,
+    "mode": "daily", "npc": "chasseur", "createdAt": 1751500001003
+  },
+  "q-premier-sang": {
+    "title": "Premier sang",
+    "description": "Elimine 50 créatures hostiles, toutes confondues.",
+    "type": "kill", "target": "", "amount": 50,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 10,
+    "mode": "once", "npc": "chasseur", "createdAt": 1751500001006
+  },
+  "q-invocateur-vaincu": {
+    "title": "L'Invocateur vaincu",
+    "description": "Terrasse 4 évocateurs.",
+    "type": "kill", "target": "minecraft:evoker", "amount": 4,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 28,
+    "mode": "once", "npc": "guilde", "createdAt": 1751500002000
+  },
+  "q-contrat-garde": {
+    "title": "Contrat de garde",
+    "description": "Repousse 30 pillards. Renouvelable 5 fois.",
+    "type": "kill", "target": "minecraft:pillager", "amount": 30,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 6,
+    "mode": "limited", "maxClaims": 5, "npc": "chasseur", "createdAt": 1751500001008
+  },
+  "q-wither-vaincu": {
+    "title": "Le Fléau invoqué",
+    "description": "Le premier à vaincre le Wither rafle la mise.",
+    "type": "kill", "target": "minecraft:wither", "amount": 1,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 50,
+    "mode": "unique", "npc": "guilde", "createdAt": 1751500001009
+  },
+  "q-colosse-bastion": {
+    "title": "Le Colosse du bastion",
+    "description": "Le premier à terrasser 10 piglins brutes rafle la mise.",
+    "type": "kill", "target": "minecraft:piglin_brute", "amount": 10,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 42,
+    "mode": "unique", "npc": "guilde", "createdAt": 1751500001010
+  },
+  "q-raid-repousse": {
+    "title": "Le raid repoussé",
+    "description": "Terrasse un ravageur pendant un raid.",
+    "type": "kill", "target": "minecraft:ravager", "amount": 1,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 20,
+    "mode": "once", "npc": "guilde", "createdAt": 1751500001011
+  },
+
+  "q-veine-charbon": {
+    "title": "Veine de charbon",
+    "description": "Extrais 64 blocs de minerai de charbon.",
+    "type": "break", "target": "minecraft:coal_ore", "amount": 64,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 4,
+    "mode": "daily", "npc": "forgeron", "createdAt": 1751500001100
+  },
+  "q-filon-fer": {
+    "title": "Filon de fer",
+    "description": "Extrais 48 blocs de minerai de fer.",
+    "type": "break", "target": "minecraft:iron_ore", "amount": 48,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 3,
+    "mode": "daily", "npc": "forgeron", "createdAt": 1751500001101
+  },
+  "q-veine-cuivre": {
+    "title": "Veine de cuivre",
+    "description": "Extrais 48 blocs de minerai de cuivre.",
+    "type": "break", "target": "minecraft:copper_ore", "amount": 48,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 3,
+    "mode": "daily", "npc": "forgeron", "createdAt": 1751500001102
+  },
+  "q-poudre-rouge": {
+    "title": "Poudre rouge",
+    "description": "Extrais 64 blocs de minerai de redstone.",
+    "type": "break", "target": "minecraft:redstone_ore", "amount": 64,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 3,
+    "mode": "daily", "npc": "forgeron", "createdAt": 1751500001103
+  },
+  "q-bleu-profond": {
+    "title": "Bleu profond",
+    "description": "Extrais 64 blocs de minerai de lapis-lazuli.",
+    "type": "break", "target": "minecraft:lapis_ore", "amount": 64,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 3,
+    "mode": "daily", "npc": "forgeron", "createdAt": 1751500001104
+  },
+  "q-eclat-or": {
+    "title": "Éclat d'or",
+    "description": "Extrais 16 blocs de minerai d'or.",
+    "type": "break", "target": "minecraft:gold_ore", "amount": 16,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 3,
+    "mode": "daily", "npc": "forgeron", "createdAt": 1751500001105
+  },
+  "q-fonte-fer": {
+    "title": "Fonte du fer",
+    "description": "Fais fondre 32 lingots de fer.",
+    "type": "smelt", "target": "minecraft:iron_ingot", "amount": 32,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 4,
+    "mode": "daily", "npc": "forgeron", "createdAt": 1751500001106
+  },
+  "q-coulee-cuivre": {
+    "title": "Coulée de cuivre",
+    "description": "Fais fondre 32 lingots de cuivre.",
+    "type": "smelt", "target": "minecraft:copper_ingot", "amount": 32,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 4,
+    "mode": "daily", "npc": "forgeron", "createdAt": 1751500001107
+  },
+  "q-charbon-de-bois": {
+    "title": "Charbon de bois",
+    "description": "Fais cuire 32 charbons de bois.",
+    "type": "smelt", "target": "minecraft:charcoal", "amount": 32,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 3,
+    "mode": "daily", "npc": "forgeron", "createdAt": 1751500001108
+  },
+  "q-fonte-or": {
+    "title": "Fonte de l'or",
+    "description": "Fais fondre 16 lingots d'or.",
+    "type": "smelt", "target": "minecraft:gold_ingot", "amount": 16,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 4,
+    "mode": "daily", "npc": "forgeron", "createdAt": 1751500001111
+  },
+  "q-grand-filon": {
+    "title": "Le grand filon",
+    "description": "Extrais 12 blocs de minerai de diamant.",
+    "type": "break", "target": "minecraft:diamond_ore", "amount": 12,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 16,
+    "mode": "once", "npc": "forgeron", "createdAt": 1751500001112
+  },
+  "q-contrat-minerai": {
+    "title": "Contrat de minerai",
+    "description": "Fournis 64 lingots de fer fondus. Renouvelable 5 fois.",
+    "type": "smelt", "target": "minecraft:iron_ingot", "amount": 64,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 6,
+    "mode": "limited", "maxClaims": 5, "npc": "forgeron", "createdAt": 1751500001114
+  },
+
+  "q-abattage-chene": {
+    "title": "Abattage de chêne",
+    "description": "Coupe 64 troncs de chêne.",
+    "type": "break", "target": "minecraft:oak_log", "amount": 64,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 3,
+    "mode": "daily", "npc": "bucheron", "createdAt": 1753100001000
+  },
+  "q-abattage-sapin": {
+    "title": "Abattage de sapin",
+    "description": "Coupe 64 troncs de sapin.",
+    "type": "break", "target": "minecraft:spruce_log", "amount": 64,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 3,
+    "mode": "daily", "npc": "bucheron", "createdAt": 1753100001001
+  },
+  "q-abattage-bouleau": {
+    "title": "Abattage de bouleau",
+    "description": "Coupe 64 troncs de bouleau.",
+    "type": "break", "target": "minecraft:birch_log", "amount": 64,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 3,
+    "mode": "daily", "npc": "bucheron", "createdAt": 1753100001002
+  },
+  "q-abattage-jungle": {
+    "title": "Abattage en jungle",
+    "description": "Coupe 48 troncs d'acajou.",
+    "type": "break", "target": "minecraft:jungle_log", "amount": 48,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 3,
+    "mode": "daily", "npc": "bucheron", "createdAt": 1753100001003
+  },
+  "q-abattage-acacia": {
+    "title": "Abattage d'acacia",
+    "description": "Coupe 48 troncs d'acacia.",
+    "type": "break", "target": "minecraft:acacia_log", "amount": 48,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 3,
+    "mode": "daily", "npc": "bucheron", "createdAt": 1753100001004
+  },
+  "q-abattage-chene-noir": {
+    "title": "Abattage de chêne noir",
+    "description": "Coupe 48 troncs de chêne noir.",
+    "type": "break", "target": "minecraft:dark_oak_log", "amount": 48,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 3,
+    "mode": "daily", "npc": "bucheron", "createdAt": 1753100001005
+  },
+  "q-abattage-mangrove": {
+    "title": "Abattage en mangrove",
+    "description": "Coupe 32 troncs de palétuvier.",
+    "type": "break", "target": "minecraft:mangrove_log", "amount": 32,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 4,
+    "mode": "daily", "npc": "bucheron", "createdAt": 1753100001006
+  },
+  "q-abattage-cerisier": {
+    "title": "Abattage de cerisier",
+    "description": "Coupe 32 troncs de cerisier.",
+    "type": "break", "target": "minecraft:cherry_log", "amount": 32,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 4,
+    "mode": "daily", "npc": "bucheron", "createdAt": 1753100001007
+  },
+  "q-grand-abattage": {
+    "title": "Le grand abattage",
+    "description": "Coupe 256 troncs de chêne.",
+    "type": "break", "target": "minecraft:oak_log", "amount": 256,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 16,
+    "mode": "once", "npc": "bucheron", "createdAt": 1753100001008
+  },
+  "q-foret-de-cerisiers": {
+    "title": "La forêt de cerisiers",
+    "description": "Coupe 128 troncs de cerisier.",
+    "type": "break", "target": "minecraft:cherry_log", "amount": 128,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 14,
+    "mode": "once", "npc": "bucheron", "createdAt": 1753100001009
+  },
+  "q-contrat-bois": {
+    "title": "Contrat de bois",
+    "description": "Coupe 96 troncs de chêne noir. Renouvelable 5 fois.",
+    "type": "break", "target": "minecraft:dark_oak_log", "amount": 96,
+    "rewardItem": "crazythings:crazy_coin", "rewardQty": 6,
+    "mode": "limited", "maxClaims": 5, "npc": "bucheron", "createdAt": 1753100001010
+  }
+}

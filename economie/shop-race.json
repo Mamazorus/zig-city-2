@@ -1,0 +1,32 @@
+{
+  "r-tete-wither": {
+    "input": "minecraft:wither_skeleton_skull", "inputQty": 1,
+    "output": "crazythings:crazy_coin", "outputQty": 4,
+    "maxUses": 20, "npc": "receleur", "createdAt": 1751500002000
+  },
+  "r-echo-shard": {
+    "input": "minecraft:echo_shard", "inputQty": 1,
+    "output": "crazythings:crazy_coin", "outputQty": 1,
+    "maxUses": 40, "npc": "receleur", "createdAt": 1751500002001
+  },
+  "r-totem": {
+    "input": "minecraft:totem_of_undying", "inputQty": 1,
+    "output": "crazythings:crazy_coin", "outputQty": 12,
+    "maxUses": 5, "npc": "receleur", "createdAt": 1751500002002
+  },
+  "r-coeur-ocean": {
+    "input": "minecraft:heart_of_the_sea", "inputQty": 1,
+    "output": "crazythings:crazy_coin", "outputQty": 10,
+    "maxUses": 5, "npc": "receleur", "createdAt": 1751500002003
+  },
+  "r-nautile": {
+    "input": "minecraft:nautilus_shell", "inputQty": 1,
+    "output": "crazythings:crazy_coin", "outputQty": 2,
+    "maxUses": 30, "npc": "receleur", "createdAt": 1751500002004
+  },
+  "r-etoile-nether": {
+    "input": "minecraft:nether_star", "inputQty": 1,
+    "output": "crazythings:crazy_coin", "outputQty": 32,
+    "maxUses": 3, "npc": "receleur", "createdAt": 1751500002005
+  }
+}

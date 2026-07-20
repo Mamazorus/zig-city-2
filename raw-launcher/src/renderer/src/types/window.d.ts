@@ -176,7 +176,7 @@ type QuestForm = {
 
 // PNJ configurable (/npcs/{id}) : rôle + nom, spawné en jeu par `/zigshop npc <id>`.
 // skinUrl/skinVariant = skin optionnel (image 64×64 hébergée) appliqué au PNJ en jeu.
-type NpcRole = 'quest' | 'daily' | 'store' | 'race'
+type NpcRole = 'quest' | 'daily' | 'store' | 'race' | 'bank'
 interface NpcDef { id: string; name: string; role: NpcRole; createdAt?: number; skinUrl?: string | null; skinVariant?: 'classic' | 'slim' }
 type NpcForm = { id: string; name: string; role: NpcRole }
 
