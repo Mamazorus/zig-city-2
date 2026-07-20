@@ -8,15 +8,15 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 
 /**
- * Déclenche le job quotidien de la banque ({@link BankAccountData#applyDailyTick}) au changement
- * de jour civil ({@link ZigShopDate#today()}). Ce mod n'a pas de hook de tick SERVEUR global : on
- * se raccroche au tick d'UN joueur en ligne (throttlé à ~1×/minute — largement suffisant pour un
- * cycle journalier), complété par la connexion pour rattraper un changement de jour survenu
- * pendant que le serveur était vide. Le garde-fou d'idempotence RÉEL reste
- * {@code Account.lastProcessedDay} (par compte, dans {@link BankAccountData}) : {@link #lastTriggeredDay}
- * n'est qu'une optimisation pour éviter de re-interroger Firebase à chaque tick une fois le job
- * déjà lancé pour le jour courant — un redémarrage serveur la remet à zéro sans risque de double
- * traitement (le vrai garde-fou par compte s'applique quoi qu'il arrive).
+ * Déclenche le job périodique de la banque ({@link BankAccountData#applyPeriodTick}). Ce mod n'a
+ * pas de hook de tick SERVEUR global : on se raccroche au tick d'UN joueur en ligne (throttlé à
+ * ~1×/minute — largement suffisant même pour un cycle configuré en heures, cf.
+ * {@code FirebaseClient.BankConfig#periodHours}), complété par la connexion pour rattraper un
+ * cycle écoulé pendant que le serveur était vide. Le garde-fou d'idempotence RÉEL reste
+ * {@code Account.lastProcessedPeriod} (par compte, dans {@link BankAccountData}) : la config est
+ * refetchée à CHAQUE vérification throttlée (simple requête GET Firebase, ~1×/minute — pas besoin
+ * d'un throttle applicatif supplémentaire ici, contrairement à l'ancien système en jours civils où
+ * la période n'était connue qu'après coup).
  */
 @EventBusSubscriber(modid = ZigShop.MODID)
 public final class BankEvents {
@@ -24,7 +24,6 @@ public final class BankEvents {
 
     private static final int CHECK_INTERVAL_TICKS = 1200; // ~1 minute (20 ticks/s)
     private static int tickCounter = 0;
-    private static String lastTriggeredDay = "";
 
     @SubscribeEvent
     public static void onPlayerTick(PlayerTickEvent.Post event) {
@@ -35,28 +34,23 @@ public final class BankEvents {
             return;
         }
         tickCounter = 0;
-        maybeRunDailyTick(player.getServer());
+        runPeriodTick(player.getServer());
     }
 
     @SubscribeEvent
     public static void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            maybeRunDailyTick(player.getServer());
+            runPeriodTick(player.getServer());
         }
     }
 
-    private static void maybeRunDailyTick(MinecraftServer server) {
+    private static void runPeriodTick(MinecraftServer server) {
         if (server == null) {
             return;
         }
-        String today = ZigShopDate.today();
-        if (today.equals(lastTriggeredDay)) {
-            return;
-        }
-        lastTriggeredDay = today;
         FirebaseClient.fetchBankConfig().whenComplete((cfg, err) -> server.execute(() -> {
             FirebaseClient.BankConfig c = (err != null || cfg == null) ? FirebaseClient.BankConfig.DEFAULT : cfg;
-            BankAccountData.get(server).applyDailyTick(server, today, c);
+            BankAccountData.get(server).applyPeriodTick(server, c);
         }));
     }
 }

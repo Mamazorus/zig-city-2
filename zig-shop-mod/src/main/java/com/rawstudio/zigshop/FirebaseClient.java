@@ -104,26 +104,29 @@ public final class FirebaseClient {
     }
 
     /**
-     * Réglages de la BANQUE ({@code /bank/config}), édités via {@code economie/bank-config.json}
-     * (pas encore d'UI dashboard dédiée — cf. {@code push-economie.mjs}).
+     * Réglages de la BANQUE ({@code /bank/config}), édités depuis le dashboard (onglet PNJ →
+     * banquier) ou {@code economie/bank-config.json} + {@code push-economie.mjs}.
      *
-     * <p>{@code savingsRatePct}/{@code savingsCap} : le compte ÉPARGNE rapporte {@code savingsRatePct}
-     * %/jour, calculé UNIQUEMENT sur {@code min(solde, savingsCap)} (le surplus ne fructifie pas).
-     * {@code riskyMinPct}/{@code riskyMaxPct}/{@code riskyAvgPct} : le compte RISQUÉ tire chaque jour
-     * un pourcentage aléatoire dans [{@code riskyMinPct}, {@code riskyMaxPct}], dont la MOYENNE est
-     * pilotée vers {@code riskyAvgPct} (cf. {@code BankAccountData#rollRisky} pour la formule).
-     * {@code withdrawFeePct} : prélevé à CHAQUE retrait (les deux comptes), reversé à
-     * {@code feeRecipient} (pseudo). Anti-abus « dépôt juste avant / retrait juste après » : un
-     * dépôt ne fructifie/tire qu'à partir du PROCHAIN passage du job quotidien (délai structurel,
-     * entre 0 et 24 h selon le moment du dépôt dans la journée — pas un réglage en heures, cf.
-     * {@code BankAccountData} champs {@code *Pending}).
+     * <p>{@code periodHours} : durée d'un CYCLE (défaut 24 = comportement historique « par jour »).
+     * {@code savingsRatePct}/{@code savingsCap} : le compte ÉPARGNE rapporte {@code savingsRatePct}
+     * % PAR CYCLE, calculé UNIQUEMENT sur {@code min(solde, savingsCap)} (le surplus ne fructifie
+     * pas). Réduire {@code periodHours} SANS baisser {@code savingsRatePct} accélère le rendement
+     * composé d'autant (le taux s'applique tel quel à chaque cycle, il n'est jamais reproportionné
+     * automatiquement). {@code riskyMinPct}/{@code riskyMaxPct}/{@code riskyAvgPct} : le compte
+     * RISQUÉ tire à chaque cycle un pourcentage aléatoire dans [{@code riskyMinPct},
+     * {@code riskyMaxPct}], dont la MOYENNE est pilotée vers {@code riskyAvgPct} (cf.
+     * {@code BankAccountData#rollRiskyPct} pour la formule). {@code withdrawFeePct} : prélevé à
+     * CHAQUE retrait (les deux comptes), reversé à {@code feeRecipient} (pseudo). Anti-abus
+     * (« dépôt juste avant / retrait juste après ») : un dépôt ne fructifie/tire qu'à partir du
+     * PROCHAIN cycle (délai structurel, entre 0 et {@code periodHours} h selon le moment du dépôt
+     * — cf. {@code BankAccountData} champs {@code *Pending}).
      */
-    public record BankConfig(String currencyItem, double savingsRatePct, long savingsCap,
+    public record BankConfig(String currencyItem, double periodHours, double savingsRatePct, long savingsCap,
                               double riskyMinPct, double riskyMaxPct, double riskyAvgPct,
                               double withdrawFeePct, String feeRecipient) {
         /** Valeurs de repli si {@code /bank/config} est absent/injoignable (le jeu reste jouable). */
         public static final BankConfig DEFAULT = new BankConfig(
-                "crazythings:crazy_coin", 0.5, 10_000L, -8.0, 10.0, -1.0, 3.0, "");
+                "crazythings:crazy_coin", 24.0, 0.5, 10_000L, -8.0, 10.0, -1.0, 3.0, "");
     }
 
     /** Lit la config de la banque ({@code /bank/config}). {@link BankConfig#DEFAULT} si absente. */
@@ -139,6 +142,7 @@ public final class FirebaseClient {
         BankConfig d = BankConfig.DEFAULT;
         return new BankConfig(
                 strOr(o, "currencyItem", d.currencyItem()),
+                dblOr(o, "periodHours", d.periodHours()),
                 dblOr(o, "savingsRatePct", d.savingsRatePct()),
                 (long) dblOr(o, "savingsCap", d.savingsCap()),
                 dblOr(o, "riskyMinPct", d.riskyMinPct()),
@@ -155,6 +159,37 @@ public final class FirebaseClient {
         } catch (RuntimeException ex) {
             return def;
         }
+    }
+
+    /**
+     * Publie (PUT) un miroir du compte bancaire de {@code player} sous
+     * {@code /bank/accounts/{player}} : {@code {savingsTotal, riskyTotal, total, updatedAt}}.
+     * Écriture AUTHENTIFIÉE (secret SERVEUR, cf. {@link ServerConfig}), best-effort (erreurs
+     * seulement loguées) — la source de vérité reste {@link BankAccountData} (SavedData local),
+     * ce miroir n'est qu'informatif (consultable directement dans la base par l'admin).
+     */
+    public static void putBankAccount(String secret, String player, long savingsTotal, long riskyTotal) {
+        if (secret == null || secret.isBlank() || player == null || player.isBlank()) {
+            return;
+        }
+        JsonObject body = new JsonObject();
+        body.addProperty("savingsTotal", savingsTotal);
+        body.addProperty("riskyTotal", riskyTotal);
+        body.addProperty("total", savingsTotal + riskyTotal);
+        body.addProperty("updatedAt", System.currentTimeMillis());
+        URI uri = URI.create(BASE + "/bank/accounts/" + player + ".json?auth=" + secret);
+        HttpRequest req = HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofSeconds(15))
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(body.toString()))
+                .build();
+        HTTP.sendAsync(req, HttpResponse.BodyHandlers.ofString()).whenComplete((resp, err) -> {
+            if (err != null) {
+                ZigShop.LOGGER.warn("[ZigShop] Publication du compte bancaire echouee : {}", err.toString());
+            } else if (resp.statusCode() / 100 != 2) {
+                ZigShop.LOGGER.warn("[ZigShop] Publication du compte bancaire : HTTP {}", resp.statusCode());
+            }
+        });
     }
 
     private static List<QuestDef> parseQuests(String body) {

@@ -11,6 +11,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.saveddata.SavedData;
 
 import javax.annotation.Nullable;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -22,24 +24,31 @@ import java.util.UUID;
 /**
  * Comptes de la BANQUE, persistés dans les données du monde (overworld) sous
  * {@code <world>/data/zigshop_bank_accounts.dat} — un {@link SavedData}, PAS le NBT du joueur
- * (cf. {@link QuestState}) : le job quotidien ({@link #applyDailyTick}) doit pouvoir traiter tous
- * les comptes, y compris ceux des joueurs hors-ligne (seule une donnée du MONDE le permet).
+ * (cf. {@link QuestState}) : le job périodique ({@link #applyPeriodTick}) doit pouvoir traiter
+ * tous les comptes, y compris ceux des joueurs hors-ligne (seule une donnée du MONDE le permet).
  *
- * <p>Deux sous-comptes par joueur : ÉPARGNE (intérêt journalier plafonné) et RISQUÉ (tirage
- * journalier aléatoire). Chacun distingue {@code Eligible} (déjà passé au moins une fois par le
- * job → fructifie/tire) et {@code Pending} (déposé après le dernier passage du job → retirable
- * tout de suite, mais neutre jusqu'au PROCHAIN passage). Ce délai empêche un joueur de déposer
- * juste avant le tirage puis retirer juste après (cf. design validé le 19/07 : garde-fou anti-abus).
+ * <p>Deux sous-comptes par joueur : ÉPARGNE (intérêt plafonné) et RISQUÉ (tirage aléatoire), tous
+ * deux recalculés une fois par CYCLE ({@code FirebaseClient.BankConfig#periodHours}, 24 h par
+ * défaut). Chacun distingue {@code Eligible} (déjà passé au moins une fois par le job →
+ * fructifie/tire) et {@code Pending} (déposé après le dernier passage du job → retirable tout de
+ * suite, mais neutre jusqu'au PROCHAIN passage). Ce délai empêche un joueur de déposer juste avant
+ * le tirage puis retirer juste après (cf. design validé le 19/07 : garde-fou anti-abus).
  */
 public final class BankAccountData extends SavedData {
 
     /** Nom du fichier {@code .dat} sous {@code <world>/data/}. */
     public static final String FILE_ID = "zigshop_bank_accounts";
 
-    /** Historique borné (derniers jours traités, le plus récent en tête) affiché à l'écran. */
+    /** Historique borné (derniers cycles traités, le plus récent en tête) affiché à l'écran. */
     private static final int MAX_HISTORY = 14;
 
-    /** Résultat d'un jour traité, pour l'historique de l'écran. */
+    /** Horodatage lisible d'une entrée d'historique (inclut l'heure : un cycle peut être < 24 h). */
+    private static final DateTimeFormatter HISTORY_FMT = DateTimeFormatter.ofPattern("dd/MM HH:mm");
+
+    /** Durée plancher d'un cycle (anti config absurde : periodHours <= 0 bouclerait à chaque tick). */
+    private static final long MIN_PERIOD_MS = 60_000L;
+
+    /** Résultat d'un cycle traité, pour l'historique de l'écran. */
     public record HistoryEntry(String date, long savingsDelta, long riskyDelta) {}
 
     /** Résultat d'un retrait : {@code net} remis au joueur, {@code fee} prélevé (cf. {@link #creditFee}). */
@@ -53,7 +62,8 @@ public final class BankAccountData extends SavedData {
         long savingsPending;
         long riskyEligible;
         long riskyPending;
-        String lastProcessedDay = "";
+        /** Numéro du dernier cycle traité (epoch ms / durée du cycle) ; -1 = jamais traité. */
+        long lastProcessedPeriod = -1;
         /** Total mémorisé à la dernière ouverture de l'écran ; -1 = jamais ouvert (pas de delta). */
         long lastSeenTotal = -1;
         final List<HistoryEntry> history = new ArrayList<>();
@@ -97,6 +107,7 @@ public final class BankAccountData extends SavedData {
         } else {
             a.riskyPending += amount;
         }
+        publishMirror(a);
         setDirty();
     }
 
@@ -129,6 +140,7 @@ public final class BankAccountData extends SavedData {
             remaining -= fromPending;
             a.riskyEligible -= remaining;
         }
+        publishMirror(a);
         setDirty();
         long fee = Math.round(amount * Math.max(0.0, feePct) / 100.0);
         return new WithdrawResult(amount - fee, fee);
@@ -155,7 +167,21 @@ public final class BankAccountData extends SavedData {
         }
         Account a = account(profile.get().getId(), recipientName);
         a.savingsEligible += amount;
+        publishMirror(a);
         setDirty();
+    }
+
+    /** Publie (best-effort) le miroir Firebase du compte — cf. {@link FirebaseClient#putBankAccount}.
+     *  No-op silencieux si le secret serveur n'est pas configuré ou si {@code a.name} est encore
+     *  vide (compte jamais associé à un pseudo connu). */
+    private void publishMirror(Account a) {
+        if (a.name.isBlank()) {
+            return;
+        }
+        String secret = ServerConfig.firebaseSecret();
+        if (secret != null) {
+            FirebaseClient.putBankAccount(secret, a.name, a.savingsTotal(), a.riskyTotal());
+        }
     }
 
     /**
@@ -179,17 +205,21 @@ public final class BankAccountData extends SavedData {
     }
 
     /**
-     * Traite tous les comptes dont {@code lastProcessedDay != today} : les dépôts PENDING
-     * deviennent éligibles, PUIS l'intérêt épargne et le tirage risqué s'appliquent sur les
-     * nouveaux totaux éligibles. Ajoute une entrée d'historique et notifie (actionbar) les
-     * joueurs actuellement en ligne. Appelé par {@link BankEvents} au changement de jour
-     * ({@link ZigShopDate#today()}) — jamais sur le chemin chaud d'un dépôt/retrait.
+     * Traite tous les comptes dont le CYCLE courant (epoch ms / {@code cfg.periodHours()},
+     * plancher {@link #MIN_PERIOD_MS}) diffère de leur {@code lastProcessedPeriod} : les dépôts
+     * PENDING deviennent éligibles, PUIS l'intérêt épargne et le tirage risqué s'appliquent sur
+     * les nouveaux totaux éligibles. Ajoute une entrée d'historique, publie le miroir Firebase et
+     * notifie (actionbar) les joueurs actuellement en ligne. Appelé par {@link BankEvents} —
+     * jamais sur le chemin chaud d'un dépôt/retrait.
      */
-    public void applyDailyTick(MinecraftServer server, String today, FirebaseClient.BankConfig cfg) {
+    public void applyPeriodTick(MinecraftServer server, FirebaseClient.BankConfig cfg) {
+        long periodMs = Math.max(MIN_PERIOD_MS, Math.round(cfg.periodHours() * 3_600_000.0));
+        long currentPeriod = System.currentTimeMillis() / periodMs;
+        String stamp = LocalDateTime.now().format(HISTORY_FMT);
         boolean changed = false;
         for (Map.Entry<UUID, Account> e : accounts.entrySet()) {
             Account a = e.getValue();
-            if (today.equals(a.lastProcessedDay)) {
+            if (currentPeriod == a.lastProcessedPeriod) {
                 continue;
             }
             changed = true;
@@ -207,11 +237,12 @@ public final class BankAccountData extends SavedData {
             riskyDelta = Math.max(riskyDelta, -a.riskyEligible); // jamais sous zéro (arrondi défavorable)
             a.riskyEligible += riskyDelta;
 
-            a.lastProcessedDay = today;
-            a.history.add(0, new HistoryEntry(today, savingsDelta, riskyDelta));
+            a.lastProcessedPeriod = currentPeriod;
+            a.history.add(0, new HistoryEntry(stamp, savingsDelta, riskyDelta));
             while (a.history.size() > MAX_HISTORY) {
                 a.history.remove(a.history.size() - 1);
             }
+            publishMirror(a);
 
             ServerPlayer online = server.getPlayerList().getPlayer(e.getKey());
             if (online != null) {
@@ -276,7 +307,7 @@ public final class BankAccountData extends SavedData {
             t.putLong("savingsPending", a.savingsPending);
             t.putLong("riskyEligible", a.riskyEligible);
             t.putLong("riskyPending", a.riskyPending);
-            t.putString("lastProcessedDay", a.lastProcessedDay);
+            t.putLong("lastProcessedPeriod", a.lastProcessedPeriod);
             t.putLong("lastSeenTotal", a.lastSeenTotal);
             ListTag hist = new ListTag();
             for (HistoryEntry h : a.history) {
@@ -311,7 +342,9 @@ public final class BankAccountData extends SavedData {
             a.savingsPending = t.getLong("savingsPending");
             a.riskyEligible = t.getLong("riskyEligible");
             a.riskyPending = t.getLong("riskyPending");
-            a.lastProcessedDay = t.getString("lastProcessedDay");
+            // Rétrocompat : anciens comptes (avant le passage en cycles configurables) sans ce
+            // champ -> -1 (jamais traité), retraités au prochain cycle sans perte de données.
+            a.lastProcessedPeriod = t.contains("lastProcessedPeriod") ? t.getLong("lastProcessedPeriod") : -1L;
             a.lastSeenTotal = t.contains("lastSeenTotal") ? t.getLong("lastSeenTotal") : -1L;
             ListTag hist = t.getList("history", net.minecraft.nbt.Tag.TAG_COMPOUND);
             for (int i = 0; i < hist.size(); i++) {
