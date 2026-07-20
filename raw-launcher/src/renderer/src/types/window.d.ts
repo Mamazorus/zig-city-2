@@ -180,6 +180,18 @@ type NpcRole = 'quest' | 'daily' | 'store' | 'race' | 'bank'
 interface NpcDef { id: string; name: string; role: NpcRole; createdAt?: number; skinUrl?: string | null; skinVariant?: 'classic' | 'slim' }
 type NpcForm = { id: string; name: string; role: NpcRole }
 
+// Réglages de la banque (/bank/config) : lus par le mod à chaque dépôt/retrait + au job
+// quotidien — pas de redéploiement nécessaire pour ajuster un taux depuis ce formulaire.
+interface BankConfig {
+  savingsRatePct: number
+  savingsCap: number
+  riskyMinPct: number
+  riskyMaxPct: number
+  riskyAvgPct: number
+  withdrawFeePct: number
+  feeRecipient: string
+}
+
 // Entrée du catalogue d'items (extrait des jars du modpack installé) pour
 // l'autocomplétion de l'identifiant d'item côté admin.
 interface ItemCatalogEntry {
@@ -294,6 +306,8 @@ declare global {
       deleteNpc: (id: string) => Promise<{ success: boolean; error?: string }>
       // Skin d'un PNJ : dataUrl PNG 64×64 → Firebase Storage (npc-skins/) + /npcs/{id}. dataUrl absent/null = retrait.
       setNpcSkin: (data: { id: string; dataUrl?: string | null; variant?: 'classic' | 'slim' }) => Promise<{ success: boolean; skinUrl?: string | null; skinVariant?: 'classic' | 'slim'; error?: string }>
+      getBankConfig: () => Promise<{ success: boolean; config: BankConfig; error?: string }>
+      setBankConfig: (data: Partial<BankConfig>) => Promise<{ success: boolean; error?: string }>
       getItemCatalog: () => Promise<{ success: boolean; items: ItemCatalogEntry[]; error?: string }>
       getEntityCatalog: () => Promise<{ success: boolean; entities: EntityCatalogEntry[]; error?: string }>
       getBlockCatalog: () => Promise<{ success: boolean; blocks: BlockCatalogEntry[]; error?: string }>

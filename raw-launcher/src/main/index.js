@@ -2980,6 +2980,60 @@ ipcMain.handle('delete-npc', async (_, id) => {
   }
 })
 
+// ─── Réglages de la BANQUE (/bank/config) : lus par le mod zigshop à chaque dépôt/retrait
+// + au job quotidien — un changement ici est pris en compte SANS redéployer le mod.
+// currencyItem n'est PAS édité ici (reste la monnaie globale, cf. shop/config).
+const BANK_DEFAULT_CONFIG = {
+  savingsRatePct: 0.5,
+  savingsCap: 10000,
+  riskyMinPct: -8,
+  riskyMaxPct: 10,
+  riskyAvgPct: -1,
+  withdrawFeePct: 3,
+  feeRecipient: '',
+}
+function readBankConfig(raw) {
+  return (raw && typeof raw === 'object' && !Array.isArray(raw))
+    ? { ...BANK_DEFAULT_CONFIG, ...raw }
+    : { ...BANK_DEFAULT_CONFIG }
+}
+function numOr(v, def) {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : def
+}
+
+ipcMain.handle('get-bank-config', async () => {
+  if (!isFirebaseConfigured()) return { success: false, config: { ...BANK_DEFAULT_CONFIG } }
+  try {
+    const config = readBankConfig(await firebaseRequest('GET', '/bank/config', null, false))
+    return { success: true, config }
+  } catch (e) {
+    return { success: false, config: { ...BANK_DEFAULT_CONFIG }, error: e.message }
+  }
+})
+
+ipcMain.handle('set-bank-config', async (_, data) => {
+  if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
+  const gate = await requireAdminSession()
+  if (!gate.ok) return { success: false, error: gate.error }
+  const patch = {}
+  if (data && typeof data === 'object') {
+    if (data.savingsRatePct != null) patch.savingsRatePct = numOr(data.savingsRatePct, BANK_DEFAULT_CONFIG.savingsRatePct)
+    if (data.savingsCap != null) patch.savingsCap = Math.max(0, Math.round(numOr(data.savingsCap, BANK_DEFAULT_CONFIG.savingsCap)))
+    if (data.riskyMinPct != null) patch.riskyMinPct = numOr(data.riskyMinPct, BANK_DEFAULT_CONFIG.riskyMinPct)
+    if (data.riskyMaxPct != null) patch.riskyMaxPct = numOr(data.riskyMaxPct, BANK_DEFAULT_CONFIG.riskyMaxPct)
+    if (data.riskyAvgPct != null) patch.riskyAvgPct = numOr(data.riskyAvgPct, BANK_DEFAULT_CONFIG.riskyAvgPct)
+    if (data.withdrawFeePct != null) patch.withdrawFeePct = Math.max(0, numOr(data.withdrawFeePct, BANK_DEFAULT_CONFIG.withdrawFeePct))
+    if (data.feeRecipient != null) patch.feeRecipient = String(data.feeRecipient).trim().slice(0, 32)
+  }
+  try {
+    await firebaseRequest('PATCH', '/bank/config', patch, true)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
 // Assigne (ou retire) le skin d'un PNJ. `dataUrl` = PNG 64×64 (dessiné dans l'éditeur, pioché
 // en bibliothèque ou importé) → hébergé sur Firebase Storage (`npc-skins/`), puis /npcs/{slug}
 // reçoit { skinUrl, skinVariant, skinUpdatedAt }. Le mod zigshop applique ce skin au spawn

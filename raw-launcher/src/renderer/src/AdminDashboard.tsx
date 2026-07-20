@@ -96,6 +96,10 @@ interface NpcDef { id: string; name: string; role: NpcRole; createdAt?: number; 
 type NpcForm = { id: string; name: string; role: NpcRole }
 const NPC_ROLE_LABEL: Record<NpcRole, string> = { quest: 'Quêtes', daily: 'Shop du jour', store: 'Boutique', race: 'Course', bank: 'Banque' }
 
+// Réglages de la banque (miroir de window.d.ts BankConfig).
+interface BankConfigState { savingsRatePct: number; savingsCap: number; riskyMinPct: number; riskyMaxPct: number; riskyAvgPct: number; withdrawFeePct: number; feeRecipient: string }
+const EMPTY_BANK_CONFIG: BankConfigState = { savingsRatePct: 0.5, savingsCap: 10000, riskyMinPct: -8, riskyMaxPct: 10, riskyAvgPct: -1, withdrawFeePct: 3, feeRecipient: '' }
+
 // Aperçu « tête » d'un skin de PNJ (image 64×64 hébergée), rendu par crop CSS des régions
 // tête + calque, comme un avatar Minecraft. Passe par le main (fetchImage) pour contourner le
 // proxy/VPN/AV que Chromium respecte. Sans skin custom (ou le temps que le skin distant se
@@ -449,6 +453,10 @@ export default function AdminDashboard({
   const [uploadingCurrencyIcon, setUploadingCurrencyIcon] = useState(false)
   const [savingConfig, setSavingConfig] = useState(false)
   const [shopMsg, setShopMsg] = useState<string | null>(null)
+  const [bankConfig, setBankConfig] = useState<BankConfigState>(EMPTY_BANK_CONFIG)
+  const [bankLoading, setBankLoading] = useState(false)
+  const [savingBankConfig, setSavingBankConfig] = useState(false)
+  const [bankMsg, setBankMsg] = useState<string | null>(null)
   const currencyFileRef = useRef<HTMLInputElement>(null)
   const shopDayKey = dayKeyFromOffset(dayOffset)
   // Bibliothèque d'offres réutilisables (modèles à replacer sur un jour).
@@ -1066,6 +1074,27 @@ export default function AdminDashboard({
       setUploadingCurrencyIcon(false)
     }
   }, [])
+
+  // ── Banque : chargement + sauvegarde des réglages (taux, plafond, frais) ──
+  const loadBankConfig = useCallback(async () => {
+    setBankLoading(true)
+    try {
+      const r = await window.launcher.getBankConfig()
+      if (r.success) setBankConfig({ ...EMPTY_BANK_CONFIG, ...r.config })
+    } finally { setBankLoading(false) }
+  }, [])
+  useEffect(() => { if (tab === 'npcs' && selectedNpc?.role === 'bank') loadBankConfig() }, [tab, selectedNpc, loadBankConfig])
+
+  const saveBankConfig = async () => {
+    setSavingBankConfig(true)
+    setBankMsg(null)
+    try {
+      const res = await window.launcher.setBankConfig(bankConfig)
+      setBankMsg(res.success ? 'Réglages enregistrés.' : (res.error || 'Échec de l\'enregistrement.'))
+    } finally {
+      setSavingBankConfig(false)
+    }
+  }
 
   // ── Quêtes : chargement + CRUD des définitions ──
   const loadQuests = useCallback(async () => {
@@ -2460,6 +2489,85 @@ export default function AdminDashboard({
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* ═══ RÉGLAGES BANQUE (fiche du PNJ banquier) ═══ */}
+        {tab === 'npcs' && selectedNpc?.role === 'bank' && (
+          <div className="flex flex-col gap-[14px]">
+            <div className="bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[12px] p-[16px] flex flex-col gap-[16px]">
+              <p className="font-ui font-semibold text-[15px] text-white tracking-[-0.4px]">Réglages de la banque</p>
+
+              {bankLoading ? (
+                <p className="font-ui text-[14px] text-white/25 text-center py-[20px]">Chargement…</p>
+              ) : (
+                <>
+                  <div className="flex flex-col gap-[8px]">
+                    <p className="font-ui text-[13px] font-semibold text-white/60 tracking-[-0.3px]">Compte Épargne</p>
+                    <div className="grid grid-cols-2 gap-[12px]">
+                      <div className="flex flex-col">
+                        <p className={labelCls}>Taux journalier (%)</p>
+                        <input type="number" step="0.1" className={inputCls} value={bankConfig.savingsRatePct}
+                          onChange={e => setBankConfig(c => ({ ...c, savingsRatePct: parseFloat(e.target.value) || 0 }))} />
+                      </div>
+                      <div className="flex flex-col">
+                        <p className={labelCls}>Plafond (Zig Coin)</p>
+                        <input type="number" step="1" className={inputCls} value={bankConfig.savingsCap}
+                          onChange={e => setBankConfig(c => ({ ...c, savingsCap: parseInt(e.target.value, 10) || 0 }))} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-[8px]">
+                    <p className="font-ui text-[13px] font-semibold text-white/60 tracking-[-0.3px]">Compte Risqué (tirage journalier)</p>
+                    <div className="grid grid-cols-3 gap-[12px]">
+                      <div className="flex flex-col">
+                        <p className={labelCls}>Minimum (%)</p>
+                        <input type="number" step="0.1" className={inputCls} value={bankConfig.riskyMinPct}
+                          onChange={e => setBankConfig(c => ({ ...c, riskyMinPct: parseFloat(e.target.value) || 0 }))} />
+                      </div>
+                      <div className="flex flex-col">
+                        <p className={labelCls}>Maximum (%)</p>
+                        <input type="number" step="0.1" className={inputCls} value={bankConfig.riskyMaxPct}
+                          onChange={e => setBankConfig(c => ({ ...c, riskyMaxPct: parseFloat(e.target.value) || 0 }))} />
+                      </div>
+                      <div className="flex flex-col">
+                        <p className={labelCls}>Moyenne visée (%)</p>
+                        <input type="number" step="0.1" className={inputCls} value={bankConfig.riskyAvgPct}
+                          onChange={e => setBankConfig(c => ({ ...c, riskyAvgPct: parseFloat(e.target.value) || 0 }))} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-[8px]">
+                    <p className="font-ui text-[13px] font-semibold text-white/60 tracking-[-0.3px]">Retrait</p>
+                    <div className="grid grid-cols-2 gap-[12px]">
+                      <div className="flex flex-col">
+                        <p className={labelCls}>Frais (%)</p>
+                        <input type="number" step="0.1" className={inputCls} value={bankConfig.withdrawFeePct}
+                          onChange={e => setBankConfig(c => ({ ...c, withdrawFeePct: parseFloat(e.target.value) || 0 }))} />
+                      </div>
+                      <div className="flex flex-col">
+                        <p className={labelCls}>Pseudo qui reçoit les frais</p>
+                        <input className={inputCls} maxLength={32} placeholder="Ex : Mamazorus" value={bankConfig.feeRecipient}
+                          onChange={e => setBankConfig(c => ({ ...c, feeRecipient: e.target.value }))} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    {bankMsg ? <p className="font-ui text-[13px] text-white/55 tracking-[-0.3px]">{bankMsg}</p> : <span />}
+                    <button
+                      className="font-ui font-bold text-[14px] tracking-[-0.3px] bg-white text-[#0e0b16] px-[16px] h-[32px] rounded-[10px] hover:bg-white/90 disabled:opacity-30 disabled:hover:bg-white active:scale-[0.98] transition-all"
+                      disabled={savingBankConfig}
+                      onClick={saveBankConfig}
+                    >
+                      {savingBankConfig ? 'Enregistrement…' : 'Enregistrer'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         )}
 
