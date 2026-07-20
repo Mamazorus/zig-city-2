@@ -183,6 +183,7 @@ type NpcForm = { id: string; name: string; role: NpcRole }
 // Réglages de la banque (/bank/config) : lus par le mod à chaque dépôt/retrait + au job
 // quotidien — pas de redéploiement nécessaire pour ajuster un taux depuis ce formulaire.
 interface BankConfig {
+  periodHours: number
   savingsRatePct: number
   savingsCap: number
   riskyMinPct: number

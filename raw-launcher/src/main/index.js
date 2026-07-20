@@ -2984,6 +2984,7 @@ ipcMain.handle('delete-npc', async (_, id) => {
 // + au job quotidien — un changement ici est pris en compte SANS redéployer le mod.
 // currencyItem n'est PAS édité ici (reste la monnaie globale, cf. shop/config).
 const BANK_DEFAULT_CONFIG = {
+  periodHours: 24,
   savingsRatePct: 0.5,
   savingsCap: 10000,
   riskyMinPct: -8,
@@ -3018,6 +3019,7 @@ ipcMain.handle('set-bank-config', async (_, data) => {
   if (!gate.ok) return { success: false, error: gate.error }
   const patch = {}
   if (data && typeof data === 'object') {
+    if (data.periodHours != null) patch.periodHours = Math.max(0.1, numOr(data.periodHours, BANK_DEFAULT_CONFIG.periodHours))
     if (data.savingsRatePct != null) patch.savingsRatePct = numOr(data.savingsRatePct, BANK_DEFAULT_CONFIG.savingsRatePct)
     if (data.savingsCap != null) patch.savingsCap = Math.max(0, Math.round(numOr(data.savingsCap, BANK_DEFAULT_CONFIG.savingsCap)))
     if (data.riskyMinPct != null) patch.riskyMinPct = numOr(data.riskyMinPct, BANK_DEFAULT_CONFIG.riskyMinPct)

@@ -97,8 +97,8 @@ type NpcForm = { id: string; name: string; role: NpcRole }
 const NPC_ROLE_LABEL: Record<NpcRole, string> = { quest: 'Quêtes', daily: 'Shop du jour', store: 'Boutique', race: 'Course', bank: 'Banque' }
 
 // Réglages de la banque (miroir de window.d.ts BankConfig).
-interface BankConfigState { savingsRatePct: number; savingsCap: number; riskyMinPct: number; riskyMaxPct: number; riskyAvgPct: number; withdrawFeePct: number; feeRecipient: string }
-const EMPTY_BANK_CONFIG: BankConfigState = { savingsRatePct: 0.5, savingsCap: 10000, riskyMinPct: -8, riskyMaxPct: 10, riskyAvgPct: -1, withdrawFeePct: 3, feeRecipient: '' }
+interface BankConfigState { periodHours: number; savingsRatePct: number; savingsCap: number; riskyMinPct: number; riskyMaxPct: number; riskyAvgPct: number; withdrawFeePct: number; feeRecipient: string }
+const EMPTY_BANK_CONFIG: BankConfigState = { periodHours: 24, savingsRatePct: 0.5, savingsCap: 10000, riskyMinPct: -8, riskyMaxPct: 10, riskyAvgPct: -1, withdrawFeePct: 3, feeRecipient: '' }
 
 // Aperçu « tête » d'un skin de PNJ (image 64×64 hébergée), rendu par crop CSS des régions
 // tête + calque, comme un avatar Minecraft. Passe par le main (fetchImage) pour contourner le
@@ -2502,6 +2502,17 @@ export default function AdminDashboard({
                 <p className="font-ui text-[14px] text-white/25 text-center py-[20px]">Chargement…</p>
               ) : (
                 <>
+                  <div className="flex flex-col gap-[8px]">
+                    <div className="flex flex-col max-w-[220px]">
+                      <p className={labelCls}>Durée d'un cycle (heures)</p>
+                      <input type="number" step="1" min="0.1" className={inputCls} value={bankConfig.periodHours}
+                        onChange={e => setBankConfig(c => ({ ...c, periodHours: parseFloat(e.target.value) || 0 }))} />
+                    </div>
+                    <p className="font-ui text-[12px] text-white/35 tracking-[-0.3px]">
+                      Les taux ci-dessous s'appliquent À CHAQUE cycle, pas par jour : réduire la durée sans baisser les taux accélère le rendement d'autant.
+                    </p>
+                  </div>
+
                   <div className="flex flex-col gap-[8px]">
                     <p className="font-ui text-[13px] font-semibold text-white/60 tracking-[-0.3px]">Compte Épargne</p>
                     <div className="grid grid-cols-2 gap-[12px]">
