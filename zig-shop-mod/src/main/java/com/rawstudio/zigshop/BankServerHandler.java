@@ -164,7 +164,8 @@ public final class BankServerHandler {
             return;
         }
         if (result.net() > 0) {
-            ItemStack out = new ItemStack(currency, result.net());
+            // (int) sans risque : net <= amount, et amount est deja un int (parametre reseau).
+            ItemStack out = new ItemStack(currency, (int) result.net());
             if (!player.getInventory().add(out)) {
                 player.drop(out, false);
             }
