@@ -6,6 +6,7 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 import com.rawstudio.zigshop.FirebaseClient;
+import com.rawstudio.zigshop.MarketScreenEntity;
 import com.rawstudio.zigshop.MerchantEntity;
 import com.rawstudio.zigshop.MerchantSkins;
 import com.rawstudio.zigshop.ModEntities;
@@ -52,7 +53,8 @@ public final class ZigShopCommand {
                         .then(Commands.literal("race").executes(ctx -> spawn(ctx, "race")))
                         .then(Commands.literal("quest").executes(ctx -> spawn(ctx, "quest")))
                         .then(Commands.literal("questspecial").executes(ctx -> spawn(ctx, "questspecial")))
-                        .then(Commands.literal("bank").executes(ctx -> spawn(ctx, "bank"))))
+                        .then(Commands.literal("bank").executes(ctx -> spawn(ctx, "bank")))
+                        .then(Commands.literal("marketscreen").executes(ZigShopCommand::spawnMarketScreen)))
                 .then(Commands.literal("npc")
                         .then(Commands.argument("id", StringArgumentType.word())
                                 .executes(ZigShopCommand::spawnNpc)))
@@ -81,6 +83,26 @@ public final class ZigShopCommand {
         merchant.moveTo(pos.x, pos.y, pos.z, src.getRotation().y, 0.0f);
         String label = "questspecial".equals(kind) ? "PNJ de quetes speciales" : "quest".equals(kind) ? "PNJ de quetes" : "race".equals(kind) ? "Marchand course" : "store".equals(kind) ? "Boutique" : "bank".equals(kind) ? "Banquier" : "Marchand du jour";
         src.sendSuccess(() -> Component.literal("§a[Zig Shop] " + label + " créé. Clique dessus."), true);
+        return 1;
+    }
+
+    /**
+     * /zigshop spawn marketscreen : fait apparaître un écran mural (4×5 blocs) affichant le
+     * graphique en bougies du taux RISQUÉ, à la position de l'exécutant, orienté dans SA direction
+     * de regard (comme les marchands, cf. {@link #spawn}) — la face visible du graphique fait donc
+     * face à la pièce si l'admin se tient dos au mur en lançant la commande.
+     */
+    private static int spawnMarketScreen(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack src = ctx.getSource();
+        ServerLevel level = src.getLevel();
+        Vec3 pos = src.getPosition();
+        MarketScreenEntity screen = ModEntities.MARKET_SCREEN.get().spawn(level, BlockPos.containing(pos), MobSpawnType.COMMAND);
+        if (screen == null) {
+            src.sendFailure(Component.literal("[Zig Shop] Échec de la création de l'écran."));
+            return 0;
+        }
+        screen.moveTo(pos.x, pos.y, pos.z, src.getRotation().y, 0.0f);
+        src.sendSuccess(() -> Component.literal("§a[Zig Shop] Écran du marché risqué créé."), true);
         return 1;
     }
 

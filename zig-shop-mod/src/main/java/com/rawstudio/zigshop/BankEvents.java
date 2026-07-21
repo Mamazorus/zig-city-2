@@ -41,6 +41,12 @@ public final class BankEvents {
     public static void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             runPeriodTick(player.getServer());
+            // Snapshot immédiat pour les écrans muraux (cf. MarketScreenEntity) : sinon ce joueur
+            // ne verrait rien tant qu'aucun nouveau cycle ne s'écoule après sa connexion.
+            MinecraftServer server = player.getServer();
+            if (server != null) {
+                com.rawstudio.zigshop.net.MarketScreenNetwork.sendTo(player, BankAccountData.get(server));
+            }
         }
     }
 

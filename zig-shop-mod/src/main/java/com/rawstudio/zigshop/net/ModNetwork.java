@@ -50,5 +50,10 @@ public final class ModNetwork {
                         com.rawstudio.zigshop.client.BankClientHandler.open(payload.json())));
         registrar.playToServer(BankActionPayload.TYPE, BankActionPayload.CODEC,
                 (payload, context) -> BankServerHandler.handle(context, payload.entityId(), payload.action(), payload.accountType(), payload.amount()));
+        // Écran mural du marché risqué : diffusion S→C uniquement (pas d'action C→S, écran
+        // purement décoratif).
+        registrar.playToClient(MarketChartPayload.TYPE, MarketChartPayload.CODEC,
+                (payload, context) -> context.enqueueWork(() ->
+                        com.rawstudio.zigshop.client.MarketChartClientHandler.update(payload.json())));
     }
 }

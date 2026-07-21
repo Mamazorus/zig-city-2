@@ -1,5 +1,7 @@
 package com.rawstudio.zigshop;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.mojang.authlib.GameProfile;
 
 import net.minecraft.core.HolderLookup;
@@ -304,7 +306,7 @@ public final class BankAccountData extends SavedData {
             if (riskyDue) {
                 a.riskyEligible += a.riskyPending;
                 a.riskyPending = 0;
-                double pct = getOrRollRiskyPct(currentRiskyPeriod, cfg);
+                double pct = getOrRollRiskyPct(server, currentRiskyPeriod, cfg);
                 riskyDelta = Math.round(a.riskyEligible * pct / 100.0);
                 riskyDelta = Math.max(riskyDelta, -a.riskyEligible); // jamais sous zéro (arrondi défavorable)
                 a.riskyEligible += riskyDelta;
@@ -335,10 +337,11 @@ public final class BankAccountData extends SavedData {
      *
      * <p>C'est aussi ICI (une seule fois par NOUVEAU cycle, jamais par compte) que l'indice
      * synthétique du marché est capitalisé et qu'une entrée est ajoutée à {@link #riskyHistory} +
-     * republiée sur Firebase (cf. {@link #publishRiskyHistoryMirror}) — le graphique en bougies
-     * (écran en jeu + dashboard) reste donc en phase avec ce que les comptes viennent de subir.
+     * republiée sur Firebase (cf. {@link #publishRiskyHistoryMirror}) + diffusée aux écrans
+     * muraux (cf. {@code net.MarketScreenNetwork#broadcast}) — le graphique en bougies (écran en
+     * jeu, dashboard, écran mural) reste donc en phase avec ce que les comptes viennent de subir.
      */
-    private double getOrRollRiskyPct(long period, FirebaseClient.BankConfig cfg) {
+    private double getOrRollRiskyPct(MinecraftServer server, long period, FirebaseClient.BankConfig cfg) {
         if (period != riskyRollPeriod) {
             riskyRollPct = rollRiskyPct(cfg);
             riskyRollPeriod = period;
@@ -348,6 +351,7 @@ public final class BankAccountData extends SavedData {
                 riskyHistory.remove(0);
             }
             publishRiskyHistoryMirror();
+            com.rawstudio.zigshop.net.MarketScreenNetwork.broadcast(server, this);
         }
         return riskyRollPct;
     }
@@ -365,6 +369,22 @@ public final class BankAccountData extends SavedData {
             prev = r.index();
         }
         return out;
+    }
+
+    /** Sérialisation JSON de {@link #riskyCandles()} — utilisée par {@code BankServerHandler}
+     *  (écran banque) ET la diffusion réseau de {@code MarketScreenEntity} (écran mural), pour
+     *  que les deux affichages restent identiques sans dupliquer la boucle de sérialisation. */
+    public JsonArray riskyCandlesJson() {
+        JsonArray arr = new JsonArray();
+        for (RiskyCandle c : riskyCandles()) {
+            JsonObject o = new JsonObject();
+            o.addProperty("date", c.date());
+            o.addProperty("pct", c.pct());
+            o.addProperty("open", c.open());
+            o.addProperty("close", c.close());
+            arr.add(o);
+        }
+        return arr;
     }
 
     /** Publie (best-effort) le miroir Firebase de l'historique RISQUÉ PARTAGÉ — cf.

@@ -19,5 +19,6 @@ public final class ZigShopClient {
     @SubscribeEvent
     public static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(ModEntities.MERCHANT.get(), MerchantRenderer::new);
+        event.registerEntityRenderer(ModEntities.MARKET_SCREEN.get(), MarketScreenRenderer::new);
     }
 }

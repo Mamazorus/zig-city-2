@@ -21,4 +21,15 @@ public final class ModEntities {
                     .sized(0.6f, 1.95f)
                     .clientTrackingRange(10)
                     .build("merchant"));
+
+    /** Écran mural (décoratif) affichant le graphique en bougies du taux RISQUÉ en temps réel —
+     *  cf. {@link com.rawstudio.zigshop.MarketScreenEntity}. Boîte de collision volontairement
+     *  petite (le rendu, bien plus grand, dépasse largement cette boîte — normal en Minecraft,
+     *  cf. les balises/faisceaux). */
+    public static final Supplier<EntityType<MarketScreenEntity>> MARKET_SCREEN = ENTITIES.register(
+            "market_screen",
+            () -> EntityType.Builder.<MarketScreenEntity>of(MarketScreenEntity::new, MobCategory.MISC)
+                    .sized(0.5f, 0.5f)
+                    .clientTrackingRange(10)
+                    .build("market_screen"));
 }

@@ -76,16 +76,7 @@ public final class BankServerHandler {
             hist.add(ho);
         }
         root.add("history", hist);
-        JsonArray riskyHist = new JsonArray();
-        for (BankAccountData.RiskyCandle c : data.riskyCandles()) {
-            JsonObject ro = new JsonObject();
-            ro.addProperty("date", c.date());
-            ro.addProperty("pct", c.pct());
-            ro.addProperty("open", c.open());
-            ro.addProperty("close", c.close());
-            riskyHist.add(ro);
-        }
-        root.add("riskyHistory", riskyHist);
+        root.add("riskyHistory", data.riskyCandlesJson());
         return root.toString();
     }
 
