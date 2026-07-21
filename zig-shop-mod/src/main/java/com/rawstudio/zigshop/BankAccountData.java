@@ -33,6 +33,11 @@ import java.util.UUID;
  * fructifie/tire) et {@code Pending} (déposé après le dernier passage du job → retirable tout de
  * suite, mais neutre jusqu'au PROCHAIN passage). Ce délai empêche un joueur de déposer juste avant
  * le tirage puis retirer juste après (cf. design validé le 19/07 : garde-fou anti-abus).
+ *
+ * <p>Le pourcentage RISQUÉ n'est PAS tiré individuellement par joueur : un seul tirage par cycle,
+ * PARTAGÉ par tous (cf. {@link #getOrRollRiskyPct}) — une vraie tendance de marché commune que les
+ * joueurs peuvent observer et sur laquelle ils peuvent bâtir une stratégie collective, pas une
+ * loterie individuelle isolée (design demandé le 21/07).
  */
 public final class BankAccountData extends SavedData {
 
@@ -78,6 +83,12 @@ public final class BankAccountData extends SavedData {
 
     private final Map<UUID, Account> accounts = new HashMap<>();
     private final Random random = new Random();
+    /** Tirage RISQUÉ du cycle courant, PARTAGÉ par tous les comptes (pas un tirage par joueur) —
+     *  cf. {@link #getOrRollRiskyPct}. Persisté pour que deux joueurs traités à des moments
+     *  différents du MÊME cycle (ex. l'un en ligne au passage du cycle, l'autre qui se reconnecte
+     *  après un redémarrage serveur survenu entre-temps) voient exactement le même nombre. */
+    private long riskyRollPeriod = -1;
+    private double riskyRollPct = 0;
 
     public BankAccountData() {}
 
@@ -227,9 +238,12 @@ public final class BankAccountData extends SavedData {
      * potentiellement différents, cf. {@code FirebaseClient.BankConfig}) : pour le sous-compte dû,
      * les dépôts PENDING deviennent éligibles, PUIS l'intérêt (épargne) ou le tirage (risqué)
      * s'applique sur le nouveau total éligible ; l'autre sous-compte, s'il n'est pas dû, n'est pas
-     * touché (son delta d'historique reste à 0 pour ce passage). Ajoute une entrée d'historique,
-     * publie le miroir Firebase et notifie (actionbar) les joueurs actuellement en ligne. Appelé
-     * par {@link BankEvents} — jamais sur le chemin chaud d'un dépôt/retrait.
+     * touché (son delta d'historique reste à 0 pour ce passage). Le pourcentage RISQUÉ est TIRÉ
+     * UNE SEULE FOIS par cycle et PARTAGÉ entre tous les comptes dus ce cycle (cf.
+     * {@link #getOrRollRiskyPct}) — pas une loterie individuelle, une vraie tendance commune que
+     * les joueurs peuvent observer et anticiper ensemble. Ajoute une entrée d'historique, publie
+     * le miroir Firebase et notifie (actionbar) les joueurs actuellement en ligne. Appelé par
+     * {@link BankEvents} — jamais sur le chemin chaud d'un dépôt/retrait.
      */
     public void applyPeriodTick(MinecraftServer server, FirebaseClient.BankConfig cfg) {
         long now = System.currentTimeMillis();
@@ -260,7 +274,8 @@ public final class BankAccountData extends SavedData {
             if (riskyDue) {
                 a.riskyEligible += a.riskyPending;
                 a.riskyPending = 0;
-                riskyDelta = Math.round(a.riskyEligible * rollRiskyPct(cfg) / 100.0);
+                double pct = getOrRollRiskyPct(currentRiskyPeriod, cfg);
+                riskyDelta = Math.round(a.riskyEligible * pct / 100.0);
                 riskyDelta = Math.max(riskyDelta, -a.riskyEligible); // jamais sous zéro (arrondi défavorable)
                 a.riskyEligible += riskyDelta;
                 a.lastRiskyPeriod = currentRiskyPeriod;
@@ -280,6 +295,20 @@ public final class BankAccountData extends SavedData {
         if (changed) {
             setDirty();
         }
+    }
+
+    /**
+     * Pourcentage RISQUÉ du cycle {@code period} : tiré (cf. {@link #rollRiskyPct}) et mémorisé
+     * la PREMIÈRE fois qu'un compte de ce cycle est traité, puis simplement relu pour tous les
+     * comptes suivants du même cycle — y compris après un redémarrage serveur (le tirage est
+     * persisté, pas recalculé à chaque démarrage tant que {@code period} n'a pas changé).
+     */
+    private double getOrRollRiskyPct(long period, FirebaseClient.BankConfig cfg) {
+        if (period != riskyRollPeriod) {
+            riskyRollPct = rollRiskyPct(cfg);
+            riskyRollPeriod = period;
+        }
+        return riskyRollPct;
     }
 
     /** Durée d'un cycle en ms, avec plancher {@link #MIN_PERIOD_MS} (anti config absurde). */
@@ -355,6 +384,8 @@ public final class BankAccountData extends SavedData {
             map.put(e.getKey().toString(), t);
         }
         tag.put("accounts", map);
+        tag.putLong("riskyRollPeriod", riskyRollPeriod);
+        tag.putDouble("riskyRollPct", riskyRollPct);
         return tag;
     }
 
@@ -389,6 +420,8 @@ public final class BankAccountData extends SavedData {
             }
             data.accounts.put(id, a);
         }
+        data.riskyRollPeriod = tag.contains("riskyRollPeriod") ? tag.getLong("riskyRollPeriod") : -1L;
+        data.riskyRollPct = tag.contains("riskyRollPct") ? tag.getDouble("riskyRollPct") : 0.0;
         return data;
     }
 }
