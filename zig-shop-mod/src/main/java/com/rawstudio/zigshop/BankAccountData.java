@@ -174,6 +174,20 @@ public final class BankAccountData extends SavedData {
         setDirty();
     }
 
+    /**
+     * Republie le miroir Firebase de TOUS les comptes existants — appelé au démarrage du serveur
+     * (cf. {@code BankEvents#onServerStarted}) pour que le dashboard reflète l'état réel dès que
+     * le serveur tourne, sans attendre qu'un joueur agisse ou qu'un cycle s'écoule. Couvre les
+     * comptes créés depuis la toute première version du banquier : les soldes ne sont jamais
+     * perdus entre deux versions du mod (seul le repère de cycle peut être réinitialisé lors
+     * d'une migration de schéma NBT, cf. {@link #load}), donc ce rattrapage les republie tous.
+     */
+    public void publishAllMirrors() {
+        for (Account a : accounts.values()) {
+            publishMirror(a);
+        }
+    }
+
     /** Publie (best-effort) le miroir Firebase du compte — cf. {@link FirebaseClient#putBankAccount}.
      *  No-op silencieux si le secret serveur n'est pas configuré ou si {@code a.name} est encore
      *  vide (compte jamais associé à un pseudo connu). */
