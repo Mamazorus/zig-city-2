@@ -48,9 +48,9 @@ public class BankScreen extends Screen {
     private static final int TOP = 54;
     private static final int SECTION_H = 82;
     private static final int BOTTOM_MARGIN = 34;
-    private static final int CHART_W_MIN = 160;
     private static final int CHART_W_MAX = 300;
     private static final int CHART_GAP = 16;
+    private static final int SCREEN_MARGIN = 6;
     private static final int CANDLE_UP = 0xFF55FF55;
     private static final int CANDLE_DOWN = 0xFFFF5555;
     private static final int REFRESH_INTERVAL_TICKS = 300; // ~15 s (20 ticks/s)
@@ -97,17 +97,31 @@ public class BankScreen extends Screen {
         return this.height - BOTTOM_MARGIN;
     }
 
-    /** Largeur du bloc graphique : autant que possible entre {@link #CHART_W_MIN} et
-     *  {@link #CHART_W_MAX}, selon la place restante une fois le panneau de comptes casé. */
+    /** Largeur du bloc graphique : TOUJOURS ce qui reste réellement une fois le panneau de
+     *  comptes + la marge d'écran casés (jamais un plancher fixe — cf. bug du 21/07 : un
+     *  plancher forçait le total à dépasser une fenêtre étroite, poussant tout le bloc graphique
+     *  hors de l'écran à gauche). 0 si vraiment aucune place (fenêtre très étroite) : le
+     *  graphique est alors simplement masqué, {@link #layoutX} recentre le panneau de comptes
+     *  seul, comme avant l'ajout du graphique. */
     private int chartWidth() {
-        return Math.max(CHART_W_MIN, Math.min(CHART_W_MAX, this.width - PANEL_W - CHART_GAP - 40));
+        int available = this.width - PANEL_W - CHART_GAP - SCREEN_MARGIN * 2;
+        return Math.max(0, Math.min(CHART_W_MAX, available));
+    }
+
+    /** Position X du panneau de comptes (à droite du graphique) ; {@code chartW == 0} retombe
+     *  sur le simple centrage d'avant l'ajout du graphique (aucun gap à réserver). */
+    private int layoutX(int chartW) {
+        if (chartW <= 0) {
+            return (this.width - PANEL_W) / 2;
+        }
+        return (this.width - (chartW + CHART_GAP + PANEL_W)) / 2 + chartW + CHART_GAP;
     }
 
     @Override
     protected void init() {
         parseJson();
 
-        int x = (this.width - (chartWidth() + CHART_GAP + PANEL_W)) / 2 + chartWidth() + CHART_GAP;
+        int x = layoutX(chartWidth());
         int savingsY = TOP + 6;
         int riskyY = TOP + SECTION_H + 6;
 
@@ -219,14 +233,16 @@ public class BankScreen extends Screen {
         this.renderBackground(g, mouseX, mouseY, partialTick);
 
         int chartW = chartWidth();
-        int x0 = (this.width - (chartW + CHART_GAP + PANEL_W)) / 2;
-        int chartX = x0;
-        int x = x0 + chartW + CHART_GAP;
+        int x = layoutX(chartW);
+        int chartX = x - CHART_GAP - chartW;
         int bottom = listBottom();
 
         // Fonds OPAQUES des deux panneaux, AVANT les widgets (cf. ShopScreen : sinon le flou
-        // d'arrière-plan Sodium/Iris transparaît).
-        g.fill(chartX - 6, TOP, chartX + chartW + 6, bottom, 0xF20E0B16);
+        // d'arrière-plan Sodium/Iris transparaît). Pas de panneau graphique si chartW == 0
+        // (fenêtre trop étroite pour lui faire de la place, cf. chartWidth()).
+        if (chartW > 0) {
+            g.fill(chartX - 6, TOP, chartX + chartW + 6, bottom, 0xF20E0B16);
+        }
         g.fill(x - 6, TOP, x + PANEL_W + 6, bottom, 0xF20E0B16);
 
         super.render(g, mouseX, mouseY, partialTick);
@@ -255,7 +271,9 @@ public class BankScreen extends Screen {
 
         g.drawString(this.font, "§7Frais de retrait : §e" + fmt(withdrawFeePct) + "%", x + 8, TOP + SECTION_H * 2 + 14, 0xFFFFFF);
 
-        renderRiskyChart(g, chartX, chartW, bottom, mouseX, mouseY);
+        if (chartW > 0) {
+            renderRiskyChart(g, chartX, chartW, bottom, mouseX, mouseY);
+        }
     }
 
     /** Bloc graphique (bougies) du taux RISQUÉ partagé : un point par cycle écoulé, {@code open}
