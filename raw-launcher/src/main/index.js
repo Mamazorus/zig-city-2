@@ -3037,6 +3037,28 @@ ipcMain.handle('get-bank-accounts', async () => {
   }
 })
 
+// Miroir en lecture seule de l'historique du taux RISQUÉ, PARTAGÉ entre tous les joueurs et
+// publié par le mod à chaque NOUVEAU cycle (pas par joueur, cf. /bank/accounts) — alimente le
+// graphique en bougies (dashboard + écran banque en jeu). Déjà trié du plus ancien au plus
+// récent côté mod : aucun tri à refaire ici.
+ipcMain.handle('get-bank-risky-history', async () => {
+  if (!isFirebaseConfigured()) return { success: false, history: [] }
+  try {
+    const raw = await firebaseRequest('GET', '/bank/riskyHistory', null, false)
+    const history = Array.isArray(raw)
+      ? raw.filter(o => o && typeof o === 'object').map(o => ({
+          date: typeof o.date === 'string' ? o.date : '',
+          pct: Number(o.pct) || 0,
+          open: Number(o.open) || 0,
+          close: Number(o.close) || 0,
+        }))
+      : []
+    return { success: true, history }
+  } catch (e) {
+    return { success: false, history: [], error: e.message }
+  }
+})
+
 ipcMain.handle('set-bank-config', async (_, data) => {
   if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
   const gate = await requireAdminSession()

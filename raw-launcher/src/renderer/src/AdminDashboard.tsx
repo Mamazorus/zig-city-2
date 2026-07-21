@@ -4,6 +4,7 @@ import { Avatar, RemoteNewsImage } from './remote-image'
 import { ItemIcon } from './item-icon'
 import { type ItemIconDesc } from './block-renderer'
 import { ImageCropper } from './image-cropper'
+import { RiskyMarketChart, type RiskyCandle } from './risky-market-chart'
 import playerImage from './assets/player.png'
 
 type AdminTab = 'news' | 'admins' | 'players' | 'channels' | 'shop' | 'quests' | 'npcs' | 'backgrounds'
@@ -460,6 +461,8 @@ export default function AdminDashboard({
   const [bankMsg, setBankMsg] = useState<string | null>(null)
   const [bankAccounts, setBankAccounts] = useState<BankAccountRow[]>([])
   const [bankAccountsLoading, setBankAccountsLoading] = useState(false)
+  const [riskyHistory, setRiskyHistory] = useState<RiskyCandle[]>([])
+  const [riskyHistoryLoading, setRiskyHistoryLoading] = useState(false)
   const currencyFileRef = useRef<HTMLInputElement>(null)
   const shopDayKey = dayKeyFromOffset(dayOffset)
   // Bibliothèque d'offres réutilisables (modèles à replacer sur un jour).
@@ -1107,6 +1110,28 @@ export default function AdminDashboard({
     } finally { setBankAccountsLoading(false) }
   }, [])
   useEffect(() => { if (tab === 'npcs' && selectedNpc?.role === 'bank') loadBankAccounts() }, [tab, selectedNpc, loadBankAccounts])
+
+  // Historique (bougies) du taux RISQUÉ, PARTAGÉ entre tous les joueurs (cf. window.d.ts
+  // BankRiskyCandle / le mod BankAccountData#riskyCandles) — sondé toutes les 20 s tant que la
+  // fiche du PNJ banquier est ouverte pour un affichage "temps réel" sans repasser par le
+  // bouton Rafraîchir à chaque nouveau cycle. `showLoading=false` sur le sondage silencieux :
+  // on ne veut PAS que le graphique clignote en "Chargement…" toutes les 20 s (cf. dataviz
+  // skill : un refetch garde le rendu précédent, jamais de flash).
+  const loadRiskyHistory = useCallback(async (showLoading = true) => {
+    if (showLoading) setRiskyHistoryLoading(true)
+    try {
+      const r = await window.launcher.getBankRiskyHistory()
+      if (r.success) setRiskyHistory(r.history)
+    } finally {
+      if (showLoading) setRiskyHistoryLoading(false)
+    }
+  }, [])
+  useEffect(() => {
+    if (tab !== 'npcs' || selectedNpc?.role !== 'bank') return
+    loadRiskyHistory()
+    const id = setInterval(() => loadRiskyHistory(false), 20000)
+    return () => clearInterval(id)
+  }, [tab, selectedNpc, loadRiskyHistory])
 
   // ── Quêtes : chargement + CRUD des définitions ──
   const loadQuests = useCallback(async () => {
@@ -2592,6 +2617,27 @@ export default function AdminDashboard({
                     </button>
                   </div>
                 </>
+              )}
+            </div>
+
+            <div className="bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[12px] p-[16px] flex flex-col gap-[12px]">
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-[2px]">
+                  <p className="font-ui font-semibold text-[15px] text-white tracking-[-0.4px]">Marché risqué</p>
+                  <p className="font-ui text-[12px] text-white/30 tracking-[-0.3px]">Indice synthétique (base 1000) — ne représente pas une somme réelle, seulement la tendance des tirages.</p>
+                </div>
+                <button
+                  className="font-ui text-[13px] text-white/50 hover:text-white px-[10px] h-[28px] rounded-[8px] hover:bg-[rgba(255,255,255,0.06)] transition-colors disabled:opacity-30 shrink-0"
+                  disabled={riskyHistoryLoading}
+                  onClick={() => loadRiskyHistory()}
+                >
+                  {riskyHistoryLoading ? 'Chargement…' : 'Rafraîchir'}
+                </button>
+              </div>
+              {riskyHistoryLoading ? (
+                <p className="font-ui text-[14px] text-white/25 text-center py-[20px]">Chargement…</p>
+              ) : (
+                <RiskyMarketChart candles={riskyHistory} />
               )}
             </div>
 

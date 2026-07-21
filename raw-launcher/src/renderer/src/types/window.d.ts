@@ -204,6 +204,16 @@ interface BankConfig {
   feeRecipient: string
 }
 
+// Une bougie du taux RISQUÉ PARTAGÉ (/bank/riskyHistory, un point par cycle écoulé, du plus
+// ancien au plus récent) : open/close = valeur d'un indice synthétique (base 1000) qui
+// capitalise pct à chaque cycle — alimente le graphique en bougies du dashboard.
+interface BankRiskyCandle {
+  date: string
+  pct: number
+  open: number
+  close: number
+}
+
 // Entrée du catalogue d'items (extrait des jars du modpack installé) pour
 // l'autocomplétion de l'identifiant d'item côté admin.
 interface ItemCatalogEntry {
@@ -321,6 +331,7 @@ declare global {
       getBankConfig: () => Promise<{ success: boolean; config: BankConfig; error?: string }>
       setBankConfig: (data: Partial<BankConfig>) => Promise<{ success: boolean; error?: string }>
       getBankAccounts: () => Promise<{ success: boolean; accounts: BankAccountRow[]; error?: string }>
+      getBankRiskyHistory: () => Promise<{ success: boolean; history: BankRiskyCandle[]; error?: string }>
       getItemCatalog: () => Promise<{ success: boolean; items: ItemCatalogEntry[]; error?: string }>
       getEntityCatalog: () => Promise<{ success: boolean; entities: EntityCatalogEntry[]; error?: string }>
       getBlockCatalog: () => Promise<{ success: boolean; blocks: BlockCatalogEntry[]; error?: string }>

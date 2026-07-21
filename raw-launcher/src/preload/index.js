@@ -98,6 +98,7 @@ contextBridge.exposeInMainWorld('launcher', {
   getBankConfig: () => ipcRenderer.invoke('get-bank-config'),
   setBankConfig: (data) => ipcRenderer.invoke('set-bank-config', data),
   getBankAccounts: () => ipcRenderer.invoke('get-bank-accounts'),
+  getBankRiskyHistory: () => ipcRenderer.invoke('get-bank-risky-history'),
   getItemCatalog:    () => ipcRenderer.invoke('get-item-catalog'),
   getEntityCatalog:  () => ipcRenderer.invoke('get-entity-catalog'),
   getBlockCatalog:   () => ipcRenderer.invoke('get-block-catalog'),
