@@ -12,15 +12,20 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 
 /**
- * Raccourci Zig Phone (phase 1, cf. design du 19/07) : SHIFT + clic-droit avec le téléphone
- * ({@code crazythings:crazy_phone}) en main principale ouvre directement l'écran de banque, SANS
- * passer par un PNJ. L'event est annulé pour empêcher le comportement normal du téléphone (menu
- * MCreator natif du mod {@code crazythings}, hors de notre contrôle) de s'ouvrir EN PLUS — un
- * clic-droit SANS shift garde ce comportement natif intact (annulation conditionnelle).
- *
- * <p>Phase 2 (différée, cf. design) : une vraie icône sur l'écran d'accueil du téléphone, par
- * patch bytecode du jar {@code crazythings} — {@code crazythings} n'a pas de système de plugin
- * (mod MCreator), même situation que les patches déjà faits sur coastercart/sable/requins.
+ * Deux raccourcis Zig Phone vers l'écran de banque, SANS passer par un PNJ :
+ * <ul>
+ *   <li><b>Phase 1</b> (cf. design du 19/07) : SHIFT + clic-droit avec le téléphone
+ *   ({@code crazythings:crazy_phone}) en main principale. L'event est annulé pour empêcher le
+ *   comportement normal du téléphone (menu MCreator natif du mod {@code crazythings}, hors de
+ *   notre contrôle) de s'ouvrir EN PLUS — un clic-droit SANS shift garde ce comportement natif
+ *   intact (annulation conditionnelle).</li>
+ *   <li><b>Phase 2</b> (cf. design du 21/07) : une vraie icône "Banque" sur l'écran d'accueil du
+ *   téléphone, ajoutée par patch bytecode du jar {@code crazythings} ({@code crazythings} n'a pas
+ *   de système de plugin — mod MCreator, même situation que les patches déjà faits sur
+ *   coastercart/sable/requins). Le patch appelle {@link ZigPhoneAppBridge#onHomeScreenButton},
+ *   qui retombe sur {@link #openBankFor} ci-dessous — LA MÊME logique que le raccourci shift-clic,
+ *   pour ne pas la dupliquer.</li>
+ * </ul>
  */
 @EventBusSubscriber(modid = ZigShop.MODID)
 public final class BankPhoneEvents {
@@ -36,6 +41,14 @@ public final class BankPhoneEvents {
         if (!(player instanceof ServerPlayer sp)) {
             return; // la logique d'ouverture ne s'exécute que côté serveur (cf. QuestEvents/MerchantEntity)
         }
+        openBankFor(sp);
+    }
+
+    /** Ouvre l'écran de banque pour {@code sp} (config Firebase relue, comme un PNJ banquier),
+     *  sans PNJ à proximité ({@code entityId = -1}, cf. {@link BankServerHandler#open}). Partagé
+     *  entre le raccourci shift-clic ci-dessus et {@link ZigPhoneAppBridge} (icône de l'écran
+     *  d'accueil) — appelant déjà garanti côté SERVEUR par les deux. */
+    public static void openBankFor(ServerPlayer sp) {
         MinecraftServer server = sp.getServer();
         if (server == null) {
             return;
