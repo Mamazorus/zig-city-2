@@ -97,6 +97,7 @@ contextBridge.exposeInMainWorld('launcher', {
   setNpcSkin:   (data) => ipcRenderer.invoke('set-npc-skin', data),
   getBankConfig: () => ipcRenderer.invoke('get-bank-config'),
   setBankConfig: (data) => ipcRenderer.invoke('set-bank-config', data),
+  getBankAccounts: () => ipcRenderer.invoke('get-bank-accounts'),
   getItemCatalog:    () => ipcRenderer.invoke('get-item-catalog'),
   getEntityCatalog:  () => ipcRenderer.invoke('get-entity-catalog'),
   getBlockCatalog:   () => ipcRenderer.invoke('get-block-catalog'),

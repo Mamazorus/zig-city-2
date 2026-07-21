@@ -1,8 +1,9 @@
 {
   "currencyItem": "crazythings:crazy_coin",
-  "periodHours": 24,
+  "savingsPeriodHours": 24,
   "savingsRatePct": 0.5,
   "savingsCap": 10000,
+  "riskyPeriodHours": 24,
   "riskyMinPct": -8,
   "riskyMaxPct": 10,
   "riskyAvgPct": -1,

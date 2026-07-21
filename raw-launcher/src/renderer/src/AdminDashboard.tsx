@@ -97,8 +97,9 @@ type NpcForm = { id: string; name: string; role: NpcRole }
 const NPC_ROLE_LABEL: Record<NpcRole, string> = { quest: 'Quêtes', daily: 'Shop du jour', store: 'Boutique', race: 'Course', bank: 'Banque' }
 
 // Réglages de la banque (miroir de window.d.ts BankConfig).
-interface BankConfigState { periodHours: number; savingsRatePct: number; savingsCap: number; riskyMinPct: number; riskyMaxPct: number; riskyAvgPct: number; withdrawFeePct: number; feeRecipient: string }
-const EMPTY_BANK_CONFIG: BankConfigState = { periodHours: 24, savingsRatePct: 0.5, savingsCap: 10000, riskyMinPct: -8, riskyMaxPct: 10, riskyAvgPct: -1, withdrawFeePct: 3, feeRecipient: '' }
+interface BankConfigState { savingsPeriodHours: number; savingsRatePct: number; savingsCap: number; riskyPeriodHours: number; riskyMinPct: number; riskyMaxPct: number; riskyAvgPct: number; withdrawFeePct: number; feeRecipient: string }
+const EMPTY_BANK_CONFIG: BankConfigState = { savingsPeriodHours: 24, savingsRatePct: 0.5, savingsCap: 10000, riskyPeriodHours: 24, riskyMinPct: -8, riskyMaxPct: 10, riskyAvgPct: -1, withdrawFeePct: 3, feeRecipient: '' }
+interface BankAccountRow { name: string; savingsTotal: number; riskyTotal: number; total: number; updatedAt: number }
 
 // Aperçu « tête » d'un skin de PNJ (image 64×64 hébergée), rendu par crop CSS des régions
 // tête + calque, comme un avatar Minecraft. Passe par le main (fetchImage) pour contourner le
@@ -457,6 +458,8 @@ export default function AdminDashboard({
   const [bankLoading, setBankLoading] = useState(false)
   const [savingBankConfig, setSavingBankConfig] = useState(false)
   const [bankMsg, setBankMsg] = useState<string | null>(null)
+  const [bankAccounts, setBankAccounts] = useState<BankAccountRow[]>([])
+  const [bankAccountsLoading, setBankAccountsLoading] = useState(false)
   const currencyFileRef = useRef<HTMLInputElement>(null)
   const shopDayKey = dayKeyFromOffset(dayOffset)
   // Bibliothèque d'offres réutilisables (modèles à replacer sur un jour).
@@ -1095,6 +1098,15 @@ export default function AdminDashboard({
       setSavingBankConfig(false)
     }
   }
+
+  const loadBankAccounts = useCallback(async () => {
+    setBankAccountsLoading(true)
+    try {
+      const r = await window.launcher.getBankAccounts()
+      if (r.success) setBankAccounts(r.accounts)
+    } finally { setBankAccountsLoading(false) }
+  }, [])
+  useEffect(() => { if (tab === 'npcs' && selectedNpc?.role === 'bank') loadBankAccounts() }, [tab, selectedNpc, loadBankAccounts])
 
   // ── Quêtes : chargement + CRUD des définitions ──
   const loadQuests = useCallback(async () => {
@@ -2502,24 +2514,22 @@ export default function AdminDashboard({
                 <p className="font-ui text-[14px] text-white/25 text-center py-[20px]">Chargement…</p>
               ) : (
                 <>
-                  <div className="flex flex-col gap-[8px]">
-                    <div className="flex flex-col max-w-[220px]">
-                      <p className={labelCls}>Durée d'un cycle (heures)</p>
-                      <input type="number" step="1" min="0.1" className={inputCls} value={bankConfig.periodHours}
-                        onChange={e => setBankConfig(c => ({ ...c, periodHours: parseFloat(e.target.value) || 0 }))} />
-                    </div>
-                    <p className="font-ui text-[12px] text-white/35 tracking-[-0.3px]">
-                      Les taux ci-dessous s'appliquent À CHAQUE cycle, pas par jour : réduire la durée sans baisser les taux accélère le rendement d'autant.
-                    </p>
-                  </div>
+                  <p className="font-ui text-[12px] text-white/35 tracking-[-0.3px]">
+                    Chaque compte a son PROPRE cycle. Les taux s'appliquent À CHAQUE cycle, pas par jour : réduire la durée sans baisser le taux correspondant accélère le rendement d'autant.
+                  </p>
 
                   <div className="flex flex-col gap-[8px]">
                     <p className="font-ui text-[13px] font-semibold text-white/60 tracking-[-0.3px]">Compte Épargne</p>
-                    <div className="grid grid-cols-2 gap-[12px]">
+                    <div className="grid grid-cols-3 gap-[12px]">
                       <div className="flex flex-col">
-                        <p className={labelCls}>Taux journalier (%)</p>
+                        <p className={labelCls}>Taux par cycle (%)</p>
                         <input type="number" step="0.1" className={inputCls} value={bankConfig.savingsRatePct}
                           onChange={e => setBankConfig(c => ({ ...c, savingsRatePct: parseFloat(e.target.value) || 0 }))} />
+                      </div>
+                      <div className="flex flex-col">
+                        <p className={labelCls}>Cycle (heures)</p>
+                        <input type="number" step="1" min="0.1" className={inputCls} value={bankConfig.savingsPeriodHours}
+                          onChange={e => setBankConfig(c => ({ ...c, savingsPeriodHours: parseFloat(e.target.value) || 0 }))} />
                       </div>
                       <div className="flex flex-col">
                         <p className={labelCls}>Plafond (Zig Coin)</p>
@@ -2530,8 +2540,8 @@ export default function AdminDashboard({
                   </div>
 
                   <div className="flex flex-col gap-[8px]">
-                    <p className="font-ui text-[13px] font-semibold text-white/60 tracking-[-0.3px]">Compte Risqué (tirage journalier)</p>
-                    <div className="grid grid-cols-3 gap-[12px]">
+                    <p className="font-ui text-[13px] font-semibold text-white/60 tracking-[-0.3px]">Compte Risqué (tirage par cycle)</p>
+                    <div className="grid grid-cols-4 gap-[12px]">
                       <div className="flex flex-col">
                         <p className={labelCls}>Minimum (%)</p>
                         <input type="number" step="0.1" className={inputCls} value={bankConfig.riskyMinPct}
@@ -2546,6 +2556,11 @@ export default function AdminDashboard({
                         <p className={labelCls}>Moyenne visée (%)</p>
                         <input type="number" step="0.1" className={inputCls} value={bankConfig.riskyAvgPct}
                           onChange={e => setBankConfig(c => ({ ...c, riskyAvgPct: parseFloat(e.target.value) || 0 }))} />
+                      </div>
+                      <div className="flex flex-col">
+                        <p className={labelCls}>Cycle (heures)</p>
+                        <input type="number" step="1" min="0.1" className={inputCls} value={bankConfig.riskyPeriodHours}
+                          onChange={e => setBankConfig(c => ({ ...c, riskyPeriodHours: parseFloat(e.target.value) || 0 }))} />
                       </div>
                     </div>
                   </div>
@@ -2577,6 +2592,45 @@ export default function AdminDashboard({
                     </button>
                   </div>
                 </>
+              )}
+            </div>
+
+            <div className="bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.07)] rounded-[12px] p-[16px] flex flex-col gap-[12px]">
+              <div className="flex items-center justify-between">
+                <p className="font-ui font-semibold text-[15px] text-white tracking-[-0.4px]">Comptes des joueurs</p>
+                <button
+                  className="font-ui text-[13px] text-white/50 hover:text-white px-[10px] h-[28px] rounded-[8px] hover:bg-[rgba(255,255,255,0.06)] transition-colors disabled:opacity-30"
+                  disabled={bankAccountsLoading}
+                  onClick={loadBankAccounts}
+                >
+                  {bankAccountsLoading ? 'Chargement…' : 'Rafraîchir'}
+                </button>
+              </div>
+              {bankAccountsLoading ? (
+                <p className="font-ui text-[14px] text-white/25 text-center py-[20px]">Chargement…</p>
+              ) : bankAccounts.length === 0 ? (
+                <p className="font-ui text-[14px] text-white/30 text-center py-[20px]">Aucun compte pour l'instant.</p>
+              ) : (
+                <div className="flex flex-col gap-[4px]">
+                  <div className="grid grid-cols-[1fr_100px_100px_100px_110px] gap-[8px] px-[8px] font-ui text-[12px] text-white/35 tracking-[-0.3px]">
+                    <span>Joueur</span>
+                    <span className="text-right">Épargne</span>
+                    <span className="text-right">Risqué</span>
+                    <span className="text-right">Total</span>
+                    <span className="text-right">Mis à jour</span>
+                  </div>
+                  {bankAccounts.map(a => (
+                    <div key={a.name} className="grid grid-cols-[1fr_100px_100px_100px_110px] gap-[8px] items-center bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.06)] rounded-[8px] px-[8px] h-[34px] font-ui text-[13px] text-white/80">
+                      <span className="truncate font-semibold">{a.name}</span>
+                      <span className="text-right text-white/60">{a.savingsTotal}</span>
+                      <span className="text-right text-white/60">{a.riskyTotal}</span>
+                      <span className="text-right font-semibold">{a.total}</span>
+                      <span className="text-right text-white/35 text-[12px]">
+                        {a.updatedAt ? new Date(a.updatedAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </div>

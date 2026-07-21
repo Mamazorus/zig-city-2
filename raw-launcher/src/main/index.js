@@ -2984,9 +2984,10 @@ ipcMain.handle('delete-npc', async (_, id) => {
 // + au job quotidien — un changement ici est pris en compte SANS redéployer le mod.
 // currencyItem n'est PAS édité ici (reste la monnaie globale, cf. shop/config).
 const BANK_DEFAULT_CONFIG = {
-  periodHours: 24,
+  savingsPeriodHours: 24,
   savingsRatePct: 0.5,
   savingsCap: 10000,
+  riskyPeriodHours: 24,
   riskyMinPct: -8,
   riskyMaxPct: 10,
   riskyAvgPct: -1,
@@ -3013,13 +3014,37 @@ ipcMain.handle('get-bank-config', async () => {
   }
 })
 
+// Miroir en lecture seule des comptes joueurs (/bank/accounts/{pseudo}, publié par le mod à
+// chaque dépôt/retrait/passage de cycle). Purement informatif pour l'admin — trié par total
+// décroissant (les plus gros comptes en premier).
+ipcMain.handle('get-bank-accounts', async () => {
+  if (!isFirebaseConfigured()) return { success: false, accounts: [] }
+  try {
+    const map = normalizeFbMap(await firebaseRequest('GET', '/bank/accounts', null, false))
+    const accounts = Object.entries(map)
+      .filter(([, o]) => o && typeof o === 'object')
+      .map(([name, o]) => ({
+        name,
+        savingsTotal: Number(o.savingsTotal) || 0,
+        riskyTotal: Number(o.riskyTotal) || 0,
+        total: Number(o.total) || 0,
+        updatedAt: Number(o.updatedAt) || 0,
+      }))
+      .sort((a, b) => b.total - a.total)
+    return { success: true, accounts }
+  } catch (e) {
+    return { success: false, accounts: [], error: e.message }
+  }
+})
+
 ipcMain.handle('set-bank-config', async (_, data) => {
   if (!isFirebaseConfigured()) return { success: false, error: 'Firebase non configuré' }
   const gate = await requireAdminSession()
   if (!gate.ok) return { success: false, error: gate.error }
   const patch = {}
   if (data && typeof data === 'object') {
-    if (data.periodHours != null) patch.periodHours = Math.max(0.1, numOr(data.periodHours, BANK_DEFAULT_CONFIG.periodHours))
+    if (data.savingsPeriodHours != null) patch.savingsPeriodHours = Math.max(0.1, numOr(data.savingsPeriodHours, BANK_DEFAULT_CONFIG.savingsPeriodHours))
+    if (data.riskyPeriodHours != null) patch.riskyPeriodHours = Math.max(0.1, numOr(data.riskyPeriodHours, BANK_DEFAULT_CONFIG.riskyPeriodHours))
     if (data.savingsRatePct != null) patch.savingsRatePct = numOr(data.savingsRatePct, BANK_DEFAULT_CONFIG.savingsRatePct)
     if (data.savingsCap != null) patch.savingsCap = Math.max(0, Math.round(numOr(data.savingsCap, BANK_DEFAULT_CONFIG.savingsCap)))
     if (data.riskyMinPct != null) patch.riskyMinPct = numOr(data.riskyMinPct, BANK_DEFAULT_CONFIG.riskyMinPct)

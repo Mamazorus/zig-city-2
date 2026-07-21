@@ -182,10 +182,21 @@ type NpcForm = { id: string; name: string; role: NpcRole }
 
 // Réglages de la banque (/bank/config) : lus par le mod à chaque dépôt/retrait + au job
 // quotidien — pas de redéploiement nécessaire pour ajuster un taux depuis ce formulaire.
+// Miroir en lecture d'un compte joueur (/bank/accounts/{pseudo}), publié par le mod à chaque
+// dépôt/retrait/passage de cycle — purement informatif.
+interface BankAccountRow {
+  name: string
+  savingsTotal: number
+  riskyTotal: number
+  total: number
+  updatedAt: number
+}
+
 interface BankConfig {
-  periodHours: number
+  savingsPeriodHours: number
   savingsRatePct: number
   savingsCap: number
+  riskyPeriodHours: number
   riskyMinPct: number
   riskyMaxPct: number
   riskyAvgPct: number
@@ -309,6 +320,7 @@ declare global {
       setNpcSkin: (data: { id: string; dataUrl?: string | null; variant?: 'classic' | 'slim' }) => Promise<{ success: boolean; skinUrl?: string | null; skinVariant?: 'classic' | 'slim'; error?: string }>
       getBankConfig: () => Promise<{ success: boolean; config: BankConfig; error?: string }>
       setBankConfig: (data: Partial<BankConfig>) => Promise<{ success: boolean; error?: string }>
+      getBankAccounts: () => Promise<{ success: boolean; accounts: BankAccountRow[]; error?: string }>
       getItemCatalog: () => Promise<{ success: boolean; items: ItemCatalogEntry[]; error?: string }>
       getEntityCatalog: () => Promise<{ success: boolean; entities: EntityCatalogEntry[]; error?: string }>
       getBlockCatalog: () => Promise<{ success: boolean; blocks: BlockCatalogEntry[]; error?: string }>
