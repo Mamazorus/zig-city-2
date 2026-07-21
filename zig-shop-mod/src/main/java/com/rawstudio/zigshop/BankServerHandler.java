@@ -62,8 +62,10 @@ public final class BankServerHandler {
         root.addProperty("seenDelta", data.peekSeenDelta(player.getUUID(), name));
         root.addProperty("savingsRatePct", cfg.savingsRatePct());
         root.addProperty("savingsCap", cfg.savingsCap());
+        root.addProperty("savingsPeriodHours", cfg.savingsPeriodHours());
         root.addProperty("riskyMinPct", cfg.riskyMinPct());
         root.addProperty("riskyMaxPct", cfg.riskyMaxPct());
+        root.addProperty("riskyPeriodHours", cfg.riskyPeriodHours());
         root.addProperty("withdrawFeePct", cfg.withdrawFeePct());
         JsonArray hist = new JsonArray();
         for (BankAccountData.HistoryEntry h : acc.history) {

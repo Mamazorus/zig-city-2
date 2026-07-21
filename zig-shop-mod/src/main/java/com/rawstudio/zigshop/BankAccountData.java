@@ -27,9 +27,9 @@ import java.util.UUID;
  * (cf. {@link QuestState}) : le job périodique ({@link #applyPeriodTick}) doit pouvoir traiter
  * tous les comptes, y compris ceux des joueurs hors-ligne (seule une donnée du MONDE le permet).
  *
- * <p>Deux sous-comptes par joueur : ÉPARGNE (intérêt plafonné) et RISQUÉ (tirage aléatoire), tous
- * deux recalculés une fois par CYCLE ({@code FirebaseClient.BankConfig#periodHours}, 24 h par
- * défaut). Chacun distingue {@code Eligible} (déjà passé au moins une fois par le job →
+ * <p>Deux sous-comptes par joueur : ÉPARGNE (intérêt plafonné) et RISQUÉ (tirage aléatoire), chacun
+ * recalculé sur son PROPRE cycle ({@code FirebaseClient.BankConfig#savingsPeriodHours}/
+ * {@code riskyPeriodHours}, 24 h par défaut pour les deux). Chacun distingue {@code Eligible} (déjà passé au moins une fois par le job →
  * fructifie/tire) et {@code Pending} (déposé après le dernier passage du job → retirable tout de
  * suite, mais neutre jusqu'au PROCHAIN passage). Ce délai empêche un joueur de déposer juste avant
  * le tirage puis retirer juste après (cf. design validé le 19/07 : garde-fou anti-abus).
@@ -62,8 +62,11 @@ public final class BankAccountData extends SavedData {
         long savingsPending;
         long riskyEligible;
         long riskyPending;
-        /** Numéro du dernier cycle traité (epoch ms / durée du cycle) ; -1 = jamais traité. */
-        long lastProcessedPeriod = -1;
+        /** Numéro du dernier cycle ÉPARGNE/RISQUÉ traité (epoch ms / durée du cycle), chacun
+         *  indépendant (cf. {@code FirebaseClient.BankConfig#savingsPeriodHours}/{@code riskyPeriodHours}) ;
+         *  -1 = jamais traité. */
+        long lastSavingsPeriod = -1;
+        long lastRiskyPeriod = -1;
         /** Total mémorisé à la dernière ouverture de l'écran ; -1 = jamais ouvert (pas de delta). */
         long lastSeenTotal = -1;
         final List<HistoryEntry> history = new ArrayList<>();
@@ -205,39 +208,50 @@ public final class BankAccountData extends SavedData {
     }
 
     /**
-     * Traite tous les comptes dont le CYCLE courant (epoch ms / {@code cfg.periodHours()},
-     * plancher {@link #MIN_PERIOD_MS}) diffère de leur {@code lastProcessedPeriod} : les dépôts
-     * PENDING deviennent éligibles, PUIS l'intérêt épargne et le tirage risqué s'appliquent sur
-     * les nouveaux totaux éligibles. Ajoute une entrée d'historique, publie le miroir Firebase et
-     * notifie (actionbar) les joueurs actuellement en ligne. Appelé par {@link BankEvents} —
-     * jamais sur le chemin chaud d'un dépôt/retrait.
+     * Traite tous les comptes dont AU MOINS UN sous-compte a un cycle courant différent de son
+     * dernier cycle traité — épargne et risqué sont vérifiés et traités INDÉPENDAMMENT (cycles
+     * potentiellement différents, cf. {@code FirebaseClient.BankConfig}) : pour le sous-compte dû,
+     * les dépôts PENDING deviennent éligibles, PUIS l'intérêt (épargne) ou le tirage (risqué)
+     * s'applique sur le nouveau total éligible ; l'autre sous-compte, s'il n'est pas dû, n'est pas
+     * touché (son delta d'historique reste à 0 pour ce passage). Ajoute une entrée d'historique,
+     * publie le miroir Firebase et notifie (actionbar) les joueurs actuellement en ligne. Appelé
+     * par {@link BankEvents} — jamais sur le chemin chaud d'un dépôt/retrait.
      */
     public void applyPeriodTick(MinecraftServer server, FirebaseClient.BankConfig cfg) {
-        long periodMs = Math.max(MIN_PERIOD_MS, Math.round(cfg.periodHours() * 3_600_000.0));
-        long currentPeriod = System.currentTimeMillis() / periodMs;
+        long now = System.currentTimeMillis();
+        long currentSavingsPeriod = now / periodMs(cfg.savingsPeriodHours());
+        long currentRiskyPeriod = now / periodMs(cfg.riskyPeriodHours());
         String stamp = LocalDateTime.now().format(HISTORY_FMT);
         boolean changed = false;
         for (Map.Entry<UUID, Account> e : accounts.entrySet()) {
             Account a = e.getValue();
-            if (currentPeriod == a.lastProcessedPeriod) {
+            boolean savingsDue = currentSavingsPeriod != a.lastSavingsPeriod;
+            boolean riskyDue = currentRiskyPeriod != a.lastRiskyPeriod;
+            if (!savingsDue && !riskyDue) {
                 continue;
             }
             changed = true;
 
-            a.savingsEligible += a.savingsPending;
-            a.savingsPending = 0;
-            a.riskyEligible += a.riskyPending;
-            a.riskyPending = 0;
+            long savingsDelta = 0;
+            if (savingsDue) {
+                a.savingsEligible += a.savingsPending;
+                a.savingsPending = 0;
+                long savingsBase = Math.min(a.savingsEligible, Math.max(0, cfg.savingsCap()));
+                savingsDelta = Math.round(savingsBase * cfg.savingsRatePct() / 100.0);
+                a.savingsEligible += savingsDelta;
+                a.lastSavingsPeriod = currentSavingsPeriod;
+            }
 
-            long savingsBase = Math.min(a.savingsEligible, Math.max(0, cfg.savingsCap()));
-            long savingsDelta = Math.round(savingsBase * cfg.savingsRatePct() / 100.0);
-            a.savingsEligible += savingsDelta;
+            long riskyDelta = 0;
+            if (riskyDue) {
+                a.riskyEligible += a.riskyPending;
+                a.riskyPending = 0;
+                riskyDelta = Math.round(a.riskyEligible * rollRiskyPct(cfg) / 100.0);
+                riskyDelta = Math.max(riskyDelta, -a.riskyEligible); // jamais sous zéro (arrondi défavorable)
+                a.riskyEligible += riskyDelta;
+                a.lastRiskyPeriod = currentRiskyPeriod;
+            }
 
-            long riskyDelta = Math.round(a.riskyEligible * rollRiskyPct(cfg) / 100.0);
-            riskyDelta = Math.max(riskyDelta, -a.riskyEligible); // jamais sous zéro (arrondi défavorable)
-            a.riskyEligible += riskyDelta;
-
-            a.lastProcessedPeriod = currentPeriod;
             a.history.add(0, new HistoryEntry(stamp, savingsDelta, riskyDelta));
             while (a.history.size() > MAX_HISTORY) {
                 a.history.remove(a.history.size() - 1);
@@ -252,6 +266,11 @@ public final class BankAccountData extends SavedData {
         if (changed) {
             setDirty();
         }
+    }
+
+    /** Durée d'un cycle en ms, avec plancher {@link #MIN_PERIOD_MS} (anti config absurde). */
+    private static long periodMs(double hours) {
+        return Math.max(MIN_PERIOD_MS, Math.round(hours * 3_600_000.0));
     }
 
     private void pingActionbar(ServerPlayer player, long savingsDelta, long riskyDelta) {
@@ -307,7 +326,8 @@ public final class BankAccountData extends SavedData {
             t.putLong("savingsPending", a.savingsPending);
             t.putLong("riskyEligible", a.riskyEligible);
             t.putLong("riskyPending", a.riskyPending);
-            t.putLong("lastProcessedPeriod", a.lastProcessedPeriod);
+            t.putLong("lastSavingsPeriod", a.lastSavingsPeriod);
+            t.putLong("lastRiskyPeriod", a.lastRiskyPeriod);
             t.putLong("lastSeenTotal", a.lastSeenTotal);
             ListTag hist = new ListTag();
             for (HistoryEntry h : a.history) {
@@ -342,9 +362,11 @@ public final class BankAccountData extends SavedData {
             a.savingsPending = t.getLong("savingsPending");
             a.riskyEligible = t.getLong("riskyEligible");
             a.riskyPending = t.getLong("riskyPending");
-            // Rétrocompat : anciens comptes (avant le passage en cycles configurables) sans ce
-            // champ -> -1 (jamais traité), retraités au prochain cycle sans perte de données.
-            a.lastProcessedPeriod = t.contains("lastProcessedPeriod") ? t.getLong("lastProcessedPeriod") : -1L;
+            // Rétrocompat : anciens comptes (avant le passage en cycles configurables, ou avant
+            // leur séparation épargne/risqué) sans ces champs -> -1 (jamais traité), retraités au
+            // prochain cycle sans perte de données.
+            a.lastSavingsPeriod = t.contains("lastSavingsPeriod") ? t.getLong("lastSavingsPeriod") : -1L;
+            a.lastRiskyPeriod = t.contains("lastRiskyPeriod") ? t.getLong("lastRiskyPeriod") : -1L;
             a.lastSeenTotal = t.contains("lastSeenTotal") ? t.getLong("lastSeenTotal") : -1L;
             ListTag hist = t.getList("history", net.minecraft.nbt.Tag.TAG_COMPOUND);
             for (int i = 0; i < hist.size(); i++) {

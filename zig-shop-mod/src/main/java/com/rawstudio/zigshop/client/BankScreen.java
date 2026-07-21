@@ -54,8 +54,10 @@ public class BankScreen extends Screen {
     private long seenDelta;
     private double savingsRatePct;
     private long savingsCap;
+    private double savingsPeriodHours = 24;
     private double riskyMinPct;
     private double riskyMaxPct;
+    private double riskyPeriodHours = 24;
     private double withdrawFeePct;
     private final List<HistoryRow> history = new ArrayList<>();
 
@@ -155,8 +157,10 @@ public class BankScreen extends Screen {
             this.seenDelta = longOr(root, "seenDelta");
             this.savingsRatePct = root.has("savingsRatePct") ? root.get("savingsRatePct").getAsDouble() : 0;
             this.savingsCap = longOr(root, "savingsCap");
+            this.savingsPeriodHours = root.has("savingsPeriodHours") ? root.get("savingsPeriodHours").getAsDouble() : 24;
             this.riskyMinPct = root.has("riskyMinPct") ? root.get("riskyMinPct").getAsDouble() : 0;
             this.riskyMaxPct = root.has("riskyMaxPct") ? root.get("riskyMaxPct").getAsDouble() : 0;
+            this.riskyPeriodHours = root.has("riskyPeriodHours") ? root.get("riskyPeriodHours").getAsDouble() : 24;
             this.withdrawFeePct = root.has("withdrawFeePct") ? root.get("withdrawFeePct").getAsDouble() : 0;
             JsonArray arr = root.getAsJsonArray("history");
             if (arr != null) {
@@ -209,12 +213,12 @@ public class BankScreen extends Screen {
 
         g.drawString(this.font, "§fEPARGNE  §7solde : §e" + (savingsEligible + savingsPending)
                 + (savingsPending > 0 ? " §7(dont " + savingsPending + " en attente)" : ""), x + 8, savingsY, 0xFFFFFF);
-        g.drawString(this.font, "§7Taux : §a+" + fmt(savingsRatePct) + "%/jour §7(plafond " + savingsCap + ")", x + 8, savingsY + 12, 0xFFFFFF);
+        g.drawString(this.font, "§7Taux : §a+" + fmt(savingsRatePct) + "%/" + fmtPeriod(savingsPeriodHours) + " §7(plafond " + savingsCap + ")", x + 8, savingsY + 12, 0xFFFFFF);
         g.drawString(this.font, "§8Shift-clic = tout", x + 8, savingsY + 62, 0xFFFFFF);
 
         g.drawString(this.font, "§fRISQUE  §7solde : §e" + (riskyEligible + riskyPending)
                 + (riskyPending > 0 ? " §7(dont " + riskyPending + " en attente)" : ""), x + 8, riskyY, 0xFFFFFF);
-        g.drawString(this.font, "§7Tirage : §6" + fmt(riskyMinPct) + "% §7a §6+" + fmt(riskyMaxPct) + "%§7/jour", x + 8, riskyY + 12, 0xFFFFFF);
+        g.drawString(this.font, "§7Tirage : §6" + fmt(riskyMinPct) + "% §7a §6+" + fmt(riskyMaxPct) + "%§7/" + fmtPeriod(riskyPeriodHours), x + 8, riskyY + 12, 0xFFFFFF);
         g.drawString(this.font, "§8Shift-clic = tout", x + 8, riskyY + 62, 0xFFFFFF);
 
         int histY = TOP + SECTION_H * 2 + 14;
@@ -238,6 +242,11 @@ public class BankScreen extends Screen {
     /** Toujours avec un point décimal (JAMAIS la virgule d'une locale FR) : {@code Locale.ROOT}. */
     private static String fmt(double v) {
         return String.format(Locale.ROOT, "%.1f", v);
+    }
+
+    /** "jour" pour le cas par défaut (24h, plus lisible que "24h"), sinon "{X}h". */
+    private static String fmtPeriod(double hours) {
+        return Math.abs(hours - 24.0) < 0.01 ? "jour" : fmt(hours) + "h";
     }
 
     private static String resolveName(String id) {

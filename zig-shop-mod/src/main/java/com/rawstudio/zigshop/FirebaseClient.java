@@ -107,26 +107,28 @@ public final class FirebaseClient {
      * Réglages de la BANQUE ({@code /bank/config}), édités depuis le dashboard (onglet PNJ →
      * banquier) ou {@code economie/bank-config.json} + {@code push-economie.mjs}.
      *
-     * <p>{@code periodHours} : durée d'un CYCLE (défaut 24 = comportement historique « par jour »).
+     * <p>{@code savingsPeriodHours}/{@code riskyPeriodHours} : durée d'un CYCLE, INDÉPENDANTE
+     * pour chaque compte (défaut 24 = comportement historique « par jour » pour les deux).
      * {@code savingsRatePct}/{@code savingsCap} : le compte ÉPARGNE rapporte {@code savingsRatePct}
-     * % PAR CYCLE, calculé UNIQUEMENT sur {@code min(solde, savingsCap)} (le surplus ne fructifie
-     * pas). Réduire {@code periodHours} SANS baisser {@code savingsRatePct} accélère le rendement
-     * composé d'autant (le taux s'applique tel quel à chaque cycle, il n'est jamais reproportionné
-     * automatiquement). {@code riskyMinPct}/{@code riskyMaxPct}/{@code riskyAvgPct} : le compte
-     * RISQUÉ tire à chaque cycle un pourcentage aléatoire dans [{@code riskyMinPct},
-     * {@code riskyMaxPct}], dont la MOYENNE est pilotée vers {@code riskyAvgPct} (cf.
-     * {@code BankAccountData#rollRiskyPct} pour la formule). {@code withdrawFeePct} : prélevé à
-     * CHAQUE retrait (les deux comptes), reversé à {@code feeRecipient} (pseudo). Anti-abus
-     * (« dépôt juste avant / retrait juste après ») : un dépôt ne fructifie/tire qu'à partir du
-     * PROCHAIN cycle (délai structurel, entre 0 et {@code periodHours} h selon le moment du dépôt
-     * — cf. {@code BankAccountData} champs {@code *Pending}).
+     * % PAR CYCLE ÉPARGNE, calculé UNIQUEMENT sur {@code min(solde, savingsCap)} (le surplus ne
+     * fructifie pas). Réduire un {@code *PeriodHours} SANS baisser le taux correspondant accélère
+     * le rendement composé d'autant (le taux s'applique tel quel à chaque cycle, il n'est jamais
+     * reproportionné automatiquement). {@code riskyMinPct}/{@code riskyMaxPct}/{@code riskyAvgPct} :
+     * le compte RISQUÉ tire à chaque cycle RISQUÉ un pourcentage aléatoire dans
+     * [{@code riskyMinPct}, {@code riskyMaxPct}], dont la MOYENNE est pilotée vers
+     * {@code riskyAvgPct} (cf. {@code BankAccountData#rollRiskyPct} pour la formule).
+     * {@code withdrawFeePct} : prélevé à CHAQUE retrait (les deux comptes), reversé à
+     * {@code feeRecipient} (pseudo). Anti-abus (« dépôt juste avant / retrait juste après ») : un
+     * dépôt ne fructifie/tire qu'à partir du PROCHAIN cycle DE CE SOUS-COMPTE (délai structurel —
+     * cf. {@code BankAccountData} champs {@code *Pending}).
      */
-    public record BankConfig(String currencyItem, double periodHours, double savingsRatePct, long savingsCap,
+    public record BankConfig(String currencyItem, double savingsPeriodHours, double riskyPeriodHours,
+                              double savingsRatePct, long savingsCap,
                               double riskyMinPct, double riskyMaxPct, double riskyAvgPct,
                               double withdrawFeePct, String feeRecipient) {
         /** Valeurs de repli si {@code /bank/config} est absent/injoignable (le jeu reste jouable). */
         public static final BankConfig DEFAULT = new BankConfig(
-                "crazythings:crazy_coin", 24.0, 0.5, 10_000L, -8.0, 10.0, -1.0, 3.0, "");
+                "crazythings:crazy_coin", 24.0, 24.0, 0.5, 10_000L, -8.0, 10.0, -1.0, 3.0, "");
     }
 
     /** Lit la config de la banque ({@code /bank/config}). {@link BankConfig#DEFAULT} si absente. */
@@ -142,7 +144,8 @@ public final class FirebaseClient {
         BankConfig d = BankConfig.DEFAULT;
         return new BankConfig(
                 strOr(o, "currencyItem", d.currencyItem()),
-                dblOr(o, "periodHours", d.periodHours()),
+                dblOr(o, "savingsPeriodHours", d.savingsPeriodHours()),
+                dblOr(o, "riskyPeriodHours", d.riskyPeriodHours()),
                 dblOr(o, "savingsRatePct", d.savingsRatePct()),
                 (long) dblOr(o, "savingsCap", d.savingsCap()),
                 dblOr(o, "riskyMinPct", d.riskyMinPct()),
