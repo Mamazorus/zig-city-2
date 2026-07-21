@@ -76,6 +76,16 @@ public final class BankServerHandler {
             hist.add(ho);
         }
         root.add("history", hist);
+        JsonArray riskyHist = new JsonArray();
+        for (BankAccountData.RiskyCandle c : data.riskyCandles()) {
+            JsonObject ro = new JsonObject();
+            ro.addProperty("date", c.date());
+            ro.addProperty("pct", c.pct());
+            ro.addProperty("open", c.open());
+            ro.addProperty("close", c.close());
+            riskyHist.add(ro);
+        }
+        root.add("riskyHistory", riskyHist);
         return root.toString();
     }
 
@@ -108,7 +118,11 @@ public final class BankServerHandler {
                     return; // PNJ disparu (ex. retiré en créatif) : on ignore silencieusement
                 }
                 if (player.distanceToSqr(entity) > MAX_DIST_SQR) {
-                    player.sendSystemMessage(Component.literal("§c[Banque] Trop loin du banquier."));
+                    // "refresh" = ping silencieux périodique (cf. BankScreen#tick) : pas de message
+                    // d'erreur si le joueur s'est simplement éloigné entre deux pings.
+                    if (!"refresh".equals(action)) {
+                        player.sendSystemMessage(Component.literal("§c[Banque] Trop loin du banquier."));
+                    }
                     return;
                 }
             }

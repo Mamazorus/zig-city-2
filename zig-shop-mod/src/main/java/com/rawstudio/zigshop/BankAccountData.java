@@ -47,6 +47,16 @@ public final class BankAccountData extends SavedData {
     /** Historique borné (derniers cycles traités, le plus récent en tête) affiché à l'écran. */
     private static final int MAX_HISTORY = 14;
 
+    /** Historique borné du tirage RISQUÉ PARTAGÉ (cf. {@link #riskyHistory}) — beaucoup plus long
+     *  que {@link #MAX_HISTORY} : une seule liste pour TOUS les joueurs (pas par compte), donc bon
+     *  marché à garder, et un graphique en bougies a besoin de plus de points qu'une liste texte. */
+    private static final int MAX_RISKY_HISTORY = 60;
+
+    /** Valeur de départ de l'indice synthétique du marché RISQUÉ (cf. {@link RiskyCandle}) — un
+     *  repère arbitraire (pas une somme réelle), choisi rond pour que les mouvements en points
+     *  restent lisibles. */
+    private static final double RISKY_INDEX_BASE = 1000.0;
+
     /** Horodatage lisible d'une entrée d'historique (inclut l'heure : un cycle peut être < 24 h). */
     private static final DateTimeFormatter HISTORY_FMT = DateTimeFormatter.ofPattern("dd/MM HH:mm");
 
@@ -55,6 +65,17 @@ public final class BankAccountData extends SavedData {
 
     /** Résultat d'un cycle traité, pour l'historique de l'écran. */
     public record HistoryEntry(String date, long savingsDelta, long riskyDelta) {}
+
+    /** Un tirage RISQUÉ passé (un par cycle, PARTAGÉ par tous les comptes) — {@code index} =
+     *  valeur de l'indice synthétique APRÈS ce cycle (cf. {@link #riskyCandles()} pour la
+     *  conversion en bougies open/close). */
+    public record RiskyRollEntry(long period, String date, double pct, double index) {}
+
+    /** Une bougie prête à tracer pour le graphique du taux RISQUÉ : {@code open} = indice à la
+     *  fin du cycle précédent, {@code close} = après ce cycle — vert si {@code close >= open}.
+     *  Un seul nombre est tiré par cycle (pas de vrai min/haut/bas intra-cycle), donc pas de
+     *  wick : la bougie est un simple rectangle open→close, comme une variation de marché. */
+    public record RiskyCandle(String date, double pct, double open, double close) {}
 
     /** Résultat d'un retrait : {@code net} remis au joueur, {@code fee} prélevé (cf. {@link #creditFee}). */
     public record WithdrawResult(long net, long fee) {}
@@ -89,6 +110,13 @@ public final class BankAccountData extends SavedData {
      *  après un redémarrage serveur survenu entre-temps) voient exactement le même nombre. */
     private long riskyRollPeriod = -1;
     private double riskyRollPct = 0;
+    /** Valeur courante de l'indice synthétique du marché RISQUÉ (cf. {@link RiskyCandle}) —
+     *  capitalise {@link #riskyRollPct} à chaque NOUVEAU cycle (pas à chaque compte traité). */
+    private double riskyIndexValue = RISKY_INDEX_BASE;
+    /** Historique borné des tirages RISQUÉS passés, du plus ANCIEN au plus RÉCENT (ordre inverse
+     *  de {@code Account.history} : ici on trace une courbe de gauche à droite, pas une liste
+     *  d'activité récente). */
+    private final List<RiskyRollEntry> riskyHistory = new ArrayList<>();
 
     public BankAccountData() {}
 
@@ -186,17 +214,19 @@ public final class BankAccountData extends SavedData {
     }
 
     /**
-     * Republie le miroir Firebase de TOUS les comptes existants — appelé au démarrage du serveur
-     * (cf. {@code BankEvents#onServerStarted}) pour que le dashboard reflète l'état réel dès que
-     * le serveur tourne, sans attendre qu'un joueur agisse ou qu'un cycle s'écoule. Couvre les
-     * comptes créés depuis la toute première version du banquier : les soldes ne sont jamais
-     * perdus entre deux versions du mod (seul le repère de cycle peut être réinitialisé lors
-     * d'une migration de schéma NBT, cf. {@link #load}), donc ce rattrapage les republie tous.
+     * Republie le miroir Firebase de TOUS les comptes existants + l'historique RISQUÉ partagé —
+     * appelé au démarrage du serveur (cf. {@code BankEvents#onServerStarted}) pour que le
+     * dashboard reflète l'état réel dès que le serveur tourne, sans attendre qu'un joueur agisse
+     * ou qu'un cycle s'écoule. Couvre les comptes créés depuis la toute première version du
+     * banquier : les soldes ne sont jamais perdus entre deux versions du mod (seul le repère de
+     * cycle peut être réinitialisé lors d'une migration de schéma NBT, cf. {@link #load}), donc
+     * ce rattrapage les republie tous.
      */
     public void publishAllMirrors() {
         for (Account a : accounts.values()) {
             publishMirror(a);
         }
+        publishRiskyHistoryMirror();
     }
 
     /** Publie (best-effort) le miroir Firebase du compte — cf. {@link FirebaseClient#putBankAccount}.
@@ -302,13 +332,49 @@ public final class BankAccountData extends SavedData {
      * la PREMIÈRE fois qu'un compte de ce cycle est traité, puis simplement relu pour tous les
      * comptes suivants du même cycle — y compris après un redémarrage serveur (le tirage est
      * persisté, pas recalculé à chaque démarrage tant que {@code period} n'a pas changé).
+     *
+     * <p>C'est aussi ICI (une seule fois par NOUVEAU cycle, jamais par compte) que l'indice
+     * synthétique du marché est capitalisé et qu'une entrée est ajoutée à {@link #riskyHistory} +
+     * republiée sur Firebase (cf. {@link #publishRiskyHistoryMirror}) — le graphique en bougies
+     * (écran en jeu + dashboard) reste donc en phase avec ce que les comptes viennent de subir.
      */
     private double getOrRollRiskyPct(long period, FirebaseClient.BankConfig cfg) {
         if (period != riskyRollPeriod) {
             riskyRollPct = rollRiskyPct(cfg);
             riskyRollPeriod = period;
+            riskyIndexValue *= 1.0 + riskyRollPct / 100.0;
+            riskyHistory.add(new RiskyRollEntry(period, LocalDateTime.now().format(HISTORY_FMT), riskyRollPct, riskyIndexValue));
+            while (riskyHistory.size() > MAX_RISKY_HISTORY) {
+                riskyHistory.remove(0);
+            }
+            publishRiskyHistoryMirror();
         }
         return riskyRollPct;
+    }
+
+    /** Bougies open/close prêtes à tracer, dérivées de {@link #riskyHistory} — calcul fait UNE
+     *  SEULE fois ici pour que {@code BankServerHandler} (écran en jeu) et
+     *  {@link #publishRiskyHistoryMirror} (miroir dashboard) restent forcément d'accord sur
+     *  l'{@code open} de chaque bougie (= le {@code close} de la précédente, ou la base pour la
+     *  toute première). */
+    public List<RiskyCandle> riskyCandles() {
+        List<RiskyCandle> out = new ArrayList<>(riskyHistory.size());
+        double prev = RISKY_INDEX_BASE;
+        for (RiskyRollEntry r : riskyHistory) {
+            out.add(new RiskyCandle(r.date(), r.pct(), prev, r.index()));
+            prev = r.index();
+        }
+        return out;
+    }
+
+    /** Publie (best-effort) le miroir Firebase de l'historique RISQUÉ PARTAGÉ — cf.
+     *  {@link FirebaseClient#putBankRiskyHistory}. No-op silencieux si le secret serveur n'est
+     *  pas configuré (même garde-fou que {@link #publishMirror}). */
+    private void publishRiskyHistoryMirror() {
+        String secret = ServerConfig.firebaseSecret();
+        if (secret != null) {
+            FirebaseClient.putBankRiskyHistory(secret, riskyCandles());
+        }
     }
 
     /** Durée d'un cycle en ms, avec plancher {@link #MIN_PERIOD_MS} (anti config absurde). */
@@ -386,6 +452,17 @@ public final class BankAccountData extends SavedData {
         tag.put("accounts", map);
         tag.putLong("riskyRollPeriod", riskyRollPeriod);
         tag.putDouble("riskyRollPct", riskyRollPct);
+        tag.putDouble("riskyIndexValue", riskyIndexValue);
+        ListTag riskyHist = new ListTag();
+        for (RiskyRollEntry r : riskyHistory) {
+            CompoundTag rt = new CompoundTag();
+            rt.putLong("period", r.period());
+            rt.putString("date", r.date());
+            rt.putDouble("pct", r.pct());
+            rt.putDouble("index", r.index());
+            riskyHist.add(rt);
+        }
+        tag.put("riskyHistory", riskyHist);
         return tag;
     }
 
@@ -422,6 +499,12 @@ public final class BankAccountData extends SavedData {
         }
         data.riskyRollPeriod = tag.contains("riskyRollPeriod") ? tag.getLong("riskyRollPeriod") : -1L;
         data.riskyRollPct = tag.contains("riskyRollPct") ? tag.getDouble("riskyRollPct") : 0.0;
+        data.riskyIndexValue = tag.contains("riskyIndexValue") ? tag.getDouble("riskyIndexValue") : RISKY_INDEX_BASE;
+        ListTag riskyHist = tag.getList("riskyHistory", net.minecraft.nbt.Tag.TAG_COMPOUND);
+        for (int i = 0; i < riskyHist.size(); i++) {
+            CompoundTag rt = riskyHist.getCompound(i);
+            data.riskyHistory.add(new RiskyRollEntry(rt.getLong("period"), rt.getString("date"), rt.getDouble("pct"), rt.getDouble("index")));
+        }
         return data;
     }
 }

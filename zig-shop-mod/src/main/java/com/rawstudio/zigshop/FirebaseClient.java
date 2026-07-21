@@ -1,5 +1,6 @@
 package com.rawstudio.zigshop;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -191,6 +192,43 @@ public final class FirebaseClient {
                 ZigShop.LOGGER.warn("[ZigShop] Publication du compte bancaire echouee : {}", err.toString());
             } else if (resp.statusCode() / 100 != 2) {
                 ZigShop.LOGGER.warn("[ZigShop] Publication du compte bancaire : HTTP {}", resp.statusCode());
+            }
+        });
+    }
+
+    /**
+     * Publie (PUT, écrase) l'historique COMMUN du taux RISQUÉ ({@code /bank/riskyHistory}) : un
+     * tableau borné de bougies {@code {date, pct, open, close}} (cf.
+     * {@code BankAccountData#riskyCandles}) — alimente le graphique en bougies (écran banque en
+     * jeu + dashboard admin).
+     * Un seul tirage PAR CYCLE pour TOUS les joueurs (cf. {@code BankAccountData#getOrRollRiskyPct}),
+     * donc un seul PUT par cycle, pas un par joueur/dépôt/retrait. Écriture AUTHENTIFIÉE
+     * (secret SERVEUR), best-effort comme {@link #putBankAccount}.
+     */
+    public static void putBankRiskyHistory(String secret, List<BankAccountData.RiskyCandle> candles) {
+        if (secret == null || secret.isBlank()) {
+            return;
+        }
+        JsonArray arr = new JsonArray();
+        for (BankAccountData.RiskyCandle c : candles) {
+            JsonObject o = new JsonObject();
+            o.addProperty("date", c.date());
+            o.addProperty("pct", c.pct());
+            o.addProperty("open", c.open());
+            o.addProperty("close", c.close());
+            arr.add(o);
+        }
+        URI uri = URI.create(BASE + "/bank/riskyHistory.json?auth=" + secret);
+        HttpRequest req = HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofSeconds(15))
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(arr.toString()))
+                .build();
+        HTTP.sendAsync(req, HttpResponse.BodyHandlers.ofString()).whenComplete((resp, err) -> {
+            if (err != null) {
+                ZigShop.LOGGER.warn("[ZigShop] Publication de l'historique risque echouee : {}", err.toString());
+            } else if (resp.statusCode() / 100 != 2) {
+                ZigShop.LOGGER.warn("[ZigShop] Publication de l'historique risque : HTTP {}", resp.statusCode());
             }
         });
     }

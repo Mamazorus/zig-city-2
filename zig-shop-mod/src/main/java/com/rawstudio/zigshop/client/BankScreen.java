@@ -25,23 +25,35 @@ import java.util.Locale;
 /**
  * Écran de la BANQUE : deux sous-comptes (ÉPARGNE, RISQUÉ) avec solde, taux, un champ de
  * montant et deux boutons (Déposer/Retirer — SHIFT-clic = tout, convention de l'inventaire
- * vanilla), le delta depuis la dernière visite, et un petit historique des derniers jours.
- * Contenu de hauteur FIXE (pas de défilement, contrairement à {@code ShopScreen}) : les montants
- * affichés sont bornés (2 comptes + ~6 lignes d'historique), pas de liste de taille variable.
+ * vanilla), le delta depuis la dernière visite, et un graphique en bougies (à gauche) du taux
+ * RISQUÉ partagé cycle par cycle — remplace l'ancien historique en lignes de texte, jugé peu
+ * lisible (design demandé le 21/07).
  *
  * <p>Le montant est saisi côté client pour lisibilité UNIQUEMENT : le serveur revalide toujours
  * le solde réel (inventaire pour un dépôt, {@code BankAccountData} pour un retrait) avant
  * d'agir — voir {@code BankServerHandler}.
+ *
+ * <p>Rafraîchissement « temps réel » : tant que l'écran reste ouvert, un ping silencieux
+ * ({@code action = "refresh"}) est envoyé toutes les {@link #REFRESH_INTERVAL_TICKS} pour capter
+ * un nouveau cycle sans que le joueur ait besoin de rouvrir l'écran (cf. {@link #tick()}).
  */
 public class BankScreen extends Screen {
 
-    private record HistoryRow(String date, long savingsDelta, long riskyDelta) {}
+    /** Une bougie du taux RISQUÉ : {@code open}/{@code close} = valeur d'un indice synthétique
+     *  (cf. {@code BankAccountData.RiskyCandle}), {@code pct} = le tirage brut du cycle (pour le
+     *  texte du sous-titre / de l'infobulle). */
+    private record RiskyCandleRow(String date, double pct, double open, double close) {}
 
     private static final int PANEL_W = 360;
     private static final int TOP = 54;
     private static final int SECTION_H = 82;
     private static final int BOTTOM_MARGIN = 34;
-    private static final int MAX_HISTORY_SHOWN = 6;
+    private static final int CHART_W_MIN = 160;
+    private static final int CHART_W_MAX = 300;
+    private static final int CHART_GAP = 16;
+    private static final int CANDLE_UP = 0xFF55FF55;
+    private static final int CANDLE_DOWN = 0xFFFF5555;
+    private static final int REFRESH_INTERVAL_TICKS = 300; // ~15 s (20 ticks/s)
 
     private String json;
     private int entityId = -1;
@@ -59,7 +71,8 @@ public class BankScreen extends Screen {
     private double riskyMaxPct;
     private double riskyPeriodHours = 24;
     private double withdrawFeePct;
-    private final List<HistoryRow> history = new ArrayList<>();
+    private final List<RiskyCandleRow> riskyCandles = new ArrayList<>();
+    private int refreshTicks = 0;
 
     private EditBox savingsBox;
     private EditBox riskyBox;
@@ -69,8 +82,8 @@ public class BankScreen extends Screen {
         this.json = json;
     }
 
-    /** Recharge l'écran avec un nouvel état (après dépôt/retrait), en préservant ce que le
-     *  joueur est en train de taper dans les deux champs de montant. */
+    /** Recharge l'écran avec un nouvel état (après dépôt/retrait/ping périodique), en préservant
+     *  ce que le joueur est en train de taper dans les deux champs de montant. */
     public void refresh(String newJson) {
         this.json = newJson;
         String keepSavings = savingsBox != null ? savingsBox.getValue() : "";
@@ -84,11 +97,17 @@ public class BankScreen extends Screen {
         return this.height - BOTTOM_MARGIN;
     }
 
+    /** Largeur du bloc graphique : autant que possible entre {@link #CHART_W_MIN} et
+     *  {@link #CHART_W_MAX}, selon la place restante une fois le panneau de comptes casé. */
+    private int chartWidth() {
+        return Math.max(CHART_W_MIN, Math.min(CHART_W_MAX, this.width - PANEL_W - CHART_GAP - 40));
+    }
+
     @Override
     protected void init() {
         parseJson();
 
-        int x = (this.width - PANEL_W) / 2;
+        int x = (this.width - (chartWidth() + CHART_GAP + PANEL_W)) / 2 + chartWidth() + CHART_GAP;
         int savingsY = TOP + 6;
         int riskyY = TOP + SECTION_H + 6;
 
@@ -118,6 +137,15 @@ public class BankScreen extends Screen {
                 .bounds((this.width - 100) / 2, this.height - 28, 100, 20).build());
     }
 
+    @Override
+    public void tick() {
+        super.tick();
+        if (++refreshTicks >= REFRESH_INTERVAL_TICKS) {
+            refreshTicks = 0;
+            PacketDistributor.sendToServer(new BankActionPayload(this.entityId, "refresh", "", 0));
+        }
+    }
+
     private static int cappedInt(long v) {
         return (int) Math.max(0, Math.min(Integer.MAX_VALUE, v));
     }
@@ -144,7 +172,7 @@ public class BankScreen extends Screen {
     }
 
     private void parseJson() {
-        history.clear();
+        riskyCandles.clear();
         try {
             JsonObject root = JsonParser.parseString(this.json).getAsJsonObject();
             this.entityId = root.has("entityId") ? root.get("entityId").getAsInt() : -1;
@@ -162,15 +190,15 @@ public class BankScreen extends Screen {
             this.riskyMaxPct = root.has("riskyMaxPct") ? root.get("riskyMaxPct").getAsDouble() : 0;
             this.riskyPeriodHours = root.has("riskyPeriodHours") ? root.get("riskyPeriodHours").getAsDouble() : 24;
             this.withdrawFeePct = root.has("withdrawFeePct") ? root.get("withdrawFeePct").getAsDouble() : 0;
-            JsonArray arr = root.getAsJsonArray("history");
-            if (arr != null) {
-                for (JsonElement el : arr) {
-                    if (history.size() >= MAX_HISTORY_SHOWN) break;
+            JsonArray riskyArr = root.getAsJsonArray("riskyHistory");
+            if (riskyArr != null) {
+                for (JsonElement el : riskyArr) {
                     JsonObject o = el.getAsJsonObject();
-                    history.add(new HistoryRow(
+                    riskyCandles.add(new RiskyCandleRow(
                             o.has("date") ? o.get("date").getAsString() : "",
-                            longOr(o, "savingsDelta"),
-                            longOr(o, "riskyDelta")));
+                            o.has("pct") ? o.get("pct").getAsDouble() : 0,
+                            o.has("open") ? o.get("open").getAsDouble() : 0,
+                            o.has("close") ? o.get("close").getAsDouble() : 0));
                 }
             }
         } catch (RuntimeException ignored) {
@@ -190,11 +218,15 @@ public class BankScreen extends Screen {
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         this.renderBackground(g, mouseX, mouseY, partialTick);
 
-        int x = (this.width - PANEL_W) / 2;
+        int chartW = chartWidth();
+        int x0 = (this.width - (chartW + CHART_GAP + PANEL_W)) / 2;
+        int chartX = x0;
+        int x = x0 + chartW + CHART_GAP;
         int bottom = listBottom();
 
-        // Fond OPAQUE du panneau, AVANT les widgets (cf. ShopScreen : sinon le flou
+        // Fonds OPAQUES des deux panneaux, AVANT les widgets (cf. ShopScreen : sinon le flou
         // d'arrière-plan Sodium/Iris transparaît).
+        g.fill(chartX - 6, TOP, chartX + chartW + 6, bottom, 0xF20E0B16);
         g.fill(x - 6, TOP, x + PANEL_W + 6, bottom, 0xF20E0B16);
 
         super.render(g, mouseX, mouseY, partialTick);
@@ -221,22 +253,86 @@ public class BankScreen extends Screen {
         g.drawString(this.font, "§7Tirage : §6" + fmt(riskyMinPct) + "% §7a §6+" + fmt(riskyMaxPct) + "%§7/" + fmtPeriod(riskyPeriodHours), x + 8, riskyY + 12, 0xFFFFFF);
         g.drawString(this.font, "§8Shift-clic = tout", x + 8, riskyY + 62, 0xFFFFFF);
 
-        int histY = TOP + SECTION_H * 2 + 14;
-        g.drawString(this.font, "§7Frais de retrait : §e" + fmt(withdrawFeePct) + "%", x + 8, histY, 0xFFFFFF);
-        histY += 12;
-        if (!history.isEmpty()) {
-            g.drawString(this.font, "§7Historique :", x + 8, histY, 0xFFFFFF);
-            histY += 11;
-            for (HistoryRow h : history) {
-                String line = "§8" + h.date() + "  §7Epargne " + signed(h.savingsDelta()) + "  §7Risque " + signed(h.riskyDelta());
-                g.drawString(this.font, line, x + 8, histY, 0xFFFFFF);
-                histY += 10;
-            }
-        }
+        g.drawString(this.font, "§7Frais de retrait : §e" + fmt(withdrawFeePct) + "%", x + 8, TOP + SECTION_H * 2 + 14, 0xFFFFFF);
+
+        renderRiskyChart(g, chartX, chartW, bottom, mouseX, mouseY);
     }
 
-    private static String signed(long v) {
-        return (v > 0 ? "§a+" : v < 0 ? "§c" : "§7") + v;
+    /** Bloc graphique (bougies) du taux RISQUÉ partagé : un point par cycle écoulé, {@code open}
+     *  = valeur de l'indice synthétique à la fin du cycle précédent, {@code close} = après ce
+     *  cycle (cf. {@code BankAccountData.RiskyCandle}) — vert si le cycle est positif, rouge
+     *  sinon. Survoler une bougie affiche son détail (date + pourcentage tiré). */
+    private void renderRiskyChart(GuiGraphics g, int chartX, int chartW, int bottom, int mouseX, int mouseY) {
+        g.drawString(this.font, "§fMarche risque", chartX + 6, TOP + 6, 0xFFFFFF);
+        RiskyCandleRow last = riskyCandles.isEmpty() ? null : riskyCandles.get(riskyCandles.size() - 1);
+        String subtitle = last == null
+                ? "§7En attente du 1er cycle"
+                : "§7Dernier cycle : " + (last.pct() >= 0 ? "§a+" : "§c") + fmt(last.pct()) + "%";
+        g.drawString(this.font, subtitle, chartX + 6, TOP + 18, 0xFFFFFF);
+
+        int plotTop = TOP + 34;
+        int plotBottom = bottom - 6;
+        int plotLeft = chartX + 6;
+        int plotRight = chartX + chartW - 6;
+        if (plotBottom <= plotTop || plotRight <= plotLeft) {
+            return;
+        }
+        g.fill(plotLeft, plotTop, plotRight, plotBottom, 0x1AFFFFFF);
+
+        if (riskyCandles.isEmpty()) {
+            g.drawCenteredString(this.font, "§7Pas encore de donnees", chartX + chartW / 2, (plotTop + plotBottom) / 2 - 4, 0xFFFFFF);
+            return;
+        }
+
+        int maxSlots = Math.max(1, (plotRight - plotLeft) / 4);
+        int from = Math.max(0, riskyCandles.size() - maxSlots);
+        List<RiskyCandleRow> visible = riskyCandles.subList(from, riskyCandles.size());
+
+        double minV = Double.MAX_VALUE;
+        double maxV = -Double.MAX_VALUE;
+        for (RiskyCandleRow c : visible) {
+            minV = Math.min(minV, Math.min(c.open(), c.close()));
+            maxV = Math.max(maxV, Math.max(c.open(), c.close()));
+        }
+        double pad = Math.max(1.0, (maxV - minV) * 0.12);
+        minV -= pad;
+        maxV += pad;
+        double range = Math.max(0.0001, maxV - minV);
+
+        float slotW = (plotRight - plotLeft) / (float) visible.size();
+        int bodyW = Math.max(2, (int) (slotW * 0.6f));
+
+        RiskyCandleRow hovered = null;
+        for (int i = 0; i < visible.size(); i++) {
+            RiskyCandleRow c = visible.get(i);
+            int cx = plotLeft + Math.round(i * slotW + slotW / 2f);
+            int yOpen = plotBottom - (int) Math.round((c.open() - minV) / range * (plotBottom - plotTop));
+            int yClose = plotBottom - (int) Math.round((c.close() - minV) / range * (plotBottom - plotTop));
+            int yTop = Math.min(yOpen, yClose);
+            int yBot = Math.max(yOpen, yClose);
+            if (yBot - yTop < 1) {
+                yBot = yTop + 1;
+            }
+            int color = c.close() >= c.open() ? CANDLE_UP : CANDLE_DOWN;
+            g.fill(cx - bodyW / 2, yTop, cx - bodyW / 2 + bodyW, yBot, color);
+
+            if (mouseX >= plotLeft + i * slotW && mouseX < plotLeft + (i + 1) * slotW
+                    && mouseY >= plotTop && mouseY <= plotBottom) {
+                hovered = c;
+            }
+        }
+
+        if (hovered != null) {
+            String l1 = "§7" + hovered.date();
+            String l2 = (hovered.pct() >= 0 ? "§a+" : "§c") + fmt(hovered.pct()) + "%";
+            int tw = Math.max(this.font.width(l1), this.font.width(l2)) + 8;
+            int th = 24;
+            int tx = Math.min(mouseX + 10, this.width - tw - 4);
+            int ty = Math.max(mouseY - th - 6, 2);
+            g.fill(tx, ty, tx + tw, ty + th, 0xF20E0B16);
+            g.drawString(this.font, l1, tx + 4, ty + 4, 0xFFFFFF);
+            g.drawString(this.font, l2, tx + 4, ty + 14, 0xFFFFFF);
+        }
     }
 
     /** Toujours avec un point décimal (JAMAIS la virgule d'une locale FR) : {@code Locale.ROOT}. */
