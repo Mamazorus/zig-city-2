@@ -94,6 +94,14 @@ public final class BankServerHandler {
             return;
         }
         context.enqueueWork(() -> {
+            // Diagnostic temporaire (22/07) : le "transfer" ne semblait pas s'appliquer en jeu
+            // alors que deposit/withdraw marchent - log tout ce qui arrive ici pour voir si
+            // l'action est meme recue et par quel chemin elle ressort. A retirer une fois le
+            // bug identifie.
+            if (!"refresh".equals(action)) {
+                ZigShop.LOGGER.info("[Banque][diag] recu action={} accountType={} amount={} entityId={} joueur={}",
+                        action, accountType, amount, entityId, player.getGameProfile().getName());
+            }
             MinecraftServer server = player.getServer();
             if (server == null) {
                 return;
@@ -163,10 +171,12 @@ public final class BankServerHandler {
      *  la banque, contrairement à un retrait). Pas besoin de {@code cfg}/l'item monnaie ici :
      *  aucun échange avec l'inventaire, juste un mouvement entre les deux soldes internes. */
     private static void doTransfer(ServerPlayer player, BankAccountData data, boolean savings, int amount) {
+        ZigShop.LOGGER.info("[Banque][diag] doTransfer savings={} amount={}", savings, amount);
         if (amount <= 0) {
             return;
         }
         boolean ok = data.transfer(player.getUUID(), savings, amount);
+        ZigShop.LOGGER.info("[Banque][diag] transfer() -> ok={}", ok);
         if (!ok) {
             player.sendSystemMessage(Component.literal("§c[Banque] Solde insuffisant."));
             return;
