@@ -191,6 +191,45 @@ public final class BankAccountData extends SavedData {
     }
 
     /**
+     * Transfère {@code amount} du sous-compte {@code fromSavings ? épargne : risqué} vers
+     * l'AUTRE, du MÊME joueur, SANS frais — contrairement à un retrait puis un dépôt séparés
+     * (qui prélevait la commission de retrait pour un mouvement qui ne quitte jamais la banque,
+     * cf. design demandé le 22/07). {@code false} si le solde est insuffisant (rien n'est modifié).
+     *
+     * <p>Prélevé pending d'abord puis eligible (même ordre que {@link #withdraw}, sans effet
+     * économique) ; crédité en PENDING sur le sous-compte de destination — même traitement qu'un
+     * dépôt normal (cf. {@link #deposit}), pour garder intact le garde-fou anti-abus (un
+     * transfert qui arrive juste avant un tirage n'y participe pas).
+     */
+    public boolean transfer(UUID id, boolean fromSavings, long amount) {
+        if (amount <= 0) {
+            return false;
+        }
+        Account a = accounts.get(id);
+        long avail = a == null ? 0 : (fromSavings ? a.savingsTotal() : a.riskyTotal());
+        if (avail < amount) {
+            return false;
+        }
+        long remaining = amount;
+        if (fromSavings) {
+            long fromPending = Math.min(a.savingsPending, remaining);
+            a.savingsPending -= fromPending;
+            remaining -= fromPending;
+            a.savingsEligible -= remaining;
+            a.riskyPending += amount;
+        } else {
+            long fromPending = Math.min(a.riskyPending, remaining);
+            a.riskyPending -= fromPending;
+            remaining -= fromPending;
+            a.riskyEligible -= remaining;
+            a.savingsPending += amount;
+        }
+        publishMirror(a);
+        setDirty();
+        return true;
+    }
+
+    /**
      * Crédite {@code amount} DIRECTEMENT en éligible (pas de délai) sur le compte épargne de
      * {@code recipientName} — c'est la marge du banquier (cf. {@link #withdraw}). Résolu via le
      * cache de profils du serveur, qui connaît un pseudo dès sa toute première connexion (marche

@@ -127,6 +127,8 @@ public final class BankServerHandler {
                     doDeposit(player, data, cfg, savings, amount);
                 } else if ("withdraw".equals(action)) {
                     doWithdraw(server, player, data, cfg, savings, amount);
+                } else if ("transfer".equals(action)) {
+                    doTransfer(player, data, savings, amount);
                 }
                 open(player, entityId, cfg); // rafraîchit l'écran (soldes à jour)
             }));
@@ -154,6 +156,24 @@ public final class BankServerHandler {
         player.sendSystemMessage(Component.literal("§a[Banque] Depot : " + give + " ")
                 .append(new ItemStack(currency).getHoverName())
                 .append(Component.literal(savings ? " §7(epargne)" : " §7(risque)")));
+    }
+
+    /** {@code savings} = source ({@code true} = épargne→risqué, {@code false} = risqué→épargne)
+     *  — cf. {@link BankAccountData#transfer} pour l'absence de frais (l'argent ne quitte jamais
+     *  la banque, contrairement à un retrait). Pas besoin de {@code cfg}/l'item monnaie ici :
+     *  aucun échange avec l'inventaire, juste un mouvement entre les deux soldes internes. */
+    private static void doTransfer(ServerPlayer player, BankAccountData data, boolean savings, int amount) {
+        if (amount <= 0) {
+            return;
+        }
+        boolean ok = data.transfer(player.getUUID(), savings, amount);
+        if (!ok) {
+            player.sendSystemMessage(Component.literal("§c[Banque] Solde insuffisant."));
+            return;
+        }
+        player.playSound(SoundEvents.VILLAGER_YES, 1.0f, 1.0f);
+        player.sendSystemMessage(Component.literal("§a[Banque] Transfert : " + amount + " §7("
+                + (savings ? "epargne -> risque" : "risque -> epargne") + ")"));
     }
 
     private static void doWithdraw(MinecraftServer server, ServerPlayer player, BankAccountData data, FirebaseClient.BankConfig cfg, boolean savings, int amount) {

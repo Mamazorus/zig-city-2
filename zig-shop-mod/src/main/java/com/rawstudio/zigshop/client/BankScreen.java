@@ -24,10 +24,14 @@ import java.util.Locale;
 
 /**
  * Écran de la BANQUE : deux sous-comptes (ÉPARGNE, RISQUÉ) avec solde, taux, un champ de
- * montant et deux boutons (Déposer/Retirer — SHIFT-clic = tout, convention de l'inventaire
+ * montant et trois boutons (Déposer/Retirer/→ — SHIFT-clic = tout, convention de l'inventaire
  * vanilla), le delta depuis la dernière visite, et un graphique en bougies (à gauche) du taux
  * RISQUÉ partagé cycle par cycle — remplace l'ancien historique en lignes de texte, jugé peu
  * lisible (design demandé le 21/07).
+ *
+ * <p>Le 3e bouton (« → Risque »/« → Epargne ») TRANSFÈRE directement vers l'autre sous-compte,
+ * SANS frais (contrairement à un retrait + dépôt séparés, cf. {@code BankAccountData#transfer} —
+ * design demandé le 22/07 : l'argent ne quitte jamais la banque, pas de raison de taxer).
  *
  * <p>Le montant est saisi côté client pour lisibilité UNIQUEMENT : le serveur revalide toujours
  * le solde réel (inventaire pour un dépôt, {@code BankAccountData} pour un retrait) avant
@@ -135,6 +139,9 @@ public class BankScreen extends Screen {
         this.addRenderableWidget(Button.builder(Component.literal("Retirer"),
                         b -> sendAction("withdraw", "savings", Screen.hasShiftDown() ? cappedInt(savingsEligible + savingsPending) : parseAmount(savingsBox)))
                 .bounds(x + 178, savingsY + 40, 68, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("→ Risque"),
+                        b -> sendAction("transfer", "savings", Screen.hasShiftDown() ? cappedInt(savingsEligible + savingsPending) : parseAmount(savingsBox)))
+                .bounds(x + 250, savingsY + 40, 90, 20).build());
 
         riskyBox = new EditBox(this.font, x + 8, riskyY + 40, 90, 20, Component.literal("Montant risque"));
         riskyBox.setMaxLength(9);
@@ -146,6 +153,9 @@ public class BankScreen extends Screen {
         this.addRenderableWidget(Button.builder(Component.literal("Retirer"),
                         b -> sendAction("withdraw", "risky", Screen.hasShiftDown() ? cappedInt(riskyEligible + riskyPending) : parseAmount(riskyBox)))
                 .bounds(x + 178, riskyY + 40, 68, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("→ Epargne"),
+                        b -> sendAction("transfer", "risky", Screen.hasShiftDown() ? cappedInt(riskyEligible + riskyPending) : parseAmount(riskyBox)))
+                .bounds(x + 250, riskyY + 40, 90, 20).build());
 
         this.addRenderableWidget(Button.builder(Component.literal("Fermer"), b -> this.onClose())
                 .bounds((this.width - 100) / 2, this.height - 28, 100, 20).build());
